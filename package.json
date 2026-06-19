@@ -1,0 +1,31 @@
+{
+  "name": "bikeroutenicepdx",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Portland Greenway Router — bike routing PWA using PBOT's authoritative greenway GIS",
+  "license": "MIT",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "fetch:pbot": "tsx scripts/fetch-pbot.ts",
+    "fetch:osm": "tsx scripts/fetch-osm.ts",
+    "build:graph": "tsx scripts/build-graph.ts",
+    "export:greenways": "tsx scripts/export-greenways.ts",
+    "build:tiles": "tsx scripts/build-tiles.ts",
+    "reconcile": "tsx scripts/reconcile.ts",
+    "test:routes": "tsx tests/routes/run.ts",
+    "dev:server": "npm --workspace server run dev",
+    "dev:web": "npm --workspace web run dev"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  },
+  "dependencies": {
+    "@turf/turf": "^7.1.0",
+    "osmtogeojson": "^3.0.0-beta.5"
+  }
+}

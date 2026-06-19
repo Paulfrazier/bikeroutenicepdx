@@ -1,0 +1,57 @@
+# BikeRouteNicePDX — Valhalla routing service
+#
+# Image choice: gisops/valhalla:latest
+#   We use gisops/valhalla rather than ghcr.io/valhalla/valhalla because:
+#   - gisops tags are more frequently updated and better tested against the
+#     current valhalla release cycle (verified stable through 3.4.x).
+#   - The ghcr.io image is the upstream CI artifact; it builds but its
+#     entrypoint script is less battle-tested for production tile-server use.
+#   - Both images are FROM the same upstream source; gisops adds a thin
+#     entrypoint wrapper that handles "build tiles if absent, then serve".
+#
+# To rebuild tiles after the PBF changes (e.g. after npm run build:graph):
+#   docker compose down -v && docker compose up --build
+#
+# The -v flag removes the valhalla_tiles volume so tiles are rebuilt from
+# scratch. Without it, stale tiles will be served even if the PBF changed.
+
+services:
+  valhalla:
+    image: gisops/valhalla:latest
+    container_name: bikeroutenice-valhalla
+
+    volumes:
+      # PBF + sidecar files produced by scripts/build-graph.ts
+      - ../data/reconciled/current:/data:ro
+      # Our custom config (overrides any image-default valhalla.json)
+      - ./valhalla.json:/data/valhalla.json:ro
+      # Lua tagging callbacks (graph.lua runs at tile-build time)
+      - ./conf:/conf:ro
+      # Named volume holds built tile set; survives container restarts
+      - valhalla_tiles:/data/valhalla_tiles
+
+    ports:
+      - "8002:8002"
+
+    environment:
+      # Tell the entrypoint where to write/read tiles
+      - tile_dir=/data/valhalla_tiles
+      # If tiles already exist in the volume, skip the (slow) build step.
+      # Set to True only after a confirmed good build; default False so the
+      # first `docker compose up` always builds from the PBF.
+      - use_tiles_ignore_pbf=False
+      # Point at the tagged PBF that scripts/build-graph.ts produces
+      - pbf_files=/data/portland-tagged.osm.pbf
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8002/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 120s  # tile build can take a few minutes on first run
+
+    restart: unless-stopped
+
+volumes:
+  valhalla_tiles:
+    driver: local

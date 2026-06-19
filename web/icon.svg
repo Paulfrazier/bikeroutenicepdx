@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="80" fill="#16a34a"/>
+  <!-- Bicycle wheels -->
+  <circle cx="160" cy="320" r="80" stroke="white" stroke-width="24" fill="none"/>
+  <circle cx="352" cy="320" r="80" stroke="white" stroke-width="24" fill="none"/>
+  <!-- Wheel hubs -->
+  <circle cx="160" cy="320" r="12" fill="white"/>
+  <circle cx="352" cy="320" r="12" fill="white"/>
+  <!-- Frame: seat stay + chain stay -->
+  <line x1="160" y1="320" x2="256" y2="200" stroke="white" stroke-width="22" stroke-linecap="round"/>
+  <line x1="160" y1="320" x2="256" y2="280" stroke="white" stroke-width="22" stroke-linecap="round"/>
+  <!-- Frame: top tube + down tube -->
+  <line x1="256" y1="200" x2="352" y2="320" stroke="white" stroke-width="22" stroke-linecap="round"/>
+  <line x1="256" y1="280" x2="352" y2="320" stroke="white" stroke-width="22" stroke-linecap="round"/>
+  <!-- Seat tube -->
+  <line x1="256" y1="200" x2="256" y2="280" stroke="white" stroke-width="22" stroke-linecap="round"/>
+  <!-- Handlebar stem -->
+  <line x1="304" y1="200" x2="352" y2="230" stroke="white" stroke-width="18" stroke-linecap="round"/>
+  <line x1="304" y1="185" x2="304" y2="215" stroke="white" stroke-width="18" stroke-linecap="round"/>
+  <!-- Seat -->
+  <line x1="220" y1="195" x2="270" y2="195" stroke="white" stroke-width="18" stroke-linecap="round"/>
+  <!-- Pedals -->
+  <circle cx="256" cy="305" r="16" fill="white"/>
+  <line x1="236" y1="305" x2="276" y2="305" stroke="white" stroke-width="14" stroke-linecap="round"/>
+</svg>

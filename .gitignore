@@ -1,0 +1,27 @@
+node_modules/
+dist/
+build/
+.DS_Store
+*.log
+.env
+.env.local
+
+# Fetched data — large, regenerable
+data/pbot/*.geojson
+data/pbot/*.zip
+data/osm/*.pbf
+data/osm/*.osm
+data/reconciled/*.pbf
+data/reconciled/*.osm
+data/reconciled/*.geojson
+
+# Valhalla tiles
+routing/valhalla_tiles/
+routing/valhalla_tiles.tar
+routing/*.gph
+
+# PMTiles
+web/public/*.pmtiles
+
+# Test harness output
+tests/results/

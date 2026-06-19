@@ -1,0 +1,149 @@
+{
+  "mjolnir": {
+    "tile_dir": "/data/valhalla_tiles",
+
+    "tile_extract": "/data/valhalla_tiles/tiles.tar",
+
+    "pbf_file_paths": ["/data/portland-tagged.osm.pbf"],
+
+    "lua": "/conf/graph.lua",
+
+    "admin": "/data/valhalla_tiles/admin.sqlite",
+    "timezone": "/data/valhalla_tiles/not_needed.sqlite",
+
+    "include_driveways": false,
+
+    "threads": 2,
+
+    "logging": {
+      "type": "std_out",
+      "color": false,
+      "file_name": "path_not_used"
+    }
+  },
+
+  "loki": {
+    "actions": ["locate", "route", "height", "sources_to_targets", "optimized_route",
+                "isochrone", "trace_route", "trace_attributes", "transit_available",
+                "expansion", "centroid", "status"],
+    "logging": {
+      "type": "std_out",
+      "color": false,
+      "file_name": "path_not_used",
+      "long_request": 100.0
+    },
+    "service": {
+      "proxy": "ipc:///tmp/loki"
+    }
+  },
+
+  "thor": {
+    "logging": {
+      "type": "std_out",
+      "color": false,
+      "file_name": "path_not_used",
+      "long_request": 100.0
+    },
+    "service": {
+      "proxy": "ipc:///tmp/thor"
+    },
+    "max_reserved_labels_count_astar": 1000000,
+    "clear_reserved_memory": false
+  },
+
+  "odin": {
+    "logging": {
+      "type": "std_out",
+      "color": false,
+      "file_name": "path_not_used"
+    },
+    "service": {
+      "proxy": "ipc:///tmp/odin"
+    }
+  },
+
+  "meili": {
+    "mode": "bicycle",
+    "customizable": ["mode", "search_radius", "turn_penalty_factor",
+                     "gps_accuracy", "interpolation_distance", "sigma_z", "beta",
+                     "max_route_distance_factor", "max_route_time_factor"],
+    "default": {
+      "gps_accuracy": 5.0,
+      "search_radius": 50,
+      "sigma_z": 4.07,
+      "turn_penalty_factor": 0,
+      "beta": 3,
+      "max_route_distance_factor": 5,
+      "max_route_time_factor": 5
+    },
+    "logging": {
+      "type": "std_out",
+      "color": false,
+      "file_name": "path_not_used"
+    },
+    "service": {
+      "proxy": "ipc:///tmp/meili"
+    }
+  },
+
+  "httpd": {
+    "service": {
+      "listen": "tcp://*:8002",
+      "loopback": "ipc:///tmp/loopback",
+      "interrupt": "ipc:///tmp/interrupt"
+    }
+  },
+
+  "service_limits": {
+    "bicycle": {
+      "max_distance": 100000,
+      "max_locations": 20,
+      "max_matrix_distance": 400000,
+      "max_matrix_location_pairs": 2500
+    },
+    "pedestrian": {
+      "max_distance": 250000,
+      "max_locations": 50,
+      "max_matrix_distance": 200000,
+      "max_matrix_location_pairs": 2500,
+      "max_transit_walking_distance": 10000,
+      "min_transit_walking_distance": 1
+    },
+    "max_exclude_locations": 50,
+    "max_reachability": 100,
+    "max_radius": 200,
+    "max_timedep_distance": 500000,
+    "max_alternates": 2,
+    "max_exclude_polygons_length": 10000
+  },
+
+  "costing_options": {
+    "bicycle": {
+      "bicycle_type": "Hybrid",
+
+      "use_roads": 0.1,
+
+      "use_hills": 0.25,
+
+      "use_ferry": 0.0,
+
+      "avoid_bad_surfaces": 0.75,
+
+      "cycling_speed": 18.0,
+
+      "maneuver_penalty": 5,
+      "alley_penalty": 15,
+      "gate_penalty": 300,
+
+      "destination_only_penalty": 600,
+      "country_crossing_penalty": 600,
+
+      "service_penalty": 15,
+      "service_factor": 1.0,
+
+      "use_living_streets": 0.5,
+
+      "shortest": false
+    }
+  }
+}

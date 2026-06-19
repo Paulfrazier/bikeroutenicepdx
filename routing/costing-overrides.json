@@ -1,0 +1,48 @@
+{
+  "version": "0.1.0",
+  "description": "BikeRouteNicePDX cost factor table. Each factor is a multiplier on Valhalla's base bicycle traversal cost — lower means more preferred. These values are the single source of truth; graph.lua hardcodes them (Lua cannot import JSON at request time), but any tuning change must update both this file and the corresponding constants in graph.lua.",
+
+  "factors": {
+    "off_street":       0.15,
+    "greenway":         0.20,
+    "protected":        0.40,
+    "buffered":         0.60,
+    "standard":         0.80,
+    "residential":      1.00,
+    "collector":        2.50,
+    "arterial":         5.00,
+    "arterial_no_bike": 10.00
+  },
+
+  "penalties": {
+    "difficult_crossing_seconds": 60
+  },
+
+  "thresholds": {
+    "min_greenway_coverage": 0.70,
+    "max_forbidden_meters": 200,
+    "forbidden_streets": [
+      "Sandy Blvd",
+      "SE Powell Blvd",
+      "SE Cesar Chavez Blvd",
+      "NE Martin Luther King Jr Blvd",
+      "W Burnside St",
+      "E Burnside St",
+      "82nd Ave"
+    ]
+  },
+
+  "_notes": {
+    "bicycle_safety_mapping": {
+      "description": "graph.lua translates bicycle_network_class → a bicycle_safety float in [0,1]. Valhalla's bicycle costing uses bicycle_safety as an edge penalty weight where 1.0 = fully safe and 0.0 = perfectly safe. We invert our cost factors into this scale.",
+      "off_street":       0.1,
+      "greenway":         0.2,
+      "protected":        0.4,
+      "buffered":         0.6,
+      "standard":         0.8,
+      "arterial_no_bike": 1.0
+    },
+    "duplication_note": "The factor values in graph.lua's SAFETY_MAP table must be kept in sync with this file. They are duplicated because Lua running inside the tile-build process cannot open arbitrary files from the host filesystem without the mjolnir lua sandbox allowing it — and the sidecar JSON is a different concern (per-way class lookup) vs. this global factor table.",
+    "test_harness": "tests/routes/run.ts reads this file's thresholds to gate pass/fail. Do not rename or restructure keys without updating that file."
+  }
+}

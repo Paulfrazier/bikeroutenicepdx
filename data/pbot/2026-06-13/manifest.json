@@ -1,0 +1,34 @@
+{
+  "fetchedDate": "2026-06-13",
+  "generatedAt": "2026-06-13T07:30:31.244Z",
+  "arcgisQuerySuffix": "/query?where=1%3D1&outFields=*&f=geojson&outSR=4326",
+  "layers": [
+    {
+      "name": "bicycle-network",
+      "description": "PBOT bicycle network lines with classification field (greenway, protected, buffered, standard, shared roadway, off-street path)",
+      "url": "https://services.arcgis.com/quVN97tn06YNGj9s/arcgis/rest/services/Bicycle_Network/FeatureServer/0/query?where=1%3D1&outFields=*&f=geojson&outSR=4326",
+      "success": false,
+      "byteCount": 0,
+      "fetchedAt": "2026-06-13T07:30:30.469Z",
+      "error": "HTTP 400 Bad Request"
+    },
+    {
+      "name": "difficult-crossings",
+      "description": "PBOT difficult/dangerous crossing point features — used for +60s penalty in cost model",
+      "url": "https://services.arcgis.com/quVN97tn06YNGj9s/arcgis/rest/services/Bicycle_Difficult_Crossings/FeatureServer/0/query?where=1%3D1&outFields=*&f=geojson&outSR=4326",
+      "success": false,
+      "byteCount": 0,
+      "fetchedAt": "2026-06-13T07:30:30.878Z",
+      "error": "HTTP 400 Bad Request"
+    },
+    {
+      "name": "wayfinding-signs",
+      "description": "PBOT bike wayfinding sign point features with destination text — used for v1.0 turn cues",
+      "url": "https://services.arcgis.com/quVN97tn06YNGj9s/arcgis/rest/services/Bicycle_Wayfinding_Signs/FeatureServer/0/query?where=1%3D1&outFields=*&f=geojson&outSR=4326",
+      "success": false,
+      "byteCount": 0,
+      "fetchedAt": "2026-06-13T07:30:31.129Z",
+      "error": "HTTP 400 Bad Request"
+    }
+  ]
+}
