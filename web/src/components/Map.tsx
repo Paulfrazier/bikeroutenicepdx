@@ -1,6 +1,8 @@
 /**
  * Map.tsx — MapLibre GL map with:
- *   - Basemap: PMTiles (VITE_BASEMAP_URL) with fallback to demotiles OSM style
+ *   - Basemap: OpenFreeMap hosted vector style by default (free, no API key);
+ *     override via VITE_BASEMAP_URL (a .pmtiles path for self-hosting, or any
+ *     MapLibre style URL)
  *   - Bike network overlay: /bike-network.geojson (full Portland bike network,
  *     colored by facility class: greenway/protected/buffered/lane/path/shared)
  *   - Route line: live GeoJSON from useRoute (bold blue)
@@ -8,12 +10,12 @@
  *   - User location dot via GeolocateControl
  *   - Legend card (bottom-left) showing facility class colors
  *
- * Basemap fallback note:
- *   VITE_BASEMAP_URL defaults to /portland.pmtiles which is gitignored (large
- *   binary). In dev without the file, the browser will 404 the pmtiles source
- *   and the map will silently show no basemap. To always have a visible
- *   basemap during dev, set VITE_BASEMAP_URL="" to skip pmtiles and load
- *   the OSM demotiles style instead.
+ * Basemap selection (VITE_BASEMAP_URL):
+ *   - unset (default) → OpenFreeMap Liberty, a free hosted vector basemap with
+ *     no API key or usage limits. Works in dev and production with zero setup.
+ *   - "*.pmtiles" path/URL → self-hosted PMTiles (build it with
+ *     `npm run build:tiles`; the file is gitignored). Detailed but you host it.
+ *   - "" (empty) → MapLibre demotiles, a minimal low-detail fallback.
  */
 
 import { useEffect, useRef, useCallback } from "react";
@@ -41,8 +43,11 @@ async function ensurePmtilesProtocol() {
 const PORTLAND_CENTER: LngLatLike = [-122.65, 45.52];
 const PORTLAND_ZOOM = 12;
 
+// Free hosted vector basemap — no API key, no signup, no usage limits.
+// https://openfreemap.org
+const OPENFREEMAP_STYLE = "https://tiles.openfreemap.org/styles/liberty";
 const BASEMAP_URL =
-  (import.meta.env.VITE_BASEMAP_URL as string | undefined) ?? "/portland.pmtiles";
+  (import.meta.env.VITE_BASEMAP_URL as string | undefined) ?? OPENFREEMAP_STYLE;
 const DEMOTILES_STYLE = "https://demotiles.maplibre.org/style.json";
 
 /** Build a MapLibre style object for a PMTiles basemap. */
@@ -251,10 +256,14 @@ export function Map({
 
     let style: string | maplibregl.StyleSpecification;
     if (BASEMAP_URL && BASEMAP_URL.endsWith(".pmtiles")) {
+      // Self-hosted PMTiles basemap (build via `npm run build:tiles`).
       ensurePmtilesProtocol().catch(console.error);
       style = pmtilesStyle(BASEMAP_URL);
+    } else if (BASEMAP_URL) {
+      // Hosted MapLibre style URL (default: OpenFreeMap — free, no API key).
+      style = BASEMAP_URL;
     } else {
-      // Fallback: free OSM raster style from MapLibre demotiles
+      // Empty override: minimal low-detail demotiles fallback.
       style = DEMOTILES_STYLE;
     }
 

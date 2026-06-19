@@ -26,6 +26,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { fileURLToPath } from "url";
 import { execFileSync, spawnSync } from "child_process";
 
 // ---------------------------------------------------------------------------
@@ -50,7 +51,7 @@ const PROGRESS_INTERVAL_BYTES = 10 * 1024 * 1024; // 10 MB
 // Path helpers
 // ---------------------------------------------------------------------------
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "..");
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA_OSM = path.join(REPO_ROOT, "data", "osm");
 const CURRENT_LINK = path.join(DATA_OSM, "current");
 

@@ -20,17 +20,25 @@ npm run dev:web
 | Variable | Default | Description |
 |---|---|---|
 | `VITE_API_URL` | `/api` | Backend base URL. In dev, Vite proxies `/api` to `http://localhost:3000`. In production, set to the deployed server URL. |
-| `VITE_BASEMAP_URL` | `/portland.pmtiles` | PMTiles basemap path or URL. |
+| `VITE_BASEMAP_URL` | _(unset)_ | Basemap source. Unset → free OpenFreeMap hosted style. A `*.pmtiles` path → self-hosted PMTiles. Empty string → minimal demotiles fallback. |
 
-### Basemap fallback
+### Basemap
 
-`/portland.pmtiles` is gitignored (large binary, built by `scripts/build-tiles.ts`).
-Without it the map has a blank basemap in dev. Two options:
+By default (env var unset) the map loads **OpenFreeMap** — a free hosted vector
+basemap (`https://tiles.openfreemap.org/styles/liberty`) with no API key, no
+signup, and no usage limits. It works in dev and production with zero setup, so
+this is the recommended option.
 
-1. Run `npm run build:tiles` to generate the PMTiles file and put it in `web/public/`.
-2. Leave `VITE_BASEMAP_URL` empty (`VITE_BASEMAP_URL=`) to fall back to the free
-   MapLibre demotiles OSM raster style (`https://demotiles.maplibre.org/style.json`).
-   This style doesn't need any file — it fetches tiles from the internet.
+To self-host instead (e.g. to avoid any third-party dependency), build a local
+PMTiles archive and point the env var at it:
+
+1. `npm run fetch:osm` — download + crop the Portland OSM extract (needs `osmium-tool`).
+2. `npm run build:tiles` — run Planetiler to produce `web/public/portland.pmtiles`
+   (needs Java 21+; the script auto-downloads `tools/planetiler.jar`).
+3. Set `VITE_BASEMAP_URL=/portland.pmtiles`.
+
+The `.pmtiles` file is gitignored (large binary); for production host it on a
+range-request-capable CDN (Vercel, Cloudflare R2) and point the env var at that URL.
 
 ## Greenways overlay
 
