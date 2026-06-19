@@ -16,6 +16,10 @@ struct MapView: UIViewRepresentable {
         map.showsUserLocation = true
         map.pointOfInterestFilter = .excludingAll
 
+        // Ask for location permission so the blue user-location dot appears.
+        // Setting showsUserLocation alone does NOT trigger the prompt.
+        context.coordinator.requestLocationPermission()
+
         // Center on Portland.
         let center = CLLocationCoordinate2D(latitude: 45.52, longitude: -122.67)
         map.region = MKCoordinateRegion(

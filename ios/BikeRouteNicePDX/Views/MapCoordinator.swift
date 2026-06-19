@@ -10,6 +10,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     var tapGesture: UITapGestureRecognizer?
     var panGesture: UIPanGestureRecognizer?
 
+    private let locationManager = CLLocationManager()
+    private var lastRecenterTick = 0
+    private var pendingRecenter = false
+
     private var startAnnotation: MKPointAnnotation?
     private var endAnnotation: MKPointAnnotation?
     private var routeOverlay: RoutePolyline?
@@ -30,6 +34,12 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
     func sync() {
         guard let map = mapView else { return }
+
+        // Recenter on the user when the store's tick advances (locate button).
+        if store.recenterTick != lastRecenterTick {
+            lastRecenterTick = store.recenterTick
+            recenterOnUser(map)
+        }
 
         // Lock map interaction while drawing so our pan gesture owns the touch.
         let drawing = store.isDrawMode
@@ -148,6 +158,38 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         }
         draftCoords = []
         lastScreenPoint = nil
+    }
+
+    // MARK: - Location
+
+    /// Ask for when-in-use permission. Showing the blue dot requires this —
+    /// setting `showsUserLocation` alone never prompts.
+    func requestLocationPermission() {
+        if locationManager.authorizationStatus == .notDetermined {
+            locationManager.requestWhenInUseAuthorization()
+        }
+    }
+
+    /// Recenter the map on the user's current location. If we don't have a fix
+    /// yet, remember the request and recenter once the first location arrives.
+    private func recenterOnUser(_ map: MKMapView) {
+        if let coordinate = map.userLocation.location?.coordinate {
+            let region = MKCoordinateRegion(
+                center: coordinate,
+                span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)
+            )
+            map.setRegion(region, animated: true)
+            pendingRecenter = false
+        } else {
+            pendingRecenter = true
+            requestLocationPermission()
+        }
+    }
+
+    /// Once the user's location lands, honor any pending recenter request.
+    func mapView(_ mapView: MKMapView, didUpdate userLocation: MKUserLocation) {
+        guard pendingRecenter, userLocation.location != nil else { return }
+        recenterOnUser(mapView)
     }
 
     // MARK: - MKMapViewDelegate

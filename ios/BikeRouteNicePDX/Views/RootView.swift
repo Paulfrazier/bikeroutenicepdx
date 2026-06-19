@@ -18,8 +18,14 @@ struct RootView: View {
 
             topBanner
 
-            VStack {
+            VStack(spacing: 12) {
                 Spacer()
+                if !store.isDrawMode {
+                    HStack {
+                        Spacer()
+                        locateButton
+                    }
+                }
                 ControlsBar(showSearch: $showSearch)
             }
         }
@@ -46,6 +52,22 @@ struct RootView: View {
         } else if store.phase == .snapping {
             banner(icon: "point.topleft.down.curvedto.point.bottomright.up", text: "Snapping to the bike network…")
         }
+    }
+
+    private var locateButton: some View {
+        Button {
+            store.recenterOnUser()
+        } label: {
+            Image(systemName: "location.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.tint)
+                .frame(width: 46, height: 46)
+                .background(.regularMaterial, in: Circle())
+                .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 12)
+        .accessibilityLabel("Center on my location")
     }
 
     private func banner(icon: String, text: String) -> some View {

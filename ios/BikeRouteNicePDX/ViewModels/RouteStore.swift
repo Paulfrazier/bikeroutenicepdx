@@ -22,6 +22,11 @@ final class RouteStore {
     // Search
     var searchResults: [SearchResult] = []
 
+    // Map controls — incremented to ask the map to recenter on the user's
+    // current location (observed by the coordinator in updateUIView).
+    private(set) var recenterTick = 0
+    func recenterOnUser() { recenterTick += 1 }
+
     private let match = MatchService()
     private let search = SearchService()
 
