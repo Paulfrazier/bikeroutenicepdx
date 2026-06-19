@@ -479,6 +479,34 @@ button {
   color: var(--color-text-muted, #64748b);
 }
 
+/* ── Edit-route toggle ─────────────────────────────────────────────────────── */
+.edit-route-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin: 2px 0 4px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text, #1f2937);
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.15));
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.edit-route-btn:hover {
+  border-color: var(--color-accent, #16a34a);
+}
+
+.edit-route-btn--active {
+  color: #fff;
+  background: var(--color-accent, #16a34a);
+  border-color: var(--color-accent, #16a34a);
+}
+
 /* ── Directions panel ──────────────────────────────────────────────────────── */
 .directions-panel {
   list-style: none;
@@ -622,6 +650,18 @@ button {
   letter-spacing: 0.6px;
   color: var(--color-text-muted);
   margin-bottom: 6px;
+}
+
+/* Second heading ("Your route") sits below the network list. */
+.bike-legend__title--route {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border, rgba(0, 0, 0, 0.1));
+}
+
+/* Route ribbon swatches are a touch thicker so they read as the route. */
+.bike-legend__swatch--route {
+  height: 5px;
 }
 
 .bike-legend__list {

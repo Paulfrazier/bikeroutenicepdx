@@ -10,21 +10,26 @@ import UIKit
 enum FriendlyTier: Equatable, Sendable {
     case green   // protected, greenway, path
     case amber   // buffered, lane
-    case red     // shared, or no facility matched
+    case calm    // no bike facility, but no busy arterial nearby — quiet street
+    case red     // no bike facility AND on/along a busy arterial
 
     /// Stroke color for the route line (matches the web palette).
     var color: UIColor {
         switch self {
         case .green: return UIColor(red: 0.086, green: 0.639, blue: 0.290, alpha: 1) // #16A34A
         case .amber: return UIColor(red: 0.961, green: 0.620, blue: 0.043, alpha: 1) // #F59E0B
+        case .calm:  return UIColor(red: 0.392, green: 0.455, blue: 0.545, alpha: 1) // #64748B (slate)
         case .red:   return UIColor(red: 0.863, green: 0.149, blue: 0.149, alpha: 1) // #DC2626
         }
     }
 
-    /// Mixed-traffic stretches render dashed to read as "lower comfort".
+    /// Only busy-street stretches render dashed; calm streets stay solid.
     var dashed: Bool { self == .red }
 
-    /// Map a network facility class onto a friendliness tier.
+    /// Map a network facility class onto a friendliness tier. Calm vs red is
+    /// never decided here — it's resolved by the arterial fallback when no bike
+    /// facility matches, so unrecognized/shared classes fall through to .red and
+    /// the arterial check downgrades them to .calm when no busy road is nearby.
     static func tier(forClass cls: String) -> FriendlyTier {
         switch cls {
         case "protected", "greenway", "path": return .green
@@ -51,6 +56,12 @@ actor BikeFriendliness {
     /// Max angular difference (degrees, undirected) between the route segment
     /// and a candidate network segment for it to count.
     private static let bearingToleranceDeg = 35.0
+    /// Max perpendicular distance (meters) for a route segment to count as being
+    /// "on" a busy arterial (tighter than the bike threshold).
+    private static let arterialThresholdMeters = 18.0
+    /// Max angular difference (degrees, undirected) for a route segment to count
+    /// as aligned with a candidate arterial segment.
+    private static let arterialBearingToleranceDeg = 30.0
     /// Contiguous tier runs shorter than this (meters) are merged into the
     /// preceding run to kill single-segment color flicker.
     private static let minRunMeters = 25.0
@@ -65,6 +76,14 @@ actor BikeFriendliness {
         let tier: FriendlyTier
     }
 
+    /// One straight busy-arterial segment (position + bearing only — no tier;
+    /// merely being near one downgrades an otherwise-calm route segment to red).
+    private struct ArtSeg {
+        let a: CLLocationCoordinate2D
+        let b: CLLocationCoordinate2D
+        let bearing: Double
+    }
+
     private struct CellKey: Hashable {
         let x: Int
         let y: Int
@@ -72,6 +91,8 @@ actor BikeFriendliness {
 
     private var segs: [Seg] = []
     private var grid: [CellKey: [Int]] = [:]
+    private var artSegs: [ArtSeg] = []
+    private var artGrid: [CellKey: [Int]] = [:]
     private var loaded = false
 
     // MARK: - Public API
@@ -102,21 +123,23 @@ actor BikeFriendliness {
         // Hysteresis smoothing → final per-segment tiers.
         let smoothed = smooth(rawTiers, lengths: segLens)
 
-        // Coverage = (green + amber length) / total length.
+        // Coverage = fraction NOT on a busy road = (total − red length) / total.
+        // Green, amber, and calm all count as comfortable.
         var total = 0.0
-        var covered = 0.0
+        var redLength = 0.0
         for i in 0..<segCount {
             total += segLens[i]
-            if smoothed[i] != .red { covered += segLens[i] }
+            if smoothed[i] == .red { redLength += segLens[i] }
         }
-        let coverage = total > 0 ? covered / total : 0
+        let coverage = total > 0 ? (total - redLength) / total : 0
         return (smoothed, coverage)
     }
 
     // MARK: - Classification core
 
-    /// Nearest qualifying network segment's tier for a route-segment midpoint,
-    /// or `.red` if none is within threshold + bearing tolerance.
+    /// Tier for a route-segment midpoint. First try to match a nearby bike
+    /// facility (green/amber). If none matches, fall back to the arterial index:
+    /// on/along a busy road → `.red`, otherwise a quiet street → `.calm`.
     private func tierForMidpoint(_ mid: CLLocationCoordinate2D, routeBearing: Double) -> FriendlyTier {
         let latRad = mid.latitude * .pi / 180
         let cosLat = cos(latRad)
@@ -150,7 +173,40 @@ actor BikeFriendliness {
                 }
             }
         }
-        return bestTier ?? .red
+        if let bestTier { return bestTier }
+
+        // No bike facility — busy arterial nearby → red, else calm quiet street.
+        return isOnArterial(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy)
+            ? .red : .calm
+    }
+
+    /// Whether the midpoint is within `arterialThresholdMeters` of a busy
+    /// arterial segment that is bearing-aligned within `arterialBearingToleranceDeg`.
+    private func isOnArterial(
+        _ mid: CLLocationCoordinate2D,
+        routeBearing: Double,
+        cosLat: Double,
+        cx: Int,
+        cy: Int
+    ) -> Bool {
+        var seen = Set<Int>()
+        for gx in (cx - 1)...(cx + 1) {
+            for gy in (cy - 1)...(cy + 1) {
+                guard let bucket = artGrid[CellKey(x: gx, y: gy)] else { continue }
+                for idx in bucket {
+                    if !seen.insert(idx).inserted { continue }
+                    let seg = artSegs[idx]
+                    if Self.angularDelta(routeBearing, seg.bearing) > Self.arterialBearingToleranceDeg {
+                        continue
+                    }
+                    let d = perpDistanceMeters(
+                        mid: mid, a: seg.a, b: seg.b, cosLat: cosLat
+                    )
+                    if d <= Self.arterialThresholdMeters { return true }
+                }
+            }
+        }
+        return false
     }
 
     /// Merge contiguous runs whose total length < minRunMeters into the
@@ -234,6 +290,80 @@ actor BikeFriendliness {
                 }
             default:
                 continue
+            }
+        }
+
+        loadArterials()
+    }
+
+    /// Build the second spatial index over the bundled busy-arterial network.
+    /// Same grid cell size + helpers as the bike index; segments carry bearing +
+    /// position only (no tier).
+    private func loadArterials() {
+        guard
+            let url = Bundle.main.url(forResource: "arterials", withExtension: "geojson"),
+            let data = try? Data(contentsOf: url),
+            // JSONSerialization (not MKGeoJSONDecoder) — one bad feature must not
+            // nuke the whole collection.
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let features = root["features"] as? [[String: Any]]
+        else {
+            return
+        }
+
+        for feature in features {
+            guard
+                let geometry = feature["geometry"] as? [String: Any],
+                let type = geometry["type"] as? String
+            else { continue }
+
+            switch type {
+            case "LineString":
+                if let line = geometry["coordinates"] as? [[Double]] {
+                    addArterialLine(line)
+                }
+            case "MultiLineString":
+                if let lines = geometry["coordinates"] as? [[[Double]]] {
+                    for line in lines { addArterialLine(line) }
+                }
+            default:
+                continue
+            }
+        }
+    }
+
+    /// Split one [[lng, lat], ...] arterial line into straight segments + index.
+    private func addArterialLine(_ line: [[Double]]) {
+        guard line.count >= 2 else { return }
+        var prev: CLLocationCoordinate2D?
+        for pair in line {
+            guard pair.count >= 2 else { prev = nil; continue }
+            let c = CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0])
+            if let a = prev {
+                indexArterial(ArtSeg(a: a, b: c, bearing: Self.bearing(a, c)))
+            }
+            prev = c
+        }
+    }
+
+    /// Add an arterial segment to every grid cell its bounding box touches.
+    private func indexArterial(_ seg: ArtSeg) {
+        let idx = artSegs.count
+        artSegs.append(seg)
+
+        let minLng = min(seg.a.longitude, seg.b.longitude)
+        let maxLng = max(seg.a.longitude, seg.b.longitude)
+        let minLat = min(seg.a.latitude, seg.b.latitude)
+        let maxLat = max(seg.a.latitude, seg.b.latitude)
+
+        let x0 = Int(floor(minLng / Self.cell))
+        let x1 = Int(floor(maxLng / Self.cell))
+        let y0 = Int(floor(minLat / Self.cell))
+        let y1 = Int(floor(maxLat / Self.cell))
+
+        for gx in x0...x1 {
+            for gy in y0...y1 {
+                artGrid[CellKey(x: gx, y: gy), default: []].append(idx)
             }
         }
     }

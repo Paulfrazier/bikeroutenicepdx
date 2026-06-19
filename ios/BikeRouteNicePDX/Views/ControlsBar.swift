@@ -67,9 +67,12 @@ struct ControlsBar: View {
     private var actionArea: some View {
         switch store.phase {
         case .idle, .settingStart:
-            hint("Tap the map or search to drop your start pin.")
+            VStack(spacing: 10) {
+                useLocationButton
+                hint("…or tap the map / search to set your start.")
+            }
         case .settingEnd:
-            hint("Now set your destination.")
+            hint("Now tap the map to drop your destination — or search.")
         case .readyToDraw:
             // Both pins are set — the route is auto-computing (debounced). Show
             // the same working state as .snapping rather than a manual gate.
@@ -89,7 +92,7 @@ struct ControlsBar: View {
                             .font(.headline)
                         Spacer()
                         if let coverage = snapped.coverage {
-                            Text("🚲 \(Int((coverage * 100).rounded()))% on bike infra")
+                            Text("🚲 \(Int((coverage * 100).rounded()))% comfortable")
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(.secondary)
                         } else {
@@ -99,8 +102,12 @@ struct ControlsBar: View {
                         }
                     }
                 }
+                if store.isEditMode {
+                    hint("Drag the route to reshape it — it re-snaps to roads.")
+                }
                 HStack(spacing: 12) {
                     clearAllButton
+                    editButton
                     primaryButton("Draw", icon: "hand.draw.fill") {
                         store.enterDrawMode()
                     }
@@ -137,6 +144,21 @@ struct ControlsBar: View {
         case 1: return "Routed through 1 point"
         default: return "Routed through \(count) points"
         }
+    }
+
+    /// Set the route start to the user's current GPS location. After this the
+    /// hint switches to "tap the map to drop your destination."
+    private var useLocationButton: some View {
+        Button {
+            store.useMyLocationAsStart()
+        } label: {
+            Label("Use my location", systemImage: "location.fill")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.green)
     }
 
     private var routingSpinner: some View {
@@ -177,6 +199,21 @@ struct ControlsBar: View {
                 .padding(.horizontal, 16)
         }
         .buttonStyle(.bordered)
+    }
+
+    /// Toggle the route into/out of edit mode. Only in edit mode can the line be
+    /// dragged to reshape — keeps it from moving by accident the rest of the time.
+    private var editButton: some View {
+        Button {
+            store.isEditMode.toggle()
+        } label: {
+            Label(store.isEditMode ? "Done" : "Edit", systemImage: store.isEditMode ? "checkmark" : "hand.point.up.left.fill")
+                .font(.subheadline.weight(.medium))
+                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+        }
+        .buttonStyle(.bordered)
+        .tint(store.isEditMode ? .green : .blue)
     }
 
     private var clearAllButton: some View {

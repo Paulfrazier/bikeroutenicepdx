@@ -28,7 +28,7 @@ import maplibregl, {
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { LngLat, RouteResponse } from "../types";
-import { hitTestRoute, type Px } from "../geo";
+import { hitTestRoute, VERTEX_HIT_PX, type Px } from "../geo";
 
 // Protocol handler for PMTiles (lazy-import to keep bundle splittable)
 let pmtilesProtocolAdded = false;
@@ -186,6 +186,14 @@ const LEGEND_ITEMS = [
   { cls: "shared",    color: "#9CA3AF", label: "Enhanced Shared Roadway", dashed: true  },
 ] as const;
 
+// Route ribbon (friendliness tier) key — matches the route-line colors.
+const ROUTE_LEGEND_ITEMS = [
+  { tier: "green", color: "#16A34A", label: "Bike facility",    dashed: false },
+  { tier: "amber", color: "#F59E0B", label: "Bike lane",        dashed: false },
+  { tier: "calm",  color: "#64748B", label: "Quiet street",     dashed: false },
+  { tier: "red",   color: "#DC2626", label: "Busy street",      dashed: true  },
+] as const;
+
 function BikeNetworkLegend() {
   return (
     <div className="bike-legend" aria-label="Bike network legend">
@@ -195,6 +203,23 @@ function BikeNetworkLegend() {
           <li key={cls} className="bike-legend__item">
             <span
               className="bike-legend__swatch"
+              style={{
+                background: dashed
+                  ? `repeating-linear-gradient(to right, ${color} 0px, ${color} 5px, transparent 5px, transparent 8px)`
+                  : color,
+              }}
+              aria-hidden="true"
+            />
+            <span className="bike-legend__label">{label}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="bike-legend__title bike-legend__title--route">Your route</div>
+      <ul className="bike-legend__list">
+        {ROUTE_LEGEND_ITEMS.map(({ tier, color, label, dashed }) => (
+          <li key={tier} className="bike-legend__item">
+            <span
+              className="bike-legend__swatch bike-legend__swatch--route"
               style={{
                 background: dashed
                   ? `repeating-linear-gradient(to right, ${color} 0px, ${color} 5px, transparent 5px, transparent 8px)`
@@ -221,10 +246,15 @@ interface MapProps {
   tierFeatures: GeoJSON.FeatureCollection;
   onMapClick: (lngLat: LngLat) => void;
   onStepFlyTo: LngLat | null;
-  /** Hand-edited route coords; when non-null these override the server route. */
-  editedCoords: LngLat[] | null;
-  /** Commit a hand-drag edit back up to App. */
-  onRouteEdit: (coords: LngLat[]) => void;
+  /** When true, the route line is draggable; otherwise it's locked and the map
+   * pans freely over it (prevents accidental moves). */
+  editing: boolean;
+  /** Ordered drag-to-reshape pass-through waypoints (owned by App). */
+  vias: LngLat[];
+  /** A drag finished: `dragged` is the released point; `movingViaIndex` is the
+   * index of an existing via that was grabbed, or null to insert a new one. App
+   * updates its via list and re-routes (snapping to real roads). */
+  onReshape: (dragged: LngLat, movingViaIndex: number | null) => void;
 }
 
 export function Map({
@@ -234,8 +264,9 @@ export function Map({
   tierFeatures,
   onMapClick,
   onStepFlyTo,
-  editedCoords,
-  onRouteEdit,
+  editing,
+  vias,
+  onReshape,
 }: MapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -250,11 +281,26 @@ export function Map({
   const dragIndexRef = useRef<number>(-1);
   // Set true on drag-end so the synthetic "click" that follows doesn't drop a pin.
   const suppressClickRef = useRef(false);
-  // onRouteEdit can change identity; read it through a ref from map listeners.
-  const onRouteEditRef = useRef(onRouteEdit);
+  // Index of an existing via grabbed at drag-start (else null → insert new).
+  const movingViaIndexRef = useRef<number | null>(null);
+  // Pixel where the drag began + whether it has passed the move threshold, so a
+  // tap on the line (in edit mode) doesn't insert a spurious via.
+  const dragStartPxRef = useRef<Px | null>(null);
+  const draggedFarRef = useRef(false);
+  // Props that map listeners read live (identities change every render).
+  const onReshapeRef = useRef(onReshape);
+  const editingRef = useRef(editing);
+  const viasRef = useRef(vias);
+  const tierFeaturesRef = useRef(tierFeatures);
   useEffect(() => {
-    onRouteEditRef.current = onRouteEdit;
+    onReshapeRef.current = onReshape;
+    editingRef.current = editing;
+    viasRef.current = vias;
+    tierFeaturesRef.current = tierFeatures;
   });
+
+  /** Movement (px) before a press becomes a reshape rather than a tap. */
+  const DRAG_THRESHOLD_PX = 6;
 
   // ── Initialize map ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -375,6 +421,19 @@ export function Map({
         type: "geojson",
         data: emptyGeojson(),
       });
+      // White casing UNDER the colored runs, so the route always reads as a
+      // distinct ribbon over the colored bike-network. Added first → painted
+      // below the tier lines, leaving a ~1.5px white halo each side.
+      map.addLayer({
+        id: "route-casing",
+        type: "line",
+        source: "route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#ffffff",
+          "line-width": 9,
+        },
+      });
       map.addLayer({
         id: "route-line",
         type: "line",
@@ -387,7 +446,8 @@ export function Map({
             ["get", "tier"],
             "green", "#16A34A",
             "amber", "#F59E0B",
-            "#DC2626",
+            "calm", "#64748B",
+            "#64748B",
           ],
           "line-width": 6,
         },
@@ -432,8 +492,10 @@ export function Map({
         id: "route-vertices",
         type: "circle",
         source: "route-vertices",
+        // Hidden until the user enters edit mode (toggled by the `editing` effect).
+        layout: { visibility: "none" },
         paint: {
-          "circle-radius": 5,
+          "circle-radius": 6,
           "circle-color": "#ffffff",
           "circle-stroke-color": "#2563eb",
           "circle-stroke-width": 2,
@@ -448,15 +510,38 @@ export function Map({
         return { x: p.x, y: p.y };
       });
 
+    // Index of the existing via within grab range of `p`, else null. Grabbing
+    // near a via moves it; grabbing anywhere else on the line inserts a new one.
+    const nearestViaIndexPx = (p: Px): number | null => {
+      let best = VERTEX_HIT_PX;
+      let idx: number | null = null;
+      viasRef.current.forEach((v, i) => {
+        const pt = map.project(v as LngLatLike);
+        const d = Math.hypot(p.x - pt.x, p.y - pt.y);
+        if (d <= best) {
+          best = d;
+          idx = i;
+        }
+      });
+      return idx;
+    };
+
     const onMove = (
       e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
     ) => {
       const coords = dragCoordsRef.current;
       const idx = dragIndexRef.current;
       if (!coords || idx < 0) return;
+      // Ignore tiny movements so a tap on the line doesn't become a reshape.
+      const start = dragStartPxRef.current;
+      if (start && !draggedFarRef.current) {
+        const dpx = Math.hypot(e.point.x - start.x, e.point.y - start.y);
+        if (dpx < DRAG_THRESHOLD_PX) return;
+        draggedFarRef.current = true;
+      }
       coords[idx] = [e.lngLat.lng, e.lngLat.lat];
       // Draw the live line on the transient drag source (the tier source is
-      // cleared during the drag and refilled once classification completes).
+      // cleared during the drag and refilled once the re-route completes).
       const dsrc = map.getSource("route-drag") as
         | maplibregl.GeoJSONSource
         | undefined;
@@ -474,19 +559,43 @@ export function Map({
       map.off("touchend", onEnd);
       map.dragPan.enable();
       const coords = dragCoordsRef.current;
+      const idx = dragIndexRef.current;
+      const movingVia = movingViaIndexRef.current;
+      const moved = draggedFarRef.current;
       dragCoordsRef.current = null;
       dragIndexRef.current = -1;
-      if (coords) {
-        // Suppress the click that fires right after a drag-release.
-        suppressClickRef.current = true;
-        displayCoordsRef.current = coords;
-        onRouteEditRef.current(coords);
+      dragStartPxRef.current = null;
+      draggedFarRef.current = false;
+      movingViaIndexRef.current = null;
+      if (!coords || idx < 0) return;
+
+      if (!moved) {
+        // A tap, not a drag — restore the route line and drop nothing.
+        (
+          map.getSource("route") as maplibregl.GeoJSONSource | undefined
+        )?.setData(tierFeaturesRef.current);
+        (
+          map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
+        )?.setData(emptyGeojson());
+        (
+          map.getSource("route-vertices") as maplibregl.GeoJSONSource | undefined
+        )?.setData(vertexFeatures(displayCoordsRef.current));
+        return;
       }
+
+      // Suppress the click that fires right after a drag-release.
+      suppressClickRef.current = true;
+      // Hand the released point up to App, which updates vias + re-routes
+      // (snapping to roads). Keep the drag preview on screen until the new
+      // snapped route's tierFeatures arrive — no snap-back flicker.
+      onReshapeRef.current(coords[idx], movingVia);
     };
 
     const onDown = (
       e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
     ) => {
+      // Route is locked unless the user is in edit mode → no accidental grabs.
+      if (!editingRef.current) return;
       if (displayCoordsRef.current.length < 2) return;
       const hit = hitTestRoute(
         { x: e.point.x, y: e.point.y },
@@ -496,6 +605,11 @@ export function Map({
 
       e.preventDefault();
       map.dragPan.disable();
+
+      // Did the press grab an existing via? Decide before any insertion.
+      movingViaIndexRef.current = nearestViaIndexPx({ x: e.point.x, y: e.point.y });
+      dragStartPxRef.current = { x: e.point.x, y: e.point.y };
+      draggedFarRef.current = false;
 
       const coords = displayCoordsRef.current.map(
         (c) => [c[0], c[1]] as LngLat
@@ -571,12 +685,10 @@ export function Map({
     )?.setData(emptyGeojson());
   }, [tierFeatures]);
 
-  // ── Fresh server route: track coords + fit bounds (only when not hand-edited) ──
+  // ── Server route: track coords + fit bounds (only for a fresh route) ──
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
-    // While edited coords are active, the editedCoords effect owns the geometry.
-    if (editedCoords) return;
 
     const vsrc = map.getSource("route-vertices") as
       | maplibregl.GeoJSONSource
@@ -586,8 +698,9 @@ export function Map({
       const coords = route.geometry.coordinates;
       displayCoordsRef.current = coords;
       vsrc?.setData(vertexFeatures(coords));
-      // Fit map to route bounds
-      if (coords.length > 1) {
+      // Fit map to route bounds ONLY for a fresh route (no vias). A reshape
+      // re-route has vias set — refitting then would yank the viewport.
+      if (coords.length > 1 && viasRef.current.length === 0) {
         const bounds = coords.reduce(
           (b, c) => b.extend(c as LngLatLike),
           new maplibregl.LngLatBounds(coords[0] as LngLatLike, coords[0] as LngLatLike)
@@ -601,18 +714,18 @@ export function Map({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route]);
 
-  // ── Hand-edited coords: track them, NO fitBounds (don't yank the viewport) ─
+  // ── Toggle the grab-dot handles' visibility with edit mode ──
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !map.isStyleLoaded() || !editedCoords) return;
-
-    const vsrc = map.getSource("route-vertices") as
-      | maplibregl.GeoJSONSource
-      | undefined;
-
-    displayCoordsRef.current = editedCoords;
-    vsrc?.setData(vertexFeatures(editedCoords));
-  }, [editedCoords]);
+    if (!map || !map.isStyleLoaded()) return;
+    if (map.getLayer("route-vertices")) {
+      map.setLayoutProperty(
+        "route-vertices",
+        "visibility",
+        editing ? "visible" : "none"
+      );
+    }
+  }, [editing]);
 
   // ── Sync from marker ─────────────────────────────────────────────────────
   useEffect(() => {

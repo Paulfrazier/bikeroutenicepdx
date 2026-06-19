@@ -14,6 +14,8 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     private let locationManager = CLLocationManager()
     private var lastRecenterTick = 0
     private var pendingRecenter = false
+    private var lastUseLocationTick = 0
+    private var pendingUseLocationStart = false
     private var lastRouteVersion = 0
 
     private var startAnnotation: MKPointAnnotation?
@@ -63,6 +65,12 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             recenterOnUser(map)
         }
 
+        // Set the start pin to the user's current location ("Use my location").
+        if store.useLocationTick != lastUseLocationTick {
+            lastUseLocationTick = store.useLocationTick
+            useCurrentLocationAsStart(map)
+        }
+
         // Lock map interaction while drawing so our pan gesture owns the touch.
         let drawing = store.isDrawMode
         map.isScrollEnabled = !drawing
@@ -72,9 +80,11 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         panGesture?.isEnabled = drawing
         tapGesture?.isEnabled = !drawing
 
-        // Hand-edit pan is live only when a finished route is on screen and we're
-        // not drawing. shouldBegin further gates it to touches that land on the line.
-        editPanGesture?.isEnabled = (store.snapped != nil && !drawing)
+        // Hand-edit pan is live only when a finished route is on screen, we're not
+        // drawing, AND the user has explicitly entered edit mode. Outside edit mode
+        // the route is non-interactive so the map pans freely over it (no accidental
+        // grabs). shouldBegin further gates it to touches that land on the line.
+        editPanGesture?.isEnabled = (store.snapped != nil && !drawing && store.isEditMode)
 
         syncAnnotation(&startAnnotation, waypoint: store.start, title: "Start", map: map)
         syncAnnotation(&endAnnotation, waypoint: store.end, title: "End", map: map)
@@ -92,7 +102,17 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
                 // place without yanking the camera around after each drag.
                 let isFreshRoute = nothingShown
                 removeRouteOverlays(map)
-                let built = buildTierOverlays(for: snapped)
+                let tiers = buildTierOverlays(for: snapped)
+                // White casing under the colored runs so the route stays a
+                // distinct ribbon over the colored bike-network. Added first so
+                // the tier overlays paint on top of it.
+                var built: [MKOverlay] = []
+                if snapped.coordinates.count >= 2 {
+                    built.append(RouteCasingPolyline(
+                        coordinates: snapped.coordinates, count: snapped.coordinates.count
+                    ))
+                }
+                built.append(contentsOf: tiers)
                 routeOverlays = built
                 map.addOverlays(built, level: .aboveLabels)
                 if isFreshRoute, let rect = unionRect(of: built) {
@@ -422,16 +442,51 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         }
     }
 
-    /// Once the user's location lands, honor any pending recenter request.
+    /// Set the route start to the user's current location. If we don't have a
+    /// fix yet, remember the request and apply it once the first location lands.
+    private func useCurrentLocationAsStart(_ map: MKMapView) {
+        if let coordinate = map.userLocation.location?.coordinate {
+            pendingUseLocationStart = false
+            setStartFromLocation(coordinate)
+            recenterOnUser(map)
+        } else {
+            pendingUseLocationStart = true
+            requestLocationPermission()
+        }
+    }
+
+    /// Drop the start pin at `coordinate`. Deferred off the SwiftUI update pass
+    /// (sync() runs inside updateUIView) so we never mutate the store mid-render.
+    private func setStartFromLocation(_ coordinate: CLLocationCoordinate2D) {
+        Task { @MainActor [store] in
+            store.setPin(coordinate, kind: .start, label: "My location")
+        }
+    }
+
+    /// Once the user's location lands, honor any pending recenter / use-as-start.
     func mapView(_ mapView: MKMapView, didUpdate userLocation: MKUserLocation) {
-        guard pendingRecenter, userLocation.location != nil else { return }
-        recenterOnUser(mapView)
+        guard userLocation.location != nil else { return }
+        if pendingRecenter {
+            recenterOnUser(mapView)
+        }
+        if pendingUseLocationStart, let coordinate = userLocation.location?.coordinate {
+            pendingUseLocationStart = false
+            setStartFromLocation(coordinate)
+            recenterOnUser(mapView)
+        }
     }
 
     // MARK: - MKMapViewDelegate
 
     func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
         switch overlay {
+        case let polyline as RouteCasingPolyline:
+            let renderer = MKPolylineRenderer(polyline: polyline)
+            renderer.strokeColor = .white
+            renderer.lineWidth = 9
+            renderer.lineCap = .round
+            renderer.lineJoin = .round
+            return renderer
         case let polyline as RouteTierPolyline:
             let renderer = MKPolylineRenderer(polyline: polyline)
             renderer.strokeColor = polyline.tier.color

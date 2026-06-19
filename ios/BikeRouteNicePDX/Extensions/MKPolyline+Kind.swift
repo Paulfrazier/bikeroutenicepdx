@@ -7,6 +7,10 @@ final class GreenwayPolyline: MKPolyline {}
 final class RoutePolyline: MKPolyline {}
 final class DraftPolyline: MKPolyline {}
 
+/// White underlay drawn beneath the colored route runs so the route always
+/// reads as a distinct ribbon on top of the colored bike-network overlay.
+final class RouteCasingPolyline: MKPolyline {}
+
 /// One contiguous same-tier run of the routed line. The route is rendered as a
 /// sequence of these so its color tracks bike-friendliness along its length.
 final class RouteTierPolyline: MKPolyline {

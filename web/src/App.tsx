@@ -15,7 +15,7 @@ import { DirectionsPanel } from "./components/DirectionsPanel";
 import { useRoute } from "./hooks/useRoute";
 import { useFriendliness } from "./hooks/useFriendliness";
 import { toTierFeatureCollection } from "./friendliness";
-import { haversineLength } from "./geo";
+import { nearestVertexIndex } from "./geo";
 import type { LngLat } from "./types";
 
 export default function App() {
@@ -25,28 +25,56 @@ export default function App() {
   const [to, setTo] = useState<LngLat | null>(null);
   const [toLabel, setToLabel] = useState("");
 
-  // ── Route ──────────────────────────────────────────────────────────────────
-  const { route, loading: routeLoading, error: routeError } = useRoute(from, to);
-
-  // ── Hand-edited route ────────────────────────────────────────────────────
-  // When the user drags the line, edited coords override the server geometry.
-  // A new server route clears any edits.
-  const [editedCoords, setEditedCoords] = useState<LngLat[] | null>(null);
+  // ── Drag-to-reshape via points ───────────────────────────────────────────
+  // Each drag drops (or moves) a pass-through waypoint; the route is re-fetched
+  // start → vias → end, snapped to real roads. Cleared when endpoints change.
+  const [vias, setVias] = useState<LngLat[]>([]);
+  const [editing, setEditing] = useState(false);
   useEffect(() => {
-    setEditedCoords(null);
-  }, [route]);
-  const editedDistanceM = useMemo(
-    () => (editedCoords ? haversineLength(editedCoords) : null),
-    [editedCoords]
+    setVias([]);
+    setEditing(false);
+  }, [from, to]);
+
+  // ── Route ──────────────────────────────────────────────────────────────────
+  const { route, loading: routeLoading, error: routeError } = useRoute(
+    from,
+    to,
+    vias
   );
-  const manuallyEdited = editedCoords !== null;
+  const reshaped = vias.length > 0;
 
   // ── Bike-friendliness classification (client-side) ────────────────────────
-  // Classify the currently-displayed coords — the hand-edited line if present,
-  // otherwise the server route geometry — so tiers + coverage update on edit.
+  // Classify the active (snapped) route geometry so tiers + coverage update
+  // after every reshape re-route.
   const activeCoords = useMemo<LngLat[] | null>(
-    () => editedCoords ?? route?.geometry.coordinates ?? null,
-    [editedCoords, route]
+    () => route?.geometry.coordinates ?? null,
+    [route]
+  );
+
+  // A drag finished: update the via list (move an existing one or insert a new
+  // one in along-route order) and let useRoute re-route + snap.
+  const handleReshape = useCallback(
+    (dragged: LngLat, movingViaIndex: number | null) => {
+      const routeCoords = route?.geometry.coordinates ?? [];
+      setVias((prev) => {
+        if (movingViaIndex !== null && movingViaIndex < prev.length) {
+          const next = prev.slice();
+          next[movingViaIndex] = dragged;
+          return next;
+        }
+        // Insert in along-route order: count existing vias that come before the
+        // dragged point along the current route geometry (mirrors iOS reshape).
+        const draggedKey = nearestVertexIndex(dragged, routeCoords);
+        let insertAt = 0;
+        for (const v of prev) {
+          if (nearestVertexIndex(v, routeCoords) <= draggedKey) insertAt++;
+        }
+        const next = prev.slice();
+        next.splice(Math.min(insertAt, next.length), 0, dragged);
+        return next;
+      });
+    },
+    [route]
   );
   const friendliness = useFriendliness(activeCoords);
   const tierFeatures = useMemo(
@@ -149,16 +177,17 @@ export default function App() {
               distance_m={route.distance_m}
               duration_s={route.duration_s}
               coverage={friendliness?.coverage}
-              editedDistanceM={editedDistanceM ?? undefined}
-              manuallyEdited={manuallyEdited}
+              reshaped={reshaped}
             />
-            {/* Steps are stale once the line is hand-edited; hide them. */}
-            {!manuallyEdited && (
-              <DirectionsPanel
-                steps={route.steps}
-                onStepClick={handleStepClick}
-              />
-            )}
+            <button
+              type="button"
+              className={`edit-route-btn ${editing ? "edit-route-btn--active" : ""}`}
+              aria-pressed={editing}
+              onClick={() => setEditing((e) => !e)}
+            >
+              {editing ? "✓ Done editing" : "✎ Edit route"}
+            </button>
+            <DirectionsPanel steps={route.steps} onStepClick={handleStepClick} />
           </div>
         )}
 
@@ -179,8 +208,9 @@ export default function App() {
           tierFeatures={tierFeatures}
           onMapClick={handleMapClick}
           onStepFlyTo={flyTo}
-          editedCoords={editedCoords}
-          onRouteEdit={setEditedCoords}
+          editing={editing}
+          vias={vias}
+          onReshape={handleReshape}
         />
 
         {/* ── Mobile bottom drawer ── */}
@@ -208,10 +238,17 @@ export default function App() {
                 distance_m={route.distance_m}
                 duration_s={route.duration_s}
                 coverage={friendliness?.coverage}
-                editedDistanceM={editedDistanceM ?? undefined}
-                manuallyEdited={manuallyEdited}
+                reshaped={reshaped}
               />
-              {drawerExpanded && !manuallyEdited && (
+              <button
+                type="button"
+                className={`edit-route-btn ${editing ? "edit-route-btn--active" : ""}`}
+                aria-pressed={editing}
+                onClick={() => setEditing((e) => !e)}
+              >
+                {editing ? "✓ Done editing" : "✎ Edit route"}
+              </button>
+              {drawerExpanded && (
                 <DirectionsPanel
                   steps={route.steps}
                   onStepClick={handleStepClick}

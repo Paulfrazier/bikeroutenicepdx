@@ -54,12 +54,13 @@ struct LegendView: View {
         .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
     }
 
-    /// 3-tier route color key, matching the colored route line.
+    /// 4-tier route color key, matching the colored route line.
     private var routeLegendRows: [(label: String, color: UIColor, dashed: Bool)] {
         [
             ("Protected / Greenway / Path", FriendlyTier.green.color, false),
             ("Bike lane / Buffered", FriendlyTier.amber.color, false),
-            ("Mixed traffic", FriendlyTier.red.color, true),
+            ("Quiet street", FriendlyTier.calm.color, false),
+            ("Busy street — no bike lane", FriendlyTier.red.color, true),
         ]
     }
 

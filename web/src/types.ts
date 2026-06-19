@@ -8,6 +8,8 @@ export type LngLat = [number, number];
 export interface RouteRequest {
   from: LngLat;
   to: LngLat;
+  /** Ordered pass-through points (Valhalla "through" waypoints) for reshaping. */
+  via?: LngLat[];
 }
 
 export interface RouteStep {

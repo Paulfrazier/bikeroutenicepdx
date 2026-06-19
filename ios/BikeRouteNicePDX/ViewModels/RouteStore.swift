@@ -35,6 +35,11 @@ final class RouteStore {
     /// a fresh route is started.
     var isManuallyEdited = false
 
+    /// Whether the user has tapped "Edit route" to make the line draggable. When
+    /// false the route is non-interactive and the map pans freely over it (no
+    /// accidental grabs). Reset whenever a fresh route or new endpoint appears.
+    var isEditMode = false
+
     // Search
     var searchResults: [SearchResult] = []
 
@@ -42,6 +47,11 @@ final class RouteStore {
     // current location (observed by the coordinator in updateUIView).
     private(set) var recenterTick = 0
     func recenterOnUser() { recenterTick += 1 }
+
+    // Bumped to ask the map to set the route START to the user's current
+    // location (observed by the coordinator, which has the live GPS fix).
+    private(set) var useLocationTick = 0
+    func useMyLocationAsStart() { useLocationTick += 1 }
 
     private let match = MatchService()
     private let router = RouteService()
@@ -65,6 +75,7 @@ final class RouteStore {
         // Changing a pin invalidates any existing route.
         snapped = nil
         isManuallyEdited = false
+        isEditMode = false
         vias = []
         searchResults = []
         recomputeIdlePhase()
@@ -115,6 +126,7 @@ final class RouteStore {
     private func performAutoRoute(from startC: CLLocationCoordinate2D, to endC: CLLocationCoordinate2D) async {
         vias = []
         isManuallyEdited = false
+        isEditMode = false
         phase = .snapping
         errorMessage = nil
         do {
@@ -181,6 +193,7 @@ final class RouteStore {
         drawnTrace = []
         snapped = nil
         isManuallyEdited = false
+        isEditMode = false
         vias = []
         searchResults = []
         errorMessage = nil

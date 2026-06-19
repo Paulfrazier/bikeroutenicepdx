@@ -36,6 +36,27 @@ export function haversineLength(coords: LngLat[]): number {
   return total;
 }
 
+/**
+ * Index of the vertex in `coords` closest to `target` (great-circle).
+ *
+ * Mirrors iOS `GeoMath.nearestIndex`. Used to order drag-to-reshape via points:
+ * since the current route passes through existing vias in order, a new via's
+ * nearest-vertex index tells us where in the ordered via list it belongs.
+ */
+export function nearestVertexIndex(target: LngLat, coords: LngLat[]): number {
+  if (coords.length === 0) return 0;
+  let bestIndex = 0;
+  let best = Infinity;
+  for (let i = 0; i < coords.length; i++) {
+    const d = haversineLength([coords[i], target]);
+    if (d < best) {
+      best = d;
+      bestIndex = i;
+    }
+  }
+  return bestIndex;
+}
+
 // ── Screen-pixel geometry ──────────────────────────────────────────────────
 
 export interface Px {
