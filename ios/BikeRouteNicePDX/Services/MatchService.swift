@@ -24,3 +24,28 @@ struct MatchService {
         return SnappedRoute(coordinates: coords, distanceMeters: response.distance_m)
     }
 }
+
+/// Routes start → [vias] → end via the server's /route endpoint, with the via
+/// points passed as ordered pass-through waypoints. Powers drag-to-reshape:
+/// each dragged point becomes a via and the whole route is recomputed cleanly
+/// along real roads (no map-matching of a hand-drawn shape). Decodes into the
+/// shared MatchResponse — /route returns a superset, extra keys are ignored.
+struct RouteService {
+    func route(
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D,
+        vias: [CLLocationCoordinate2D]
+    ) async throws -> SnappedRoute {
+        let body = RouteRequest(
+            from: [from.longitude, from.latitude],
+            to: [to.longitude, to.latitude],
+            via: vias.map { [$0.longitude, $0.latitude] }
+        )
+        let response = try await APIClient.post(path: "route", body: body, as: MatchResponse.self)
+        let coords = response.geometry.coordinates.compactMap { pair -> CLLocationCoordinate2D? in
+            guard pair.count == 2 else { return nil }
+            return CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0])
+        }
+        return SnappedRoute(coordinates: coords, distanceMeters: response.distance_m)
+    }
+}

@@ -196,12 +196,17 @@ export class ValhallaError extends Error {
 
 export async function getRoute(
   from: [number, number], // [lng, lat]
-  to: [number, number]   // [lng, lat]
+  to: [number, number],   // [lng, lat]
+  vias: [number, number][] = [] // [lng, lat][] — ordered pass-through waypoints
 ): Promise<RouteResult> {
   const body = {
+    // start/end are "break" stops; vias are "through" so the route passes
+    // through each (in order) without stopping or U-turning — this is what
+    // powers drag-to-reshape: each dragged point becomes a through waypoint.
     locations: [
-      { lon: from[0], lat: from[1] },
-      { lon: to[0], lat: to[1] },
+      { lon: from[0], lat: from[1], type: "break" },
+      ...vias.map(([lon, lat]) => ({ lon, lat, type: "through" })),
+      { lon: to[0], lat: to[1], type: "break" },
     ],
     costing: "bicycle",
     costing_options: {

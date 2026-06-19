@@ -14,6 +14,10 @@ final class RouteStore {
     var isDrawMode = false
     var drawnTrace: [CLLocationCoordinate2D] = []
 
+    /// Ordered drag-to-reshape pass-through waypoints. Each hand-drag drops (or
+    /// moves) one of these; the route is re-routed start → vias → end cleanly.
+    var vias: [CLLocationCoordinate2D] = []
+
     // Result
     var snapped: SnappedRoute? {
         didSet { routeVersion += 1 }
@@ -40,6 +44,7 @@ final class RouteStore {
     func recenterOnUser() { recenterTick += 1 }
 
     private let match = MatchService()
+    private let router = RouteService()
     private let search = SearchService()
 
     var bothPinsSet: Bool { start != nil && end != nil }
@@ -55,6 +60,7 @@ final class RouteStore {
         // Changing a pin invalidates any existing route.
         snapped = nil
         isManuallyEdited = false
+        vias = []
         searchResults = []
         recomputeIdlePhase()
     }
@@ -86,6 +92,7 @@ final class RouteStore {
         drawnTrace = []
         snapped = nil
         isManuallyEdited = false
+        vias = []
         errorMessage = nil
         phase = .drawing
     }
@@ -95,6 +102,7 @@ final class RouteStore {
         drawnTrace = []
         snapped = nil
         isManuallyEdited = false
+        vias = []
         errorMessage = nil
         if bothPinsSet {
             isDrawMode = true
@@ -112,6 +120,7 @@ final class RouteStore {
         drawnTrace = []
         snapped = nil
         isManuallyEdited = false
+        vias = []
         searchResults = []
         errorMessage = nil
         isDrawMode = false
@@ -123,30 +132,54 @@ final class RouteStore {
         drawnTrace = coordinates
     }
 
-    /// Commit a hand-dragged line. Shows the raw drag instantly for feedback, then
-    /// re-snaps it onto roads via /match so it stops being squiggly. The `follow`
-    /// flag lets the snap drift onto whatever road the user dragged toward (incl.
-    /// non-bike streets). If the match fails (e.g. dragged far off any road) the
-    /// raw line is kept — honoring the user's intent rather than erroring out.
-    func commitEdit(_ coords: [CLLocationCoordinate2D]) async {
-        // 1. Instant feedback: show the line exactly where the finger left it.
-        snapped = SnappedRoute(coordinates: coords, distanceMeters: GeoMath.length(coords))
+    /// Reshape the route by dropping (or moving) a pass-through via point, then
+    /// re-routing start → vias → end cleanly along real roads. The dragged point
+    /// becomes a via; `movingViaIndex` (when the user grabbed an existing via)
+    /// relocates that one instead of inserting a new one.
+    ///
+    /// `preview` is the rubber-banded line shown during the drag — we display it
+    /// immediately so the route doesn't snap back to the old shape while the
+    /// re-route is in flight, then replace it with the clean result. On failure
+    /// we revert to the route as it was before this drag.
+    func reshape(
+        to dragged: CLLocationCoordinate2D,
+        preview: [CLLocationCoordinate2D],
+        movingViaIndex: Int?
+    ) async {
+        guard let startC = start?.coordinate, let endC = end?.coordinate else { return }
+
+        let previousVias = vias
+        let previousSnapped = snapped
+
+        // Update the via list.
+        if let i = movingViaIndex, vias.indices.contains(i) {
+            vias[i] = dragged
+        } else {
+            // Insert in along-route order: count existing vias that come before
+            // the dragged point along the current route geometry.
+            let routeCoords = previousSnapped?.coordinates ?? preview
+            let draggedKey = GeoMath.nearestIndex(of: dragged, in: routeCoords)
+            let insertAt = vias.filter {
+                GeoMath.nearestIndex(of: $0, in: routeCoords) <= draggedKey
+            }.count
+            vias.insert(dragged, at: min(insertAt, vias.count))
+        }
+
+        // Show the rubber-banded preview immediately (no snap-back flicker).
+        snapped = SnappedRoute(coordinates: preview, distanceMeters: GeoMath.length(preview))
         isManuallyEdited = true
         phase = .routed
 
-        // 2. Re-snap onto roads, following the drawn path.
         do {
-            let resnapped = try await match.snap(
-                trace: coords,
-                start: start?.coordinate,
-                end: end?.coordinate,
-                follow: true
-            )
-            guard resnapped.coordinates.count >= 2 else { return } // keep raw on empty match
-            snapped = resnapped
-            isManuallyEdited = false // it's snapped to roads now
+            let routed = try await router.route(from: startC, to: endC, vias: vias)
+            guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
+            snapped = routed
+            isManuallyEdited = false // it's a clean road route now
         } catch {
-            // Keep the raw dragged line; don't surface a blocking error.
+            // Re-route failed (e.g. via unreachable) — undo this drag.
+            vias = previousVias
+            snapped = previousSnapped
+            isManuallyEdited = previousVias.isEmpty ? false : isManuallyEdited
         }
     }
 
@@ -197,10 +230,13 @@ final class RouteStore {
     /// commit path by nudging the middle vertex. Triggered by BRN_DEMO=edit.
     func runDemoEdit() async {
         await runDemoSnap()
-        guard var coords = snapped?.coordinates, coords.count >= 3 else { return }
+        guard let coords = snapped?.coordinates, coords.count >= 3 else { return }
         let mid = coords.count / 2
-        coords[mid].longitude -= 0.0015 // shove the middle of the line west
-        await commitEdit(coords)
+        var dragged = coords[mid]
+        dragged.longitude -= 0.0015 // shove the middle of the line west → drop a via
+        var preview = coords
+        preview[mid] = dragged
+        await reshape(to: dragged, preview: preview, movingViaIndex: nil)
     }
     #endif
 

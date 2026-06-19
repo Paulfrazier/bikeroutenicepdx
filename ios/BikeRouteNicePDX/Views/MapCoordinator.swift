@@ -33,6 +33,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     // its overlay alone so an unrelated store change can't yank the line.
     private var editCoords: [CLLocationCoordinate2D] = []
     private var editingIndex: Int?
+    private var editingViaIndex: Int? // set when the drag grabbed an existing via
     private var isEditing = false
 
     private static let vertexGrabPx: CGFloat = 22 // tap radius to grab a vertex
@@ -190,11 +191,12 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         lastScreenPoint = nil
     }
 
-    // MARK: - Hand-edit the route line (raw, no re-snapping)
+    // MARK: - Hand-edit the route line (drag → via point → clean re-route)
 
-    /// Drag the displayed route line wherever the finger goes — no /match call.
-    /// Grabbing near a vertex moves it; grabbing along a segment inserts a new
-    /// vertex there and drags that. On lift we commit the raw coordinates.
+    /// Drag the displayed route line to reshape it. Grabbing near an existing via
+    /// moves that via; grabbing anywhere else drops a new one. During the drag we
+    /// rubber-band the line for feedback; on lift the store re-routes start → vias
+    /// → end cleanly along real roads (no squiggle).
     @objc func handleEditPan(_ gesture: UIPanGestureRecognizer) {
         guard let map = mapView, let snapped = store.snapped else { return }
         let point = gesture.location(in: map)
@@ -202,9 +204,14 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         switch gesture.state {
         case .began:
             let coords = snapped.coordinates
+            // Did the touch grab an existing via? If so we'll move it; otherwise
+            // the drag will drop a new via.
+            editingViaIndex = nearestViaIndex(point, map: map)
+
             guard let hit = hitTest(point, coords: coords, map: map) else {
                 // shouldBegin should have prevented this; bail safely.
                 editingIndex = nil
+                editingViaIndex = nil
                 return
             }
             switch hit {
@@ -228,25 +235,31 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             redrawEdit(map)
 
         case .ended:
-            guard isEditing, editCoords.count >= 2 else {
+            guard isEditing, editCoords.count >= 2,
+                  let idx = editingIndex, editCoords.indices.contains(idx) else {
                 isEditing = false
                 editingIndex = nil
+                editingViaIndex = nil
                 editCoords = []
                 map.isScrollEnabled = true
                 return
             }
-            let coords = editCoords
+            let dragged = editCoords[idx]
+            let preview = editCoords
+            let viaIndex = editingViaIndex
             isEditing = false
             editingIndex = nil
+            editingViaIndex = nil
             map.isScrollEnabled = true
-            // Async re-snap: shows the raw line instantly, then tightens it onto
-            // roads. sync() rebuilds the overlay from snapped on each update.
-            Task { await store.commitEdit(coords) }
+            // Drop/move a via and re-route: shows the rubber-banded preview, then
+            // replaces it with the clean road route. sync() rebuilds on each update.
+            Task { await store.reshape(to: dragged, preview: preview, movingViaIndex: viaIndex) }
             editCoords = []
 
         case .cancelled, .failed:
             isEditing = false
             editingIndex = nil
+            editingViaIndex = nil
             editCoords = []
             map.isScrollEnabled = true
             // Rebuild the overlay from the store's untouched route.
@@ -270,6 +283,19 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     }
 
     // MARK: - Hit-testing (screen space)
+
+    /// Index of the existing via whose screen position is within grab range of
+    /// `point`, else nil. A grab near a via moves it; anywhere else drops a new one.
+    private func nearestViaIndex(_ point: CGPoint, map: MKMapView) -> Int? {
+        var best = Self.vertexGrabPx
+        var idx: Int?
+        for (i, via) in store.vias.enumerated() {
+            let p = map.convert(via, toPointTo: map)
+            let d = hypot(point.x - p.x, point.y - p.y)
+            if d <= best { best = d; idx = i }
+        }
+        return idx
+    }
 
     private enum EditHit {
         case vertex(Int)

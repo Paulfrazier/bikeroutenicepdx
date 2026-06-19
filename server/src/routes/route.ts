@@ -1,7 +1,7 @@
 /**
  * POST /route
  *
- * Body: { from: [lng, lat], to: [lng, lat] }
+ * Body: { from: [lng, lat], to: [lng, lat], via?: [lng, lat][] }
  * Response: RouteResult per API contract.
  */
 
@@ -26,6 +26,9 @@ const LngLat = z
 const RouteBody = z.object({
   from: LngLat,
   to: LngLat,
+  // Ordered pass-through waypoints for drag-to-reshape. Capped so a runaway
+  // edit can't overwhelm Valhalla.
+  via: z.array(LngLat).max(50, "too many via points").optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -46,10 +49,11 @@ app.post(
     }
   }),
   async (c) => {
-    const { from, to } = c.req.valid("json");
+    const { from, to, via } = c.req.valid("json");
 
-    // Reject if from === to (Valhalla would error anyway, but friendlier message)
-    if (from[0] === to[0] && from[1] === to[1]) {
+    // Reject if from === to with no via points (Valhalla would error anyway, but
+    // friendlier message). With vias the route is well-defined even if endpoints match.
+    if (from[0] === to[0] && from[1] === to[1] && !(via && via.length)) {
       return c.json(
         { error: "from and to must be different locations", code: "invalid_request" },
         400
@@ -57,7 +61,7 @@ app.post(
     }
 
     try {
-      const result = await getRoute(from, to);
+      const result = await getRoute(from, to, via ?? []);
       return c.json(result);
     } catch (err) {
       if (err instanceof ValhallaError) {

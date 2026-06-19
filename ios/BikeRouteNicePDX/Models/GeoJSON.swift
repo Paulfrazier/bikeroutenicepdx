@@ -10,6 +10,14 @@ struct MatchRequest: Encodable {
     let follow: Bool?
 }
 
+/// Request body for POST /route. Coordinates are [lng, lat]. `via` carries the
+/// ordered drag-to-reshape pass-through waypoints.
+struct RouteRequest: Encodable {
+    let from: [Double]
+    let to: [Double]
+    let via: [[Double]]
+}
+
 /// Response from POST /match (and /route) — a GeoJSON LineString + totals.
 struct MatchResponse: Decodable {
     struct Geometry: Decodable {

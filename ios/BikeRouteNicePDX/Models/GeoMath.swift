@@ -14,4 +14,20 @@ enum GeoMath {
         }
         return total
     }
+
+    /// Index of the vertex in `coords` closest to `target` (great-circle).
+    /// Used to order drag-to-reshape via points: since the current route passes
+    /// through existing vias in order, a new via's nearest-vertex index tells us
+    /// where in the ordered via list it belongs.
+    static func nearestIndex(of target: CLLocationCoordinate2D, in coords: [CLLocationCoordinate2D]) -> Int {
+        guard !coords.isEmpty else { return 0 }
+        let t = CLLocation(latitude: target.latitude, longitude: target.longitude)
+        var bestIndex = 0
+        var best = Double.greatestFiniteMagnitude
+        for (i, c) in coords.enumerated() {
+            let d = CLLocation(latitude: c.latitude, longitude: c.longitude).distance(from: t)
+            if d < best { best = d; bestIndex = i }
+        }
+        return bestIndex
+    }
 }

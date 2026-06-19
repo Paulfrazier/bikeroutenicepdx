@@ -98,7 +98,7 @@ struct ControlsBar: View {
                         Label(snapped.distanceLabel, systemImage: "bicycle")
                             .font(.headline)
                         Spacer()
-                        Text(store.isManuallyEdited ? "Manually edited" : "Snapped to greenways")
+                        Text(routeCaption)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -128,6 +128,20 @@ struct ControlsBar: View {
     }
 
     // MARK: - Reusable bits
+
+    /// Caption under the routed distance. Reflects whether the route has been
+    /// reshaped with drag-to-reshape via points.
+    private var routeCaption: String {
+        if store.isManuallyEdited {
+            return "Reshaping…" // re-route in flight after a drag
+        }
+        let count = store.vias.count
+        switch count {
+        case 0: return "Snapped to greenways"
+        case 1: return "Routed through 1 point"
+        default: return "Routed through \(count) points"
+        }
+    }
 
     private func hint(_ text: String) -> some View {
         Text(text)
