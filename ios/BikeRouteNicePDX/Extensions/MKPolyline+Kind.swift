@@ -7,6 +7,11 @@ final class GreenwayPolyline: MKPolyline {}
 final class RoutePolyline: MKPolyline {}
 final class DraftPolyline: MKPolyline {}
 
+/// Wide, low-alpha underlay drawn beneath the casing to fake a soft outer glow
+/// (MKPolylineRenderer has no real blur), lifting the route off the basemap so
+/// it reads as a raised ribbon regardless of the bike-network color beneath.
+final class RouteGlowPolyline: MKPolyline {}
+
 /// White underlay drawn beneath the colored route runs so the route always
 /// reads as a distinct ribbon on top of the colored bike-network overlay.
 final class RouteCasingPolyline: MKPolyline {}

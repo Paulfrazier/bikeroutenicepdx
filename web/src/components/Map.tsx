@@ -421,9 +421,24 @@ export function Map({
         type: "geojson",
         data: emptyGeojson(),
       });
+      // Soft outer glow UNDER everything route-related. A wide, blurred,
+      // semi-transparent dark line lifts the route off the basemap so it reads
+      // as a raised ribbon regardless of what bike-network color sits beneath.
+      map.addLayer({
+        id: "route-glow",
+        type: "line",
+        source: "route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#0f172a",
+          "line-width": 16,
+          "line-blur": 8,
+          "line-opacity": 0.25,
+        },
+      });
       // White casing UNDER the colored runs, so the route always reads as a
-      // distinct ribbon over the colored bike-network. Added first → painted
-      // below the tier lines, leaving a ~1.5px white halo each side.
+      // distinct ribbon over the colored bike-network. Added above the glow but
+      // below the tier lines, leaving a ~2.5px white halo each side.
       map.addLayer({
         id: "route-casing",
         type: "line",
@@ -431,7 +446,7 @@ export function Map({
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#ffffff",
-          "line-width": 9,
+          "line-width": 11,
         },
       });
       map.addLayer({
@@ -683,6 +698,17 @@ export function Map({
     (
       map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
     )?.setData(emptyGeojson());
+
+    // Fade the bike network back while a route is displayed so the route owns
+    // the foreground (its green tier is near-identical to the greenway color).
+    // Restore full opacity when the route is cleared.
+    const hasRoute = tierFeatures.features.length > 0;
+    if (map.getLayer("bike-network-solid")) {
+      map.setPaintProperty("bike-network-solid", "line-opacity", hasRoute ? 0.35 : 0.85);
+    }
+    if (map.getLayer("bike-network-shared")) {
+      map.setPaintProperty("bike-network-shared", "line-opacity", hasRoute ? 0.3 : 0.8);
+    }
   }, [tierFeatures]);
 
   // ── Server route: track coords + fit bounds (only for a fresh route) ──

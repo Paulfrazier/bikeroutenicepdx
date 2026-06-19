@@ -25,6 +25,9 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     private var routeOverlays: [MKOverlay] = []
     /// Single rubber-banded preview line shown while a hand-edit drag is live.
     private var editPreviewOverlay: RoutePolyline?
+    /// True while a route is on screen — fades the bike-network overlay back so
+    /// the route reads as the foreground (toggled in sync()/removeRouteOverlays).
+    private var networkFaded = false
 
     // Live finger-draw state (kept here, not in the store, so map moves don't
     // thrash SwiftUI's updateUIView while the finger is down).
@@ -103,11 +106,15 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
                 let isFreshRoute = nothingShown
                 removeRouteOverlays(map)
                 let tiers = buildTierOverlays(for: snapped)
-                // White casing under the colored runs so the route stays a
-                // distinct ribbon over the colored bike-network. Added first so
-                // the tier overlays paint on top of it.
+                // Glow underlay + white casing under the colored runs so the
+                // route stays a distinct, raised ribbon over the colored
+                // bike-network. Added first (glow, then casing) so the tier
+                // overlays paint on top of both.
                 var built: [MKOverlay] = []
                 if snapped.coordinates.count >= 2 {
+                    built.append(RouteGlowPolyline(
+                        coordinates: snapped.coordinates, count: snapped.coordinates.count
+                    ))
                     built.append(RouteCasingPolyline(
                         coordinates: snapped.coordinates, count: snapped.coordinates.count
                     ))
@@ -115,6 +122,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
                 built.append(contentsOf: tiers)
                 routeOverlays = built
                 map.addOverlays(built, level: .aboveLabels)
+                setNetworkFaded(true, on: map)
                 if isFreshRoute, let rect = unionRect(of: built) {
                     map.setVisibleMapRect(
                         rect,
@@ -137,6 +145,17 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         if let preview = editPreviewOverlay {
             map.removeOverlay(preview)
             editPreviewOverlay = nil
+        }
+        setNetworkFaded(false, on: map)
+    }
+
+    /// Fade (or restore) the bike-network overlay's opacity. No-ops if already in
+    /// the requested state; otherwise forces the network renderers to redraw.
+    private func setNetworkFaded(_ faded: Bool, on map: MKMapView) {
+        guard networkFaded != faded else { return }
+        networkFaded = faded
+        for overlay in map.overlays where overlay is BikeMultiPolyline {
+            map.renderer(for: overlay)?.setNeedsDisplay()
         }
     }
 
@@ -480,10 +499,19 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
     func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
         switch overlay {
+        case let polyline as RouteGlowPolyline:
+            // Wide, low-alpha underlay faking a soft outer glow (no real blur in
+            // MKPolylineRenderer) so the route lifts off the basemap.
+            let renderer = MKPolylineRenderer(polyline: polyline)
+            renderer.strokeColor = UIColor(white: 0.06, alpha: 0.22)
+            renderer.lineWidth = 16
+            renderer.lineCap = .round
+            renderer.lineJoin = .round
+            return renderer
         case let polyline as RouteCasingPolyline:
             let renderer = MKPolylineRenderer(polyline: polyline)
             renderer.strokeColor = .white
-            renderer.lineWidth = 9
+            renderer.lineWidth = 11
             renderer.lineCap = .round
             renderer.lineJoin = .round
             return renderer
@@ -511,7 +539,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             return renderer
         case let multi as BikeMultiPolyline:
             let renderer = MKMultiPolylineRenderer(multiPolyline: multi)
-            renderer.strokeColor = multi.bikeClass.color.withAlphaComponent(0.85)
+            // Fade the network back while a route is displayed so the route owns
+            // the foreground (its green tier ≈ the greenway color).
+            renderer.strokeColor = multi.bikeClass.color
+                .withAlphaComponent(networkFaded ? 0.35 : 0.85)
             renderer.lineWidth = multi.bikeClass.lineWidth
             renderer.lineCap = .round
             renderer.lineJoin = .round
