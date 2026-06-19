@@ -15,9 +15,16 @@ final class RouteStore {
     var drawnTrace: [CLLocationCoordinate2D] = []
 
     // Result
-    var snapped: SnappedRoute?
+    var snapped: SnappedRoute? {
+        didSet { routeVersion += 1 }
+    }
     var phase: RoutePhase = .idle
     var errorMessage: String?
+
+    /// Bumped on every `snapped` assignment so the map coordinator can reliably
+    /// detect a route change and rebuild its overlay — even when a re-snap
+    /// returns the same number of points as the line it replaces.
+    private(set) var routeVersion = 0
 
     /// True once the user has hand-dragged the route line, overriding the
     /// server snap. Drives the "Manually edited" caption and is reset whenever
@@ -116,12 +123,31 @@ final class RouteStore {
         drawnTrace = coordinates
     }
 
-    /// Replace the displayed route with a hand-dragged version. No server call —
-    /// the line goes exactly where the user put it and stays there.
-    func commitEdit(_ coords: [CLLocationCoordinate2D]) {
+    /// Commit a hand-dragged line. Shows the raw drag instantly for feedback, then
+    /// re-snaps it onto roads via /match so it stops being squiggly. The `follow`
+    /// flag lets the snap drift onto whatever road the user dragged toward (incl.
+    /// non-bike streets). If the match fails (e.g. dragged far off any road) the
+    /// raw line is kept — honoring the user's intent rather than erroring out.
+    func commitEdit(_ coords: [CLLocationCoordinate2D]) async {
+        // 1. Instant feedback: show the line exactly where the finger left it.
         snapped = SnappedRoute(coordinates: coords, distanceMeters: GeoMath.length(coords))
         isManuallyEdited = true
         phase = .routed
+
+        // 2. Re-snap onto roads, following the drawn path.
+        do {
+            let resnapped = try await match.snap(
+                trace: coords,
+                start: start?.coordinate,
+                end: end?.coordinate,
+                follow: true
+            )
+            guard resnapped.coordinates.count >= 2 else { return } // keep raw on empty match
+            snapped = resnapped
+            isManuallyEdited = false // it's snapped to roads now
+        } catch {
+            // Keep the raw dragged line; don't surface a blocking error.
+        }
     }
 
     func finishDrawing() async {
@@ -174,7 +200,7 @@ final class RouteStore {
         guard var coords = snapped?.coordinates, coords.count >= 3 else { return }
         let mid = coords.count / 2
         coords[mid].longitude -= 0.0015 // shove the middle of the line west
-        commitEdit(coords)
+        await commitEdit(coords)
     }
     #endif
 

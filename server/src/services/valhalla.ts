@@ -336,7 +336,7 @@ export interface MatchResult {
 
 export async function matchTrace(
   trace: [number, number][], // [lng, lat][] — the decimated finger path
-  anchors?: { from?: [number, number]; to?: [number, number] }
+  anchors?: { from?: [number, number]; to?: [number, number]; follow?: boolean }
 ): Promise<MatchResult> {
   // Pin the snapped line to the exact start/end markers when provided, so the
   // route begins/ends at the user's pins rather than the first/last drawn point.
@@ -345,20 +345,26 @@ export async function matchTrace(
   for (const [lng, lat] of trace) shape.push({ lat, lon: lng });
   if (anchors?.to) shape.push({ lat: anchors.to[1], lon: anchors.to[0] });
 
+  // Freehand draw (default): strongly prefer bike infra (use_roads 0.1), tight
+  // search radius. Hand-edit re-snap (follow=true): the user deliberately dragged
+  // the line somewhere, so raise use_roads to follow them onto whatever road is
+  // nearest (incl. arterials) and widen the search radius to honor bigger drags.
+  const follow = anchors?.follow ?? false;
+
   const body = {
     shape,
     costing: "bicycle",
     costing_options: {
       bicycle: {
         bicycle_type: "Hybrid",
-        use_roads: 0.1,
+        use_roads: follow ? 0.5 : 0.1,
         use_hills: 0.5,
       },
     },
     // map_snap loosely matches a sloppy freehand trace to the network.
     shape_match: "map_snap",
     trace_options: {
-      search_radius: 50, // meters — tolerate finger imprecision
+      search_radius: follow ? 80 : 50, // meters — tolerate finger imprecision / bigger drags
       gps_accuracy: 30,
       turn_penalty_factor: 200, // discourage zig-zag across parallel edges
       breakage_distance: 2000, // allow gaps between sparse drawn points

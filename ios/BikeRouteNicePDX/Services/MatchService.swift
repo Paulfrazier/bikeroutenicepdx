@@ -7,12 +7,14 @@ struct MatchService {
     func snap(
         trace: [CLLocationCoordinate2D],
         start: CLLocationCoordinate2D?,
-        end: CLLocationCoordinate2D?
+        end: CLLocationCoordinate2D?,
+        follow: Bool = false
     ) async throws -> SnappedRoute {
         let body = MatchRequest(
             trace: trace.map { [$0.longitude, $0.latitude] },
             start: start.map { [$0.longitude, $0.latitude] },
-            end: end.map { [$0.longitude, $0.latitude] }
+            end: end.map { [$0.longitude, $0.latitude] },
+            follow: follow ? true : nil
         )
         let response = try await APIClient.post(path: "match", body: body, as: MatchResponse.self)
         let coords = response.geometry.coordinates.compactMap { pair -> CLLocationCoordinate2D? in

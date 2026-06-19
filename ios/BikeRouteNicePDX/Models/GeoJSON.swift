@@ -5,6 +5,9 @@ struct MatchRequest: Encodable {
     let trace: [[Double]]
     let start: [Double]?
     let end: [Double]?
+    /// True for hand-edit re-snaps: the server then hugs the drawn path onto the
+    /// nearest road (incl. non-bike streets) instead of favoring greenways.
+    let follow: Bool?
 }
 
 /// Response from POST /match (and /route) — a GeoJSON LineString + totals.

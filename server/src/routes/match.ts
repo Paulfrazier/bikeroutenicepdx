@@ -5,7 +5,7 @@
  * finger-draw flow). Mirrors /route, but takes a polyline of drawn points
  * (plus optional start/end anchors) and returns the snapped route.
  *
- * Body: { trace: [[lng, lat], ...], start?: [lng, lat], end?: [lng, lat] }
+ * Body: { trace: [[lng, lat], ...], start?: [lng, lat], end?: [lng, lat], follow?: boolean }
  * Response: { geometry: LineString, distance_m, duration_s }
  */
 
@@ -36,6 +36,10 @@ const MatchBody = z.object({
     .max(2000, "trace has too many points"),
   start: LngLat.optional(),
   end: LngLat.optional(),
+  // When true (hand-edit re-snaps), match hugs the drawn path onto whatever road
+  // is nearest — including non-bike streets — instead of pulling back toward a
+  // parallel greenway. Absent/false keeps the bike-favoring freehand-draw snap.
+  follow: z.boolean().optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -56,10 +60,10 @@ app.post(
     }
   }),
   async (c) => {
-    const { trace, start, end } = c.req.valid("json");
+    const { trace, start, end, follow } = c.req.valid("json");
 
     try {
-      const result = await matchTrace(trace, { from: start, to: end });
+      const result = await matchTrace(trace, { from: start, to: end, follow });
       return c.json(result);
     } catch (err) {
       if (err instanceof ValhallaError) {

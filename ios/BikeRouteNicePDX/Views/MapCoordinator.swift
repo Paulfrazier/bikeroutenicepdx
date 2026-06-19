@@ -14,6 +14,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     private let locationManager = CLLocationManager()
     private var lastRecenterTick = 0
     private var pendingRecenter = false
+    private var lastRouteVersion = 0
 
     private var startAnnotation: MKPointAnnotation?
     private var endAnnotation: MKPointAnnotation?
@@ -74,9 +75,16 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         syncAnnotation(&endAnnotation, waypoint: store.end, title: "End", map: map)
 
         if let snapped = store.snapped {
-            let needsUpdate =
-                routeOverlay == nil || routeOverlay?.pointCount != snapped.coordinates.count
+            // Rebuild when the route identity changes (routeVersion), not just its
+            // point count — a re-snap can return the same count as the raw line it
+            // replaces, which a count check would miss.
+            let needsUpdate = routeOverlay == nil || store.routeVersion != lastRouteVersion
+            lastRouteVersion = store.routeVersion
             if needsUpdate {
+                // Only zoom-to-fit when the route first appears (fresh draw). On a
+                // hand-edit the overlay already exists — rebuild it in place without
+                // yanking the camera around after each drag.
+                let isFreshRoute = routeOverlay == nil
                 if let existing = routeOverlay { map.removeOverlay(existing) }
                 let overlay = RoutePolyline(
                     coordinates: snapped.coordinates,
@@ -84,11 +92,13 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
                 )
                 routeOverlay = overlay
                 map.addOverlay(overlay, level: .aboveLabels)
-                map.setVisibleMapRect(
-                    overlay.boundingMapRect,
-                    edgePadding: UIEdgeInsets(top: 90, left: 40, bottom: 240, right: 40),
-                    animated: true
-                )
+                if isFreshRoute {
+                    map.setVisibleMapRect(
+                        overlay.boundingMapRect,
+                        edgePadding: UIEdgeInsets(top: 90, left: 40, bottom: 240, right: 40),
+                        animated: true
+                    )
+                }
             }
         } else if let existing = routeOverlay {
             map.removeOverlay(existing)
@@ -229,7 +239,9 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             isEditing = false
             editingIndex = nil
             map.isScrollEnabled = true
-            store.commitEdit(coords) // sync() rebuilds the overlay from snapped
+            // Async re-snap: shows the raw line instantly, then tightens it onto
+            // roads. sync() rebuilds the overlay from snapped on each update.
+            Task { await store.commitEdit(coords) }
             editCoords = []
 
         case .cancelled, .failed:
