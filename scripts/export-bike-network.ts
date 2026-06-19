@@ -120,6 +120,17 @@ function trim(feature: GeoJSONFeature): GeoJSONFeature | null {
   const facility = String(feature.properties?.["Facility"] ?? "").trim();
   const cls = CLASS_MAP[facility];
   if (!cls) return null; // skip NONE / unrecognized
+  // Drop empty/degenerate geometry. A LineString needs ≥2 positions and a
+  // MultiLineString needs ≥1 non-empty part — Apple's MKGeoJSONDecoder throws
+  // `nilError` on the WHOLE collection if any single feature has empty
+  // coordinates, which silently blanks the entire iOS network overlay.
+  const coords = feature.geometry.coordinates;
+  const hasGeometry =
+    Array.isArray(coords) &&
+    (t === "LineString"
+      ? coords.length >= 2
+      : coords.some((part) => Array.isArray(part) && part.length >= 2));
+  if (!hasGeometry) return null;
   const name = feature.properties?.["SegmentName"];
   return {
     type: "Feature",
