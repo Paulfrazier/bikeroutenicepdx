@@ -26,6 +26,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: website.fairpoint.bikeroutenicepdx
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: DFG7YZ82LP
     info:
       path: BikeRouteNicePDX/Info.plist
       properties:
@@ -33,10 +34,10 @@ targets:
         CFBundleName: BikeRouteNicePDX
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        # Base URL for the snapping/search server. Default works from the
-        # simulator (shares the host's network). For a physical device, set
-        # this to your Mac's LAN IP and add it to NSExceptionDomains below.
-        APIBaseURL: "http://localhost:3000"
+        # Base URL for the snapping/search server. Production = Railway (HTTPS,
+        # works anywhere). For local dev against `npm run dev:server`, point this
+        # at your Mac's LAN IP and add an http exception under NSExceptionDomains.
+        APIBaseURL: "https://bikeroutenicepdx-production.up.railway.app"
         NSLocationWhenInUseUsageDescription: "Shows your location on the map so you can draw routes from where you are."
         NSAppTransportSecurity:
           NSExceptionDomains:
