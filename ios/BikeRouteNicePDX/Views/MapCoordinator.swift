@@ -168,6 +168,14 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             renderer.lineDashPattern = [2, 8]
             renderer.lineCap = .round
             return renderer
+        case let multi as BikeMultiPolyline:
+            let renderer = MKMultiPolylineRenderer(multiPolyline: multi)
+            renderer.strokeColor = multi.bikeClass.color.withAlphaComponent(0.85)
+            renderer.lineWidth = multi.bikeClass.lineWidth
+            renderer.lineCap = .round
+            renderer.lineJoin = .round
+            if multi.bikeClass.dashed { renderer.lineDashPattern = [3, 6] }
+            return renderer
         case let polyline as GreenwayPolyline:
             let renderer = MKPolylineRenderer(polyline: polyline)
             renderer.strokeColor = UIColor.systemGreen.withAlphaComponent(0.7)

@@ -20,13 +20,14 @@ struct MapView: UIViewRepresentable {
         let center = CLLocationCoordinate2D(latitude: 45.52, longitude: -122.67)
         map.region = MKCoordinateRegion(
             center: center,
-            span: MKCoordinateSpan(latitudeDelta: 0.16, longitudeDelta: 0.16)
+            span: MKCoordinateSpan(latitudeDelta: 0.09, longitudeDelta: 0.09)
         )
 
-        // Greenway overlay — added once.
-        let greenways = GreenwayLoader.loadOverlays()
-        if !greenways.isEmpty {
-            map.addOverlays(greenways, level: .aboveRoads)
+        // Full Portland bike network overlay — added once, one overlay per
+        // facility class (already sorted so better facilities draw on top).
+        let network = BikeNetworkLoader.loadOverlays()
+        if !network.isEmpty {
+            map.addOverlays(network, level: .aboveRoads)
         }
 
         // Tap to drop pins.

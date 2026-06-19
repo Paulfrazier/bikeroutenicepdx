@@ -9,6 +9,13 @@ struct RootView: View {
             MapView()
                 .ignoresSafeArea()
 
+            HStack {
+                Spacer()
+                LegendView()
+                    .padding(.trailing, 12)
+                    .padding(.top, 8)
+            }
+
             topBanner
 
             VStack {
@@ -34,7 +41,7 @@ struct RootView: View {
         if store.isDrawMode {
             banner(
                 icon: "hand.draw",
-                text: "Trace your route with one finger — through the green greenways."
+                text: "Trace your route with one finger — follow the colored bikeways."
             )
         } else if store.phase == .snapping {
             banner(icon: "point.topleft.down.curvedto.point.bottomright.up", text: "Snapping to the bike network…")

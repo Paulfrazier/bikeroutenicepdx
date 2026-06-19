@@ -13,6 +13,7 @@
     "fetch:osm": "tsx scripts/fetch-osm.ts",
     "build:graph": "tsx scripts/build-graph.ts",
     "export:greenways": "tsx scripts/export-greenways.ts",
+    "export:bike-network": "tsx scripts/export-bike-network.ts",
     "build:tiles": "tsx scripts/build-tiles.ts",
     "reconcile": "tsx scripts/reconcile.ts",
     "test:routes": "tsx tests/routes/run.ts",

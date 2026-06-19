@@ -1,10 +1,12 @@
 /**
  * Map.tsx — MapLibre GL map with:
  *   - Basemap: PMTiles (VITE_BASEMAP_URL) with fallback to demotiles OSM style
- *   - Greenway overlay: /greenways.geojson (thick semi-transparent green)
+ *   - Bike network overlay: /bike-network.geojson (full Portland bike network,
+ *     colored by facility class: greenway/protected/buffered/lane/path/shared)
  *   - Route line: live GeoJSON from useRoute (bold blue)
  *   - Start/end markers (green/red) placed on tap
  *   - User location dot via GeolocateControl
+ *   - Legend card (bottom-left) showing facility class colors
  *
  * Basemap fallback note:
  *   VITE_BASEMAP_URL defaults to /portland.pmtiles which is gitignored (large
@@ -146,6 +148,41 @@ function emptyGeojson(): GeoJSON.FeatureCollection {
   return { type: "FeatureCollection", features: [] };
 }
 
+// ── Bike Network Legend ───────────────────────────────────────────────────────
+
+const LEGEND_ITEMS = [
+  { cls: "protected", color: "#6D28D9", label: "Protected Bike Lane",     dashed: false },
+  { cls: "greenway",  color: "#2E9E48", label: "Neighborhood Greenway",   dashed: false },
+  { cls: "path",      color: "#B45309", label: "Off-Street Path",         dashed: false },
+  { cls: "buffered",  color: "#0891B2", label: "Buffered Bike Lane",      dashed: false },
+  { cls: "lane",      color: "#F59E0B", label: "Bike Lane",               dashed: false },
+  { cls: "shared",    color: "#9CA3AF", label: "Enhanced Shared Roadway", dashed: true  },
+] as const;
+
+function BikeNetworkLegend() {
+  return (
+    <div className="bike-legend" aria-label="Bike network legend">
+      <div className="bike-legend__title">Bike Network</div>
+      <ul className="bike-legend__list">
+        {LEGEND_ITEMS.map(({ cls, color, label, dashed }) => (
+          <li key={cls} className="bike-legend__item">
+            <span
+              className="bike-legend__swatch"
+              style={{
+                background: dashed
+                  ? `repeating-linear-gradient(to right, ${color} 0px, ${color} 5px, transparent 5px, transparent 8px)`
+                  : color,
+              }}
+              aria-hidden="true"
+            />
+            <span className="bike-legend__label">{label}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 interface MapProps {
   from: LngLat | null;
   to: LngLat | null;
@@ -192,20 +229,79 @@ export function Map({ from, to, route, onMapClick, onStepFlyTo }: MapProps) {
     );
 
     map.on("load", () => {
-      // ── Greenway overlay ────────────────────────────────────────────────
-      map.addSource("greenways", {
+      // ── Bike network overlay ─────────────────────────────────────────────
+      // Full Portland bike network colored by facility class.
+      // Two layers: shared (dashed, drawn first/bottom) + all others (solid, on top).
+      // Within the solid layer, line-sort-key controls sub-ordering so higher-quality
+      // facilities render above lower-quality ones at intersection points.
+      map.addSource("bike-network", {
         type: "geojson",
-        data: "/greenways.geojson",
+        data: "/bike-network.geojson",
       });
+
+      // Layer 1 — shared roadways only, dashed gray (drawn at bottom z-order)
       map.addLayer({
-        id: "greenways-line",
+        id: "bike-network-shared",
         type: "line",
-        source: "greenways",
-        layout: { "line-cap": "round", "line-join": "round" },
+        source: "bike-network",
+        filter: ["==", ["get", "class"], "shared"],
+        layout: { "line-cap": "butt", "line-join": "round" },
         paint: {
-          "line-color": "#16a34a",
-          "line-width": 4,
-          "line-opacity": 0.6,
+          "line-color": "#9CA3AF",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1, 16, 2.5] as any,
+          "line-dasharray": [4, 3],
+          "line-opacity": 0.8,
+        },
+      });
+
+      // Layer 2 — all non-shared classes, solid lines, color by class
+      map.addLayer({
+        id: "bike-network-solid",
+        type: "line",
+        source: "bike-network",
+        filter: ["!=", ["get", "class"], "shared"],
+        layout: {
+          "line-cap": "round",
+          "line-join": "round",
+          // Draw order within this layer: higher number = painted on top
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          "line-sort-key": ["match", ["get", "class"],
+            "lane", 2,
+            "buffered", 3,
+            "path", 4,
+            "greenway", 5,
+            "protected", 6,
+            1,
+          ] as any,
+        },
+        paint: {
+          "line-color": [
+            "match",
+            ["get", "class"],
+            "greenway",  "#2E9E48",
+            "protected", "#6D28D9",
+            "buffered",  "#0891B2",
+            "lane",      "#F59E0B",
+            "path",      "#B45309",
+            "#9CA3AF", // fallback
+          ],
+          // Zoom-responsive width: thicker for high-quality facilities
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          "line-width": [
+            "interpolate", ["linear"], ["zoom"],
+            10, ["match", ["get", "class"],
+              ["protected", "greenway", "path"], 1.5,
+              ["lane", "buffered"], 1.2,
+              1.0,
+            ],
+            16, ["match", ["get", "class"],
+              ["protected", "greenway", "path"], 5,
+              ["lane", "buffered"], 3.5,
+              2.5,
+            ],
+          ] as any,
+          "line-opacity": 0.85,
         },
       });
 
@@ -315,12 +411,15 @@ export function Map({ from, to, route, onMapClick, onStepFlyTo }: MapProps) {
   }, [onStepFlyTo]);
 
   return (
-    <div
-      ref={containerRef}
-      className="map-container"
-      role="application"
-      aria-label="Bike route map"
-    />
+    <div className="map-wrapper">
+      <div
+        ref={containerRef}
+        className="map-container"
+        role="application"
+        aria-label="Bike route map"
+      />
+      <BikeNetworkLegend />
+    </div>
   );
 }
 
