@@ -214,6 +214,11 @@ interface MapProps {
   from: LngLat | null;
   to: LngLat | null;
   route: RouteResponse | null;
+  /**
+   * Route split into one LineString feature per contiguous friendliness tier
+   * (properties.tier ∈ green|amber|red). Drives the colored route rendering.
+   */
+  tierFeatures: GeoJSON.FeatureCollection;
   onMapClick: (lngLat: LngLat) => void;
   onStepFlyTo: LngLat | null;
   /** Hand-edited route coords; when non-null these override the server route. */
@@ -226,6 +231,7 @@ export function Map({
   from,
   to,
   route,
+  tierFeatures,
   onMapClick,
   onStepFlyTo,
   editedCoords,
@@ -362,7 +368,9 @@ export function Map({
         },
       });
 
-      // ── Route line (added above greenways) ─────────────────────────────
+      // ── Route, colored by bike-friendliness tier (above the bike network) ─
+      // The "route" source holds the run-split tier FeatureCollection. Two
+      // layers render it: solid for green/amber, dashed for red.
       map.addSource("route", {
         type: "geojson",
         data: emptyGeojson(),
@@ -371,6 +379,42 @@ export function Map({
         id: "route-line",
         type: "line",
         source: "route",
+        filter: ["!=", ["get", "tier"], "red"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": [
+            "match",
+            ["get", "tier"],
+            "green", "#16A34A",
+            "amber", "#F59E0B",
+            "#DC2626",
+          ],
+          "line-width": 6,
+        },
+      });
+      map.addLayer({
+        id: "route-line-red",
+        type: "line",
+        source: "route",
+        filter: ["==", ["get", "tier"], "red"],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#DC2626",
+          "line-width": 6,
+          "line-dasharray": [2, 2],
+        },
+      });
+
+      // Transient solid line shown only during an active hand-drag (the tier
+      // classification is async, so we draw a plain line until it catches up).
+      map.addSource("route-drag", {
+        type: "geojson",
+        data: emptyGeojson(),
+      });
+      map.addLayer({
+        id: "route-drag-line",
+        type: "line",
+        source: "route-drag",
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
           "line-color": "#2563eb",
@@ -411,10 +455,12 @@ export function Map({
       const idx = dragIndexRef.current;
       if (!coords || idx < 0) return;
       coords[idx] = [e.lngLat.lng, e.lngLat.lat];
-      const src = map.getSource("route") as
+      // Draw the live line on the transient drag source (the tier source is
+      // cleared during the drag and refilled once classification completes).
+      const dsrc = map.getSource("route-drag") as
         | maplibregl.GeoJSONSource
         | undefined;
-      src?.setData(lineFeature(coords));
+      dsrc?.setData(lineFeature(coords));
       const vsrc = map.getSource("route-vertices") as
         | maplibregl.GeoJSONSource
         | undefined;
@@ -464,6 +510,15 @@ export function Map({
       }
       dragCoordsRef.current = coords;
 
+      // Hand off rendering to the transient drag source: clear the tier line
+      // (its geometry is now stale) and seed the drag line at the start coords.
+      (map.getSource("route") as maplibregl.GeoJSONSource | undefined)?.setData(
+        emptyGeojson()
+      );
+      (
+        map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
+      )?.setData(lineFeature(coords));
+
       map.on("mousemove", onMove);
       map.on("touchmove", onMove);
       map.on("mouseup", onEnd);
@@ -502,23 +557,34 @@ export function Map({
     onMapClickRef.current = onMapClick;
   });
 
-  // ── Fresh server route: draw it + fit bounds (only when not hand-edited) ──
+  // ── Colored tier route: drive the "route" source from the run-split FC ────
+  // App classifies the active coords (server route OR hand-edit) and passes the
+  // tier FeatureCollection here. Filling it also ends the transient drag draw.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
-    // While edited coords are active, the editedCoords effect owns the source.
+    const src = map.getSource("route") as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    src.setData(tierFeatures);
+    (
+      map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
+    )?.setData(emptyGeojson());
+  }, [tierFeatures]);
+
+  // ── Fresh server route: track coords + fit bounds (only when not hand-edited) ──
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    // While edited coords are active, the editedCoords effect owns the geometry.
     if (editedCoords) return;
 
-    const src = map.getSource("route") as maplibregl.GeoJSONSource | undefined;
     const vsrc = map.getSource("route-vertices") as
       | maplibregl.GeoJSONSource
       | undefined;
-    if (!src) return;
 
     if (route) {
       const coords = route.geometry.coordinates;
       displayCoordsRef.current = coords;
-      src.setData(lineFeature(coords));
       vsrc?.setData(vertexFeatures(coords));
       // Fit map to route bounds
       if (coords.length > 1) {
@@ -530,25 +596,21 @@ export function Map({
       }
     } else {
       displayCoordsRef.current = [];
-      src.setData(emptyGeojson());
       vsrc?.setData(emptyGeojson());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route]);
 
-  // ── Hand-edited coords: draw them, NO fitBounds (don't yank the viewport) ─
+  // ── Hand-edited coords: track them, NO fitBounds (don't yank the viewport) ─
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded() || !editedCoords) return;
 
-    const src = map.getSource("route") as maplibregl.GeoJSONSource | undefined;
     const vsrc = map.getSource("route-vertices") as
       | maplibregl.GeoJSONSource
       | undefined;
-    if (!src) return;
 
     displayCoordsRef.current = editedCoords;
-    src.setData(lineFeature(editedCoords));
     vsrc?.setData(vertexFeatures(editedCoords));
   }, [editedCoords]);
 

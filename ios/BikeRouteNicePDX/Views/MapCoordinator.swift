@@ -18,7 +18,11 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
     private var startAnnotation: MKPointAnnotation?
     private var endAnnotation: MKPointAnnotation?
-    private var routeOverlay: RoutePolyline?
+    /// The displayed route, one overlay per contiguous bike-friendliness tier
+    /// run (replaces the old single blue line).
+    private var routeOverlays: [MKOverlay] = []
+    /// Single rubber-banded preview line shown while a hand-edit drag is live.
+    private var editPreviewOverlay: RoutePolyline?
 
     // Live finger-draw state (kept here, not in the store, so map moves don't
     // thrash SwiftUI's updateUIView while the finger is down).
@@ -79,32 +83,77 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             // Rebuild when the route identity changes (routeVersion), not just its
             // point count — a re-snap can return the same count as the raw line it
             // replaces, which a count check would miss.
-            let needsUpdate = routeOverlay == nil || store.routeVersion != lastRouteVersion
+            let nothingShown = routeOverlays.isEmpty && editPreviewOverlay == nil
+            let needsUpdate = nothingShown || store.routeVersion != lastRouteVersion
             lastRouteVersion = store.routeVersion
             if needsUpdate {
-                // Only zoom-to-fit when the route first appears (fresh draw). On a
-                // hand-edit the overlay already exists — rebuild it in place without
-                // yanking the camera around after each drag.
-                let isFreshRoute = routeOverlay == nil
-                if let existing = routeOverlay { map.removeOverlay(existing) }
-                let overlay = RoutePolyline(
-                    coordinates: snapped.coordinates,
-                    count: snapped.coordinates.count
-                )
-                routeOverlay = overlay
-                map.addOverlay(overlay, level: .aboveLabels)
-                if isFreshRoute {
+                // Only zoom-to-fit when the route first appears (fresh route). On a
+                // hand-edit / re-route the overlay already exists — rebuild it in
+                // place without yanking the camera around after each drag.
+                let isFreshRoute = nothingShown
+                removeRouteOverlays(map)
+                let built = buildTierOverlays(for: snapped)
+                routeOverlays = built
+                map.addOverlays(built, level: .aboveLabels)
+                if isFreshRoute, let rect = unionRect(of: built) {
                     map.setVisibleMapRect(
-                        overlay.boundingMapRect,
+                        rect,
                         edgePadding: UIEdgeInsets(top: 90, left: 40, bottom: 240, right: 40),
                         animated: true
                     )
                 }
             }
-        } else if let existing = routeOverlay {
-            map.removeOverlay(existing)
-            routeOverlay = nil
+        } else if !routeOverlays.isEmpty || editPreviewOverlay != nil {
+            removeRouteOverlays(map)
         }
+    }
+
+    /// Remove all route line overlays (tier runs + any live edit preview).
+    private func removeRouteOverlays(_ map: MKMapView) {
+        if !routeOverlays.isEmpty {
+            map.removeOverlays(routeOverlays)
+            routeOverlays = []
+        }
+        if let preview = editPreviewOverlay {
+            map.removeOverlay(preview)
+            editPreviewOverlay = nil
+        }
+    }
+
+    /// Build one `RouteTierPolyline` per contiguous tier run. Falls back to a
+    /// single green line when the route hasn't been classified yet (tiers nil).
+    private func buildTierOverlays(for snapped: SnappedRoute) -> [RouteTierPolyline] {
+        let coords = snapped.coordinates
+        guard coords.count >= 2 else { return [] }
+        guard let tiers = snapped.tiers, tiers.count == coords.count - 1 else {
+            let line = RouteTierPolyline(coordinates: coords, count: coords.count)
+            line.tier = .green
+            return [line]
+        }
+
+        var overlays: [RouteTierPolyline] = []
+        var runStart = 0
+        for i in 0..<tiers.count {
+            let isLast = i == tiers.count - 1
+            if isLast || tiers[i + 1] != tiers[i] {
+                // Run spans route segments runStart...i → vertices runStart...i+1.
+                let slice = Array(coords[runStart...(i + 1)])
+                let line = RouteTierPolyline(coordinates: slice, count: slice.count)
+                line.tier = tiers[i]
+                overlays.append(line)
+                runStart = i + 1
+            }
+        }
+        return overlays
+    }
+
+    /// Bounding map rect covering all of `overlays`, or nil if empty.
+    private func unionRect(of overlays: [MKOverlay]) -> MKMapRect? {
+        guard var rect = overlays.first?.boundingMapRect else { return nil }
+        for overlay in overlays.dropFirst() {
+            rect = rect.union(overlay.boundingMapRect)
+        }
+        return rect
     }
 
     private func syncAnnotation(
@@ -263,8 +312,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             editCoords = []
             map.isScrollEnabled = true
             // Rebuild the overlay from the store's untouched route.
-            if let existing = routeOverlay { map.removeOverlay(existing) }
-            routeOverlay = nil
+            removeRouteOverlays(map)
             sync()
 
         default:
@@ -273,12 +321,13 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     }
 
     /// Live redraw of the edited line using the same remove+addOverlay idiom as
-    /// the draft. Reuses `routeOverlay` so the renderer styling is unchanged.
+    /// the draft. While dragging we drop the tier colors and show a single plain
+    /// preview line; sync() rebuilds the colored runs once the re-route lands.
     private func redrawEdit(_ map: MKMapView) {
         guard editCoords.count >= 2 else { return }
-        if let existing = routeOverlay { map.removeOverlay(existing) }
+        removeRouteOverlays(map)
         let overlay = RoutePolyline(coordinates: editCoords, count: editCoords.count)
-        routeOverlay = overlay
+        editPreviewOverlay = overlay
         map.addOverlay(overlay, level: .aboveLabels)
     }
 
@@ -383,6 +432,14 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
     func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
         switch overlay {
+        case let polyline as RouteTierPolyline:
+            let renderer = MKPolylineRenderer(polyline: polyline)
+            renderer.strokeColor = polyline.tier.color
+            renderer.lineWidth = 6
+            renderer.lineCap = .round
+            renderer.lineJoin = .round
+            if polyline.tier.dashed { renderer.lineDashPattern = [2, 10] }
+            return renderer
         case let polyline as RoutePolyline:
             let renderer = MKPolylineRenderer(polyline: polyline)
             renderer.strokeColor = .systemBlue

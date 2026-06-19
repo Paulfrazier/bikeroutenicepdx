@@ -30,6 +30,20 @@ struct LegendView: View {
                                 .foregroundStyle(.primary)
                         }
                     }
+
+                    Divider().padding(.vertical, 2)
+
+                    Text("Your route")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(routeLegendRows, id: \.label) { row in
+                        HStack(spacing: 8) {
+                            routeSwatch(color: row.color, dashed: row.dashed)
+                            Text(row.label)
+                                .font(.caption2)
+                                .foregroundStyle(.primary)
+                        }
+                    }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -38,6 +52,29 @@ struct LegendView: View {
         .padding(.vertical, 10)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+    }
+
+    /// 3-tier route color key, matching the colored route line.
+    private var routeLegendRows: [(label: String, color: UIColor, dashed: Bool)] {
+        [
+            ("Protected / Greenway / Path", FriendlyTier.green.color, false),
+            ("Bike lane / Buffered", FriendlyTier.amber.color, false),
+            ("Mixed traffic", FriendlyTier.red.color, true),
+        ]
+    }
+
+    private func routeSwatch(color: UIColor, dashed: Bool) -> some View {
+        Capsule()
+            .fill(Color(uiColor: color))
+            .frame(width: 22, height: 4)
+            .opacity(dashed ? 0.85 : 1)
+            .overlay(alignment: .center) {
+                if dashed {
+                    Capsule()
+                        .fill(Color(uiColor: .systemBackground))
+                        .frame(width: 4, height: 4)
+                }
+            }
     }
 
     private func swatch(for cls: BikeClass) -> some View {

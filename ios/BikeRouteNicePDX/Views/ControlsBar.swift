@@ -71,26 +71,16 @@ struct ControlsBar: View {
         case .settingEnd:
             hint("Now set your destination.")
         case .readyToDraw:
-            HStack(spacing: 12) {
-                clearAllButton
-                primaryButton("Draw route", icon: "hand.draw.fill") {
-                    store.enterDrawMode()
-                }
-            }
+            // Both pins are set — the route is auto-computing (debounced). Show
+            // the same working state as .snapping rather than a manual gate.
+            routingSpinner
         case .drawing:
             HStack(spacing: 12) {
                 secondaryButton("Cancel") { store.clearDraw() }
                 hint("Drag one finger from start to finish.")
             }
         case .snapping:
-            HStack(spacing: 10) {
-                ProgressView()
-                Text("Snapping to the bike network…")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+            routingSpinner
         case .routed:
             VStack(spacing: 10) {
                 if let snapped = store.snapped {
@@ -98,15 +88,21 @@ struct ControlsBar: View {
                         Label(snapped.distanceLabel, systemImage: "bicycle")
                             .font(.headline)
                         Spacer()
-                        Text(routeCaption)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if let coverage = snapped.coverage {
+                            Text("🚲 \(Int((coverage * 100).rounded()))% on bike infra")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(routeCaption)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 HStack(spacing: 12) {
                     clearAllButton
-                    primaryButton("Redraw", icon: "arrow.counterclockwise") {
-                        store.clearDraw()
+                    primaryButton("Draw", icon: "hand.draw.fill") {
+                        store.enterDrawMode()
                     }
                 }
             }
@@ -141,6 +137,17 @@ struct ControlsBar: View {
         case 1: return "Routed through 1 point"
         default: return "Routed through \(count) points"
         }
+    }
+
+    private var routingSpinner: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+            Text("Finding the friendliest route…")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
     }
 
     private func hint(_ text: String) -> some View {

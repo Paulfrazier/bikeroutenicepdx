@@ -7,6 +7,12 @@ final class GreenwayPolyline: MKPolyline {}
 final class RoutePolyline: MKPolyline {}
 final class DraftPolyline: MKPolyline {}
 
+/// One contiguous same-tier run of the routed line. The route is rendered as a
+/// sequence of these so its color tracks bike-friendliness along its length.
+final class RouteTierPolyline: MKPolyline {
+    var tier: FriendlyTier = .green
+}
+
 /// One overlay per bike-facility class — all same-class segments are bundled
 /// into a single MKMultiPolyline so the whole network renders as ~6 overlays
 /// instead of thousands. `bikeClass` drives the renderer's color/width.

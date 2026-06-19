@@ -12,3 +12,4 @@ DerivedData/
 # Xcode user state
 xcuserdata/
 *.xcworkspace/xcuserdata/
+build-sim/

@@ -47,6 +47,11 @@ final class RouteStore {
     private let router = RouteService()
     private let search = SearchService()
 
+    /// Debounce/cancel token for the auto-route. Cancelling it both aborts the
+    /// pending ~350ms delay and flags the in-flight request as stale so a late
+    /// network result can't clobber a newer route.
+    private var autoRouteTask: Task<Void, Never>?
+
     var bothPinsSet: Bool { start != nil && end != nil }
 
     // MARK: - Pins
@@ -63,6 +68,7 @@ final class RouteStore {
         vias = []
         searchResults = []
         recomputeIdlePhase()
+        scheduleAutoRoute()
     }
 
     /// Tap on the map (when not drawing): fill start, then end.
@@ -84,9 +90,62 @@ final class RouteStore {
         }
     }
 
+    // MARK: - Auto-route (web parity)
+
+    /// Web parity: the moment both pins exist (and we're not finger-drawing),
+    /// auto-compute a clean start → end route. Debounced ~350ms and cancellable
+    /// so rapidly setting both pins (e.g. search-then-search) routes only once.
+    /// Freehand draw remains available from the routed state.
+    func scheduleAutoRoute() {
+        autoRouteTask?.cancel()
+        guard bothPinsSet, !isDrawMode, let startC = start?.coordinate, let endC = end?.coordinate else {
+            return
+        }
+        // Reflect "working" immediately so the controls don't sit on a stale
+        // "Draw route" gate during the debounce window.
+        phase = .snapping
+        errorMessage = nil
+        autoRouteTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            if Task.isCancelled { return }
+            await self?.performAutoRoute(from: startC, to: endC)
+        }
+    }
+
+    private func performAutoRoute(from startC: CLLocationCoordinate2D, to endC: CLLocationCoordinate2D) async {
+        vias = []
+        isManuallyEdited = false
+        phase = .snapping
+        errorMessage = nil
+        do {
+            let routed = try await router.route(from: startC, to: endC, vias: [])
+            if Task.isCancelled { return }
+            guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
+            snapped = await classified(routed)
+            if Task.isCancelled { return }
+            phase = .routed
+        } catch {
+            if Task.isCancelled { return }
+            let message = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            errorMessage = message
+            phase = .failed(message)
+        }
+    }
+
+    /// Attach bike-friendliness tiers + coverage to a freshly computed route.
+    /// Shared by the auto-route, drag-reshape, and finger-draw success paths.
+    private func classified(_ route: SnappedRoute) async -> SnappedRoute {
+        let result = await BikeFriendliness.shared.classify(route.coordinates)
+        var enriched = route
+        enriched.tiers = result.tiers
+        enriched.coverage = result.coverage
+        return enriched
+    }
+
     // MARK: - Draw mode
 
     func enterDrawMode() {
+        autoRouteTask?.cancel()
         guard bothPinsSet else { return }
         isDrawMode = true
         drawnTrace = []
@@ -99,6 +158,7 @@ final class RouteStore {
 
     /// Clear the drawn trace + route but keep the pins; re-enter draw mode.
     func clearDraw() {
+        autoRouteTask?.cancel()
         drawnTrace = []
         snapped = nil
         isManuallyEdited = false
@@ -115,6 +175,7 @@ final class RouteStore {
 
     /// Reset everything.
     func clearAll() {
+        autoRouteTask?.cancel()
         start = nil
         end = nil
         drawnTrace = []
@@ -173,7 +234,7 @@ final class RouteStore {
         do {
             let routed = try await router.route(from: startC, to: endC, vias: vias)
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
-            snapped = routed
+            snapped = await classified(routed)
             isManuallyEdited = false // it's a clean road route now
         } catch {
             // Re-route failed (e.g. via unreachable) — undo this drag.
@@ -193,11 +254,12 @@ final class RouteStore {
         phase = .snapping
         errorMessage = nil
         do {
-            snapped = try await match.snap(
+            let result = try await match.snap(
                 trace: drawnTrace,
                 start: start?.coordinate,
                 end: end?.coordinate
             )
+            snapped = await classified(result)
             phase = .routed
         } catch {
             let message = (error as? APIError)?.errorDescription ?? error.localizedDescription

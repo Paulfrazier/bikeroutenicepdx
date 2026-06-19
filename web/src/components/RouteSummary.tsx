@@ -1,13 +1,16 @@
 /**
- * RouteSummary.tsx — pill bar: distance, duration, greenway coverage.
+ * RouteSummary.tsx — pill bar: distance, duration, bike-infra coverage.
  *
- * greenway_coverage = 0 (server v0.1 limitation) → shows "—" with tooltip.
+ * `coverage` is computed CLIENT-SIDE (see friendliness.ts) as the fraction of
+ * the route on green+amber bike facilities. Undefined while it's being
+ * classified → shows "—".
  */
 
 interface RouteSummaryProps {
   distance_m: number;
   duration_s: number;
-  greenway_coverage: number;
+  /** 0–1 fraction of the route on bike infra (green+amber). */
+  coverage?: number;
   /** Length of the hand-edited line (meters); used when manuallyEdited. */
   editedDistanceM?: number;
   /** When true, the route was dragged by hand: show distance-only, no stale stats. */
@@ -30,15 +33,38 @@ function formatDuration(s: number): string {
 export function RouteSummary({
   distance_m,
   duration_s,
-  greenway_coverage,
+  coverage,
   editedDistanceM,
   manuallyEdited = false,
 }: RouteSummaryProps) {
-  const coveragePct = Math.round(greenway_coverage * 100);
-  const coverageUnavailable = greenway_coverage === 0;
+  const coverageReady = coverage !== undefined;
+  const coveragePct = coverageReady ? Math.round(coverage * 100) : 0;
 
-  // Hand-edited mode: distance-only. Duration + greenway are stale, so hide them
-  // rather than show a wrong number.
+  const coveragePill = (
+    <span
+      className={[
+        "route-summary__pill",
+        "route-summary__pill--greenway",
+        coverageReady ? "" : "route-summary__pill--greenway-na",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      aria-label={
+        coverageReady
+          ? `${coveragePct}% on bike infrastructure`
+          : "Bike infrastructure coverage being calculated"
+      }
+    >
+      {coverageReady ? (
+        <>🚲 {coveragePct}% on bike infra</>
+      ) : (
+        <>🚲 <abbr title="Calculating bike-infrastructure coverage…">—</abbr></>
+      )}
+    </span>
+  );
+
+  // Hand-edited mode: distance-only for duration (stale), but coverage is
+  // re-classified for the edited line, so keep showing it.
   if (manuallyEdited) {
     const editedDist = editedDistanceM ?? distance_m;
     return (
@@ -46,6 +72,7 @@ export function RouteSummary({
         <span className="route-summary__pill route-summary__pill--distance">
           <span aria-label="Distance">{formatDistance(editedDist)}</span>
         </span>
+        {coveragePill}
         <span className="route-summary__note">Manually edited</span>
       </div>
     );
@@ -61,31 +88,7 @@ export function RouteSummary({
         <span aria-label="Estimated duration">{formatDuration(duration_s)}</span>
       </span>
 
-      <span
-        className={[
-          "route-summary__pill",
-          "route-summary__pill--greenway",
-          coverageUnavailable ? "route-summary__pill--greenway-na" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-        aria-label={
-          coverageUnavailable
-            ? "Greenway coverage not yet available"
-            : `${coveragePct}% greenway`
-        }
-        title={
-          coverageUnavailable
-            ? "Greenway coverage calculation is a v1.0 feature."
-            : undefined
-        }
-      >
-        {coverageUnavailable ? (
-          <>🌳 <abbr title="Greenway coverage not yet available in v0.1">—</abbr></>
-        ) : (
-          <>🌳 {coveragePct}% greenway</>
-        )}
-      </span>
+      {coveragePill}
     </div>
   );
 }

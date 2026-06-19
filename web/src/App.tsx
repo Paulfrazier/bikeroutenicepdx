@@ -13,6 +13,8 @@ import { EndpointInputs } from "./components/EndpointInputs";
 import { RouteSummary } from "./components/RouteSummary";
 import { DirectionsPanel } from "./components/DirectionsPanel";
 import { useRoute } from "./hooks/useRoute";
+import { useFriendliness } from "./hooks/useFriendliness";
+import { toTierFeatureCollection } from "./friendliness";
 import { haversineLength } from "./geo";
 import type { LngLat } from "./types";
 
@@ -38,6 +40,22 @@ export default function App() {
     [editedCoords]
   );
   const manuallyEdited = editedCoords !== null;
+
+  // ── Bike-friendliness classification (client-side) ────────────────────────
+  // Classify the currently-displayed coords — the hand-edited line if present,
+  // otherwise the server route geometry — so tiers + coverage update on edit.
+  const activeCoords = useMemo<LngLat[] | null>(
+    () => editedCoords ?? route?.geometry.coordinates ?? null,
+    [editedCoords, route]
+  );
+  const friendliness = useFriendliness(activeCoords);
+  const tierFeatures = useMemo(
+    () =>
+      activeCoords && friendliness
+        ? toTierFeatureCollection(activeCoords, friendliness.tiers)
+        : ({ type: "FeatureCollection", features: [] } as GeoJSON.FeatureCollection),
+    [activeCoords, friendliness]
+  );
 
   // ── Map interaction ────────────────────────────────────────────────────────
   const clickCount = useRef(0);
@@ -130,7 +148,7 @@ export default function App() {
             <RouteSummary
               distance_m={route.distance_m}
               duration_s={route.duration_s}
-              greenway_coverage={route.greenway_coverage}
+              coverage={friendliness?.coverage}
               editedDistanceM={editedDistanceM ?? undefined}
               manuallyEdited={manuallyEdited}
             />
@@ -158,6 +176,7 @@ export default function App() {
           from={from}
           to={to}
           route={route}
+          tierFeatures={tierFeatures}
           onMapClick={handleMapClick}
           onStepFlyTo={flyTo}
           editedCoords={editedCoords}
@@ -188,7 +207,7 @@ export default function App() {
               <RouteSummary
                 distance_m={route.distance_m}
                 duration_s={route.duration_s}
-                greenway_coverage={route.greenway_coverage}
+                coverage={friendliness?.coverage}
                 editedDistanceM={editedDistanceM ?? undefined}
                 manuallyEdited={manuallyEdited}
               />
