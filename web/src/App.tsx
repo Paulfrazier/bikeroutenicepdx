@@ -7,12 +7,13 @@
  * State lives here and is passed down; no context needed at this scale.
  */
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Map, useMapClickHandler } from "./components/Map";
 import { EndpointInputs } from "./components/EndpointInputs";
 import { RouteSummary } from "./components/RouteSummary";
 import { DirectionsPanel } from "./components/DirectionsPanel";
 import { useRoute } from "./hooks/useRoute";
+import { haversineLength } from "./geo";
 import type { LngLat } from "./types";
 
 export default function App() {
@@ -24,6 +25,19 @@ export default function App() {
 
   // ── Route ──────────────────────────────────────────────────────────────────
   const { route, loading: routeLoading, error: routeError } = useRoute(from, to);
+
+  // ── Hand-edited route ────────────────────────────────────────────────────
+  // When the user drags the line, edited coords override the server geometry.
+  // A new server route clears any edits.
+  const [editedCoords, setEditedCoords] = useState<LngLat[] | null>(null);
+  useEffect(() => {
+    setEditedCoords(null);
+  }, [route]);
+  const editedDistanceM = useMemo(
+    () => (editedCoords ? haversineLength(editedCoords) : null),
+    [editedCoords]
+  );
+  const manuallyEdited = editedCoords !== null;
 
   // ── Map interaction ────────────────────────────────────────────────────────
   const clickCount = useRef(0);
@@ -117,11 +131,16 @@ export default function App() {
               distance_m={route.distance_m}
               duration_s={route.duration_s}
               greenway_coverage={route.greenway_coverage}
+              editedDistanceM={editedDistanceM ?? undefined}
+              manuallyEdited={manuallyEdited}
             />
-            <DirectionsPanel
-              steps={route.steps}
-              onStepClick={handleStepClick}
-            />
+            {/* Steps are stale once the line is hand-edited; hide them. */}
+            {!manuallyEdited && (
+              <DirectionsPanel
+                steps={route.steps}
+                onStepClick={handleStepClick}
+              />
+            )}
           </div>
         )}
 
@@ -141,6 +160,8 @@ export default function App() {
           route={route}
           onMapClick={handleMapClick}
           onStepFlyTo={flyTo}
+          editedCoords={editedCoords}
+          onRouteEdit={setEditedCoords}
         />
 
         {/* ── Mobile bottom drawer ── */}
@@ -168,8 +189,10 @@ export default function App() {
                 distance_m={route.distance_m}
                 duration_s={route.duration_s}
                 greenway_coverage={route.greenway_coverage}
+                editedDistanceM={editedDistanceM ?? undefined}
+                manuallyEdited={manuallyEdited}
               />
-              {drawerExpanded && (
+              {drawerExpanded && !manuallyEdited && (
                 <DirectionsPanel
                   steps={route.steps}
                   onStepClick={handleStepClick}

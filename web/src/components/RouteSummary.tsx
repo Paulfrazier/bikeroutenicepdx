@@ -8,6 +8,10 @@ interface RouteSummaryProps {
   distance_m: number;
   duration_s: number;
   greenway_coverage: number;
+  /** Length of the hand-edited line (meters); used when manuallyEdited. */
+  editedDistanceM?: number;
+  /** When true, the route was dragged by hand: show distance-only, no stale stats. */
+  manuallyEdited?: boolean;
 }
 
 function formatDistance(m: number): string {
@@ -27,9 +31,25 @@ export function RouteSummary({
   distance_m,
   duration_s,
   greenway_coverage,
+  editedDistanceM,
+  manuallyEdited = false,
 }: RouteSummaryProps) {
   const coveragePct = Math.round(greenway_coverage * 100);
   const coverageUnavailable = greenway_coverage === 0;
+
+  // Hand-edited mode: distance-only. Duration + greenway are stale, so hide them
+  // rather than show a wrong number.
+  if (manuallyEdited) {
+    const editedDist = editedDistanceM ?? distance_m;
+    return (
+      <div className="route-summary" role="region" aria-label="Route summary">
+        <span className="route-summary__pill route-summary__pill--distance">
+          <span aria-label="Distance">{formatDistance(editedDist)}</span>
+        </span>
+        <span className="route-summary__note">Manually edited</span>
+      </div>
+    );
+  }
 
   return (
     <div className="route-summary" role="region" aria-label="Route summary">

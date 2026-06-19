@@ -471,6 +471,14 @@ button {
   opacity: 0.65;
 }
 
+.route-summary__note {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--color-text-muted, #64748b);
+}
+
 /* ── Directions panel ──────────────────────────────────────────────────────── */
 .directions-panel {
   list-style: none;

@@ -35,8 +35,10 @@ struct RootView: View {
         }
         .task {
             #if DEBUG
-            if ProcessInfo.processInfo.environment["BRN_DEMO"] == "1" {
-                await store.runDemoSnap()
+            switch ProcessInfo.processInfo.environment["BRN_DEMO"] {
+            case "1": await store.runDemoSnap()
+            case "edit": await store.runDemoEdit()
+            default: break
             }
             #endif
         }

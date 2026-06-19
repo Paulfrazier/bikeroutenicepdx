@@ -19,6 +19,11 @@ final class RouteStore {
     var phase: RoutePhase = .idle
     var errorMessage: String?
 
+    /// True once the user has hand-dragged the route line, overriding the
+    /// server snap. Drives the "Manually edited" caption and is reset whenever
+    /// a fresh route is started.
+    var isManuallyEdited = false
+
     // Search
     var searchResults: [SearchResult] = []
 
@@ -42,6 +47,7 @@ final class RouteStore {
         }
         // Changing a pin invalidates any existing route.
         snapped = nil
+        isManuallyEdited = false
         searchResults = []
         recomputeIdlePhase()
     }
@@ -72,6 +78,7 @@ final class RouteStore {
         isDrawMode = true
         drawnTrace = []
         snapped = nil
+        isManuallyEdited = false
         errorMessage = nil
         phase = .drawing
     }
@@ -80,6 +87,7 @@ final class RouteStore {
     func clearDraw() {
         drawnTrace = []
         snapped = nil
+        isManuallyEdited = false
         errorMessage = nil
         if bothPinsSet {
             isDrawMode = true
@@ -96,6 +104,7 @@ final class RouteStore {
         end = nil
         drawnTrace = []
         snapped = nil
+        isManuallyEdited = false
         searchResults = []
         errorMessage = nil
         isDrawMode = false
@@ -105,6 +114,14 @@ final class RouteStore {
     /// Called by the map coordinator when the finger lifts.
     func commitTrace(_ coordinates: [CLLocationCoordinate2D]) {
         drawnTrace = coordinates
+    }
+
+    /// Replace the displayed route with a hand-dragged version. No server call —
+    /// the line goes exactly where the user put it and stays there.
+    func commitEdit(_ coords: [CLLocationCoordinate2D]) {
+        snapped = SnappedRoute(coordinates: coords, distanceMeters: GeoMath.length(coords))
+        isManuallyEdited = true
+        phase = .routed
     }
 
     func finishDrawing() async {
@@ -148,6 +165,16 @@ final class RouteStore {
             CLLocationCoordinate2D(latitude: 45.5500, longitude: -122.6492),
         ]
         await finishDrawing()
+    }
+
+    /// Verification hook: run the demo snap, then exercise the manual-edit
+    /// commit path by nudging the middle vertex. Triggered by BRN_DEMO=edit.
+    func runDemoEdit() async {
+        await runDemoSnap()
+        guard var coords = snapped?.coordinates, coords.count >= 3 else { return }
+        let mid = coords.count / 2
+        coords[mid].longitude -= 0.0015 // shove the middle of the line west
+        commitEdit(coords)
     }
     #endif
 

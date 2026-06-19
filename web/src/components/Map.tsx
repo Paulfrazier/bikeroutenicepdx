@@ -26,6 +26,7 @@ import maplibregl, {
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { LngLat, RouteResponse } from "../types";
+import { hitTestRoute, type Px } from "../geo";
 
 // Protocol handler for PMTiles (lazy-import to keep bundle splittable)
 let pmtilesProtocolAdded = false;
@@ -148,6 +149,27 @@ function emptyGeojson(): GeoJSON.FeatureCollection {
   return { type: "FeatureCollection", features: [] };
 }
 
+/** A single LineString feature from lng/lat coords (for the "route" source). */
+function lineFeature(coords: LngLat[]): GeoJSON.Feature {
+  return {
+    type: "Feature",
+    geometry: { type: "LineString", coordinates: coords },
+    properties: {},
+  };
+}
+
+/** Point features for each vertex (for the "route-vertices" grab-dot layer). */
+function vertexFeatures(coords: LngLat[]): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: coords.map((c) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: c },
+      properties: {},
+    })),
+  };
+}
+
 // ── Bike Network Legend ───────────────────────────────────────────────────────
 
 const LEGEND_ITEMS = [
@@ -189,13 +211,39 @@ interface MapProps {
   route: RouteResponse | null;
   onMapClick: (lngLat: LngLat) => void;
   onStepFlyTo: LngLat | null;
+  /** Hand-edited route coords; when non-null these override the server route. */
+  editedCoords: LngLat[] | null;
+  /** Commit a hand-drag edit back up to App. */
+  onRouteEdit: (coords: LngLat[]) => void;
 }
 
-export function Map({ from, to, route, onMapClick, onStepFlyTo }: MapProps) {
+export function Map({
+  from,
+  to,
+  route,
+  onMapClick,
+  onStepFlyTo,
+  editedCoords,
+  onRouteEdit,
+}: MapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
   const fromMarkerRef = useRef<Marker | null>(null);
   const toMarkerRef = useRef<Marker | null>(null);
+
+  // ── Live-drag state (kept in refs; bypasses React for 60fps smoothness) ──
+  // The coords currently displayed, so a mousedown can hit-test without React.
+  const displayCoordsRef = useRef<LngLat[]>([]);
+  // Working copy mutated during an active drag.
+  const dragCoordsRef = useRef<LngLat[] | null>(null);
+  const dragIndexRef = useRef<number>(-1);
+  // Set true on drag-end so the synthetic "click" that follows doesn't drop a pin.
+  const suppressClickRef = useRef(false);
+  // onRouteEdit can change identity; read it through a ref from map listeners.
+  const onRouteEditRef = useRef(onRouteEdit);
+  useEffect(() => {
+    onRouteEditRef.current = onRouteEdit;
+  });
 
   // ── Initialize map ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -320,14 +368,119 @@ export function Map({ from, to, route, onMapClick, onStepFlyTo }: MapProps) {
           "line-width": 6,
         },
       });
+
+      // ── Grab-dot vertices (drawn above the route line) ───────────────────
+      // Small white dots mark each editable vertex, hinting the line is draggable.
+      map.addSource("route-vertices", {
+        type: "geojson",
+        data: emptyGeojson(),
+      });
+      map.addLayer({
+        id: "route-vertices",
+        type: "circle",
+        source: "route-vertices",
+        paint: {
+          "circle-radius": 5,
+          "circle-color": "#ffffff",
+          "circle-stroke-color": "#2563eb",
+          "circle-stroke-width": 2,
+        },
+      });
     });
+
+    // ── Drag the route line raw (no re-snap, no server call) ──────────────
+    const getDisplayPixels = (): Px[] =>
+      displayCoordsRef.current.map((c) => {
+        const p = map.project(c as LngLatLike);
+        return { x: p.x, y: p.y };
+      });
+
+    const onMove = (
+      e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
+    ) => {
+      const coords = dragCoordsRef.current;
+      const idx = dragIndexRef.current;
+      if (!coords || idx < 0) return;
+      coords[idx] = [e.lngLat.lng, e.lngLat.lat];
+      const src = map.getSource("route") as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      src?.setData(lineFeature(coords));
+      const vsrc = map.getSource("route-vertices") as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      vsrc?.setData(vertexFeatures(coords));
+    };
+
+    const onEnd = () => {
+      map.off("mousemove", onMove);
+      map.off("touchmove", onMove);
+      map.off("mouseup", onEnd);
+      map.off("touchend", onEnd);
+      map.dragPan.enable();
+      const coords = dragCoordsRef.current;
+      dragCoordsRef.current = null;
+      dragIndexRef.current = -1;
+      if (coords) {
+        // Suppress the click that fires right after a drag-release.
+        suppressClickRef.current = true;
+        displayCoordsRef.current = coords;
+        onRouteEditRef.current(coords);
+      }
+    };
+
+    const onDown = (
+      e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
+    ) => {
+      if (displayCoordsRef.current.length < 2) return;
+      const hit = hitTestRoute(
+        { x: e.point.x, y: e.point.y },
+        getDisplayPixels()
+      );
+      if (!hit) return; // not on the line — let MapLibre pan normally
+
+      e.preventDefault();
+      map.dragPan.disable();
+
+      const coords = displayCoordsRef.current.map(
+        (c) => [c[0], c[1]] as LngLat
+      );
+      if (hit.type === "segment") {
+        // Insert a fresh vertex at the pointer and start dragging it.
+        const ll = map.unproject([hit.point.x, hit.point.y]);
+        coords.splice(hit.index + 1, 0, [ll.lng, ll.lat]);
+        dragIndexRef.current = hit.index + 1;
+      } else {
+        dragIndexRef.current = hit.index;
+      }
+      dragCoordsRef.current = coords;
+
+      map.on("mousemove", onMove);
+      map.on("touchmove", onMove);
+      map.on("mouseup", onEnd);
+      map.on("touchend", onEnd);
+    };
+
+    map.on("mousedown", onDown);
+    map.on("touchstart", onDown);
 
     // ── Tap to set markers ─────────────────────────────────────────────
     map.on("click", (e) => {
-      onMapClick([e.lngLat.lng, e.lngLat.lat]);
+      if (suppressClickRef.current) {
+        // This click is the tail of a route drag — swallow it.
+        suppressClickRef.current = false;
+        return;
+      }
+      onMapClickRef.current([e.lngLat.lng, e.lngLat.lat]);
     });
 
     return () => {
+      // Make sure a drag-in-progress can't leave the map unpannable.
+      map.off("mousemove", onMove);
+      map.off("touchmove", onMove);
+      map.off("mouseup", onEnd);
+      map.off("touchend", onEnd);
+      map.dragPan.enable();
       map.remove();
       mapRef.current = null;
     };
@@ -340,22 +493,25 @@ export function Map({ from, to, route, onMapClick, onStepFlyTo }: MapProps) {
     onMapClickRef.current = onMapClick;
   });
 
-  // ── Update route line source ─────────────────────────────────────────────
+  // ── Fresh server route: draw it + fit bounds (only when not hand-edited) ──
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
+    // While edited coords are active, the editedCoords effect owns the source.
+    if (editedCoords) return;
 
     const src = map.getSource("route") as maplibregl.GeoJSONSource | undefined;
+    const vsrc = map.getSource("route-vertices") as
+      | maplibregl.GeoJSONSource
+      | undefined;
     if (!src) return;
 
     if (route) {
-      src.setData({
-        type: "Feature",
-        geometry: route.geometry,
-        properties: {},
-      });
-      // Fit map to route bounds
       const coords = route.geometry.coordinates;
+      displayCoordsRef.current = coords;
+      src.setData(lineFeature(coords));
+      vsrc?.setData(vertexFeatures(coords));
+      // Fit map to route bounds
       if (coords.length > 1) {
         const bounds = coords.reduce(
           (b, c) => b.extend(c as LngLatLike),
@@ -364,9 +520,28 @@ export function Map({ from, to, route, onMapClick, onStepFlyTo }: MapProps) {
         map.fitBounds(bounds, { padding: 60, maxZoom: 16 });
       }
     } else {
+      displayCoordsRef.current = [];
       src.setData(emptyGeojson());
+      vsrc?.setData(emptyGeojson());
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route]);
+
+  // ── Hand-edited coords: draw them, NO fitBounds (don't yank the viewport) ─
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded() || !editedCoords) return;
+
+    const src = map.getSource("route") as maplibregl.GeoJSONSource | undefined;
+    const vsrc = map.getSource("route-vertices") as
+      | maplibregl.GeoJSONSource
+      | undefined;
+    if (!src) return;
+
+    displayCoordsRef.current = editedCoords;
+    src.setData(lineFeature(editedCoords));
+    vsrc?.setData(vertexFeatures(editedCoords));
+  }, [editedCoords]);
 
   // ── Sync from marker ─────────────────────────────────────────────────────
   useEffect(() => {

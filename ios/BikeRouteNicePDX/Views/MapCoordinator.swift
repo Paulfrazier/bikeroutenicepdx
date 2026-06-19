@@ -9,6 +9,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     weak var mapView: MKMapView?
     var tapGesture: UITapGestureRecognizer?
     var panGesture: UIPanGestureRecognizer?
+    var editPanGesture: UIPanGestureRecognizer?
 
     private let locationManager = CLLocationManager()
     private var lastRecenterTick = 0
@@ -26,6 +27,16 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
     private static let minScreenStep: CGFloat = 8 // points between captured samples
 
+    // Live hand-edit state (also kept here, not in the store, so a drag doesn't
+    // thrash updateUIView). While `isEditing` is true sync() leaves the map and
+    // its overlay alone so an unrelated store change can't yank the line.
+    private var editCoords: [CLLocationCoordinate2D] = []
+    private var editingIndex: Int?
+    private var isEditing = false
+
+    private static let vertexGrabPx: CGFloat = 22 // tap radius to grab a vertex
+    private static let lineGrabPx: CGFloat = 16   // tap radius to grab a segment
+
     init(store: RouteStore) {
         self.store = store
     }
@@ -34,6 +45,11 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
     func sync() {
         guard let map = mapView else { return }
+
+        // An active hand-edit drag owns the map and the overlay — don't let an
+        // unrelated store change re-run reconcile, rebuild the line, or flip the
+        // scroll lock back on mid-drag.
+        if isEditing { return }
 
         // Recenter on the user when the store's tick advances (locate button).
         if store.recenterTick != lastRecenterTick {
@@ -49,6 +65,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         map.isPitchEnabled = !drawing
         panGesture?.isEnabled = drawing
         tapGesture?.isEnabled = !drawing
+
+        // Hand-edit pan is live only when a finished route is on screen and we're
+        // not drawing. shouldBegin further gates it to touches that land on the line.
+        editPanGesture?.isEnabled = (store.snapped != nil && !drawing)
 
         syncAnnotation(&startAnnotation, waypoint: store.start, title: "Start", map: map)
         syncAnnotation(&endAnnotation, waypoint: store.end, title: "End", map: map)
@@ -160,6 +180,135 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         lastScreenPoint = nil
     }
 
+    // MARK: - Hand-edit the route line (raw, no re-snapping)
+
+    /// Drag the displayed route line wherever the finger goes — no /match call.
+    /// Grabbing near a vertex moves it; grabbing along a segment inserts a new
+    /// vertex there and drags that. On lift we commit the raw coordinates.
+    @objc func handleEditPan(_ gesture: UIPanGestureRecognizer) {
+        guard let map = mapView, let snapped = store.snapped else { return }
+        let point = gesture.location(in: map)
+
+        switch gesture.state {
+        case .began:
+            let coords = snapped.coordinates
+            guard let hit = hitTest(point, coords: coords, map: map) else {
+                // shouldBegin should have prevented this; bail safely.
+                editingIndex = nil
+                return
+            }
+            switch hit {
+            case .vertex(let index):
+                editCoords = coords
+                editingIndex = index
+            case .segment(let segIndex):
+                editCoords = coords
+                let inserted = map.convert(point, toCoordinateFrom: map)
+                let newIndex = segIndex + 1
+                editCoords.insert(inserted, at: newIndex)
+                editingIndex = newIndex
+            }
+            isEditing = true
+            map.isScrollEnabled = false
+            redrawEdit(map)
+
+        case .changed:
+            guard isEditing, let idx = editingIndex, idx < editCoords.count else { return }
+            editCoords[idx] = map.convert(point, toCoordinateFrom: map)
+            redrawEdit(map)
+
+        case .ended:
+            guard isEditing, editCoords.count >= 2 else {
+                isEditing = false
+                editingIndex = nil
+                editCoords = []
+                map.isScrollEnabled = true
+                return
+            }
+            let coords = editCoords
+            isEditing = false
+            editingIndex = nil
+            map.isScrollEnabled = true
+            store.commitEdit(coords) // sync() rebuilds the overlay from snapped
+            editCoords = []
+
+        case .cancelled, .failed:
+            isEditing = false
+            editingIndex = nil
+            editCoords = []
+            map.isScrollEnabled = true
+            // Rebuild the overlay from the store's untouched route.
+            if let existing = routeOverlay { map.removeOverlay(existing) }
+            routeOverlay = nil
+            sync()
+
+        default:
+            break
+        }
+    }
+
+    /// Live redraw of the edited line using the same remove+addOverlay idiom as
+    /// the draft. Reuses `routeOverlay` so the renderer styling is unchanged.
+    private func redrawEdit(_ map: MKMapView) {
+        guard editCoords.count >= 2 else { return }
+        if let existing = routeOverlay { map.removeOverlay(existing) }
+        let overlay = RoutePolyline(coordinates: editCoords, count: editCoords.count)
+        routeOverlay = overlay
+        map.addOverlay(overlay, level: .aboveLabels)
+    }
+
+    // MARK: - Hit-testing (screen space)
+
+    private enum EditHit {
+        case vertex(Int)
+        case segment(Int) // index of the segment's first coordinate
+    }
+
+    /// Decide what (if anything) the touch grabbed: prefer a nearby vertex, then
+    /// a nearby segment. Returns nil when the touch is too far from the line.
+    private func hitTest(_ point: CGPoint, coords: [CLLocationCoordinate2D], map: MKMapView) -> EditHit? {
+        guard coords.count >= 2 else { return nil }
+        let screen = coords.map { map.convert($0, toPointTo: map) }
+
+        // Nearest vertex first.
+        var bestVertex = CGFloat.greatestFiniteMagnitude
+        var bestVertexIndex = 0
+        for (i, p) in screen.enumerated() {
+            let d = hypot(point.x - p.x, point.y - p.y)
+            if d < bestVertex { bestVertex = d; bestVertexIndex = i }
+        }
+        if bestVertex <= Self.vertexGrabPx {
+            return .vertex(bestVertexIndex)
+        }
+
+        // Otherwise nearest segment.
+        var bestSeg = CGFloat.greatestFiniteMagnitude
+        var bestSegIndex = 0
+        for i in 0..<(screen.count - 1) {
+            let d = pointToSegmentDistance(point, screen[i], screen[i + 1])
+            if d < bestSeg { bestSeg = d; bestSegIndex = i }
+        }
+        if bestSeg <= Self.lineGrabPx {
+            return .segment(bestSegIndex)
+        }
+        return nil
+    }
+
+    /// Shortest distance, in screen points, from `p` to whichever was closest of
+    /// the route's vertices or segments. Used by gestureRecognizerShouldBegin.
+    private func nearestLineDistance(_ p: CGPoint, coords: [CLLocationCoordinate2D], map: MKMapView) -> CGFloat {
+        guard coords.count >= 2 else { return .greatestFiniteMagnitude }
+        let screen = coords.map { map.convert($0, toPointTo: map) }
+        var best = CGFloat.greatestFiniteMagnitude
+        for pt in screen {
+            best = min(best, hypot(p.x - pt.x, p.y - pt.y))
+        }
+        for i in 0..<(screen.count - 1) {
+            best = min(best, pointToSegmentDistance(p, screen[i], screen[i + 1]))
+        }
+        return best
+    }
+
     // MARK: - Location
 
     /// Ask for when-in-use permission. Showing the blue dot requires this —
@@ -257,4 +406,31 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     ) -> Bool {
         true
     }
+
+    /// Only let the edit-pan begin when the touch lands on the route line; this
+    /// gives it priority over the map's own pan there, while letting the map
+    /// scroll normally everywhere else. Other gestures begin as usual.
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === editPanGesture else { return true }
+        guard let map = mapView, let coords = store.snapped?.coordinates, !store.isDrawMode else {
+            return false
+        }
+        let point = gestureRecognizer.location(in: map)
+        let grab = max(Self.vertexGrabPx, Self.lineGrabPx)
+        return nearestLineDistance(point, coords: coords, map: map) <= grab
+    }
+}
+
+/// Shortest distance from point `p` to the line segment `a`–`b`, in the same
+/// (screen) coordinate space. Free function — pure CGPoint math.
+private func pointToSegmentDistance(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
+    let dx = b.x - a.x
+    let dy = b.y - a.y
+    let lenSq = dx * dx + dy * dy
+    if lenSq == 0 { return hypot(p.x - a.x, p.y - a.y) }
+    var t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq
+    t = max(0, min(1, t))
+    let projX = a.x + t * dx
+    let projY = a.y + t * dy
+    return hypot(p.x - projX, p.y - projY)
 }

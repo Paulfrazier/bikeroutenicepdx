@@ -25,3 +25,4 @@ web/public/*.pmtiles
 
 # Test harness output
 tests/results/
+.gstack/

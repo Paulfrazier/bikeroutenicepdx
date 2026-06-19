@@ -98,7 +98,7 @@ struct ControlsBar: View {
                         Label(snapped.distanceLabel, systemImage: "bicycle")
                             .font(.headline)
                         Spacer()
-                        Text("Snapped to greenways")
+                        Text(store.isManuallyEdited ? "Manually edited" : "Snapped to greenways")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

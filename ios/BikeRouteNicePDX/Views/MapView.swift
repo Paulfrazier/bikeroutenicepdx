@@ -54,6 +54,19 @@ struct MapView: UIViewRepresentable {
         map.addGestureRecognizer(pan)
         context.coordinator.panGesture = pan
 
+        // Pan to hand-edit an existing route line — enabled by sync() only when
+        // a route exists and we're not drawing. gestureRecognizerShouldBegin
+        // gates it so it only grabs the touch when it starts on the line.
+        let editPan = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(MapCoordinator.handleEditPan(_:))
+        )
+        editPan.maximumNumberOfTouches = 1
+        editPan.delegate = context.coordinator
+        editPan.isEnabled = false
+        map.addGestureRecognizer(editPan)
+        context.coordinator.editPanGesture = editPan
+
         context.coordinator.mapView = map
         return map
     }
