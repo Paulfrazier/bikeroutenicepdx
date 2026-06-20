@@ -183,6 +183,11 @@ button {
   flex-shrink: 0;
 }
 
+.side-panel__footer small {
+  display: block;
+  line-height: 1.5;
+}
+
 /* ── Map area ──────────────────────────────────────────────────────────────── */
 .map-area {
   position: relative;

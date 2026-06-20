@@ -324,6 +324,10 @@ export default function App() {
             Route data: <a href="https://openstreetmap.org" target="_blank" rel="noopener noreferrer">OSM</a> (ODbL) ·{" "}
             <a href="https://www.portland.gov/transportation" target="_blank" rel="noopener noreferrer">PBOT</a>
           </small>
+          <small>
+            <a href="/privacy.html" target="_blank" rel="noopener noreferrer">Privacy</a> ·{" "}
+            <a href="/terms.html" target="_blank" rel="noopener noreferrer">Terms</a> · Ride at your own risk
+          </small>
         </footer>
       </aside>
 
