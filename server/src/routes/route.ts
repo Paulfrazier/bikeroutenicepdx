@@ -8,7 +8,8 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { getRoute, ValhallaError } from "../services/valhalla.js";
+import { ValhallaError } from "../services/valhalla.js";
+import { getRouteBrouter } from "../services/brouter.js";
 
 const app = new Hono();
 
@@ -63,7 +64,7 @@ app.post(
     }
 
     try {
-      const result = await getRoute(from, to, via ?? [], preference ?? "comfort");
+      const result = await getRouteBrouter(from, to, via ?? [], preference ?? "comfort");
       return c.json(result);
     } catch (err) {
       if (err instanceof ValhallaError) {
