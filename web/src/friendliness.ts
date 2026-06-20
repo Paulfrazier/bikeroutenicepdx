@@ -204,7 +204,7 @@ export function loadNetworkIndex(
  */
 export function snapToNetwork(
   target: LngLat,
-  maxMeters = 60
+  maxMeters = 20
 ): LngLat | null {
   const grid = resolvedGrid;
   if (!grid) {

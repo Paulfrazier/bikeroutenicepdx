@@ -1,6 +1,22 @@
 import SwiftUI
 import CoreLocation
 
+/// A drag-to-reshape waypoint. Unlike the bare coordinate sent to the server it
+/// carries a stable `id` (so re-routes never reorder/lose it) and a `precise`
+/// flag: precise waypoints are pinned exactly where dropped (never snapped to
+/// the network) so the user can force the route through an exact point.
+struct Via: Identifiable {
+    let id: UUID
+    var coordinate: CLLocationCoordinate2D
+    var precise: Bool
+
+    init(id: UUID = UUID(), coordinate: CLLocationCoordinate2D, precise: Bool = false) {
+        self.id = id
+        self.coordinate = coordinate
+        self.precise = precise
+    }
+}
+
 /// Greenway-vs-speed preference for routing. Maps to the server's `use_roads`.
 enum RoutePreference: String, CaseIterable, Identifiable {
     case comfort, balanced, fast
@@ -42,13 +58,13 @@ final class RouteStore {
     var isDrawMode = false
     var drawnTrace: [CLLocationCoordinate2D] = []
 
-    /// Ordered drag-to-reshape pass-through waypoints. Each hand-drag drops (or
-    /// moves) one of these; the route is re-routed start → vias → end cleanly.
-    var vias: [CLLocationCoordinate2D] = []
+    /// Ordered drag-to-reshape waypoints (stable id + precise flag). Each
+    /// hand-drag drops/moves one; the route is re-routed start → vias → end.
+    /// PERSISTS across endpoint tweaks — only an explicit reset clears them.
+    var vias: [Via] = []
 
-    /// Cap on drag-to-reshape waypoints — keeps the route uncluttered. The map
-    /// coordinator refuses to start a new-via drag once this many exist.
-    static let maxVias = 6
+    /// Cap on drag-to-reshape waypoints. Generous — complex routes need many.
+    static let maxVias = 40
 
     // Result
     var snapped: SnappedRoute? {
@@ -104,11 +120,10 @@ final class RouteStore {
         case .start: start = waypoint
         case .end: end = waypoint
         }
-        // Changing a pin invalidates any existing route.
+        // Changing a pin invalidates the drawn geometry but KEEPS waypoints — the
+        // auto-route re-routes start → vias → end so a careful edit isn't wiped.
         snapped = nil
-        isManuallyEdited = false
         isEditMode = false
-        vias = []
         searchResults = []
         recomputeIdlePhase()
         scheduleAutoRoute()
@@ -156,13 +171,15 @@ final class RouteStore {
     }
 
     private func performAutoRoute(from startC: CLLocationCoordinate2D, to endC: CLLocationCoordinate2D) async {
-        vias = []
+        // Route THROUGH any existing waypoints (they persist across endpoint
+        // tweaks) rather than dropping them.
         isManuallyEdited = false
-        isEditMode = false
         phase = .snapping
         errorMessage = nil
         do {
-            let routed = try await router.route(from: startC, to: endC, vias: [], preference: routePreference.rawValue)
+            let routed = try await router.route(
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue
+            )
             if Task.isCancelled { return }
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             snapped = await classified(routed)
@@ -257,23 +274,24 @@ final class RouteStore {
         let previousVias = vias
         let previousSnapped = snapped
 
-        // Snap the dragged point onto the nearest bike-network edge so the via
-        // lands on a real path (not mid-block), which keeps the re-route from
-        // taking weird detours. Off-network drags keep the raw point.
-        let snappedDrag = await BikeFriendliness.shared.nearestNetworkPoint(dragged) ?? dragged
-
-        // Update the via list.
         if let i = movingViaIndex, vias.indices.contains(i) {
-            vias[i] = snappedDrag
+            // Move: respect the via's kind. A precise anchor stays exactly where
+            // dropped; a snap waypoint re-snaps to the nearest path (≤20m).
+            let moving = vias[i]
+            let at = moving.precise
+                ? dragged
+                : (await BikeFriendliness.shared.nearestNetworkPoint(dragged) ?? dragged)
+            vias[i] = Via(id: moving.id, coordinate: at, precise: moving.precise)
         } else {
-            // Insert in along-route order: count existing vias that come before
-            // the dragged point along the current route geometry.
+            // Insert a new snapped waypoint, ordered by arc-length along the route
+            // (stable — a re-snap can't reorder it). Don't collapse onto a
+            // neighbor: if the snap lands within 8m of an existing via, keep raw.
+            let snapped = await BikeFriendliness.shared.nearestNetworkPoint(dragged) ?? dragged
+            let at = vias.contains(where: { GeoMath.distance($0.coordinate, snapped) < 8 }) ? dragged : snapped
             let routeCoords = previousSnapped?.coordinates ?? preview
-            let draggedKey = GeoMath.nearestIndex(of: snappedDrag, in: routeCoords)
-            let insertAt = vias.filter {
-                GeoMath.nearestIndex(of: $0, in: routeCoords) <= draggedKey
-            }.count
-            vias.insert(snappedDrag, at: min(insertAt, vias.count))
+            let key = GeoMath.arcLength(of: at, in: routeCoords)
+            let insertAt = vias.filter { GeoMath.arcLength(of: $0.coordinate, in: routeCoords) < key }.count
+            vias.insert(Via(coordinate: at, precise: false), at: min(insertAt, vias.count))
         }
 
         // Show the rubber-banded preview immediately (no snap-back flicker).
@@ -282,7 +300,9 @@ final class RouteStore {
         phase = .routed
 
         do {
-            let routed = try await router.route(from: startC, to: endC, vias: vias, preference: routePreference.rawValue)
+            let routed = try await router.route(
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue
+            )
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             snapped = await classified(routed)
             isManuallyEdited = false // it's a clean road route now
@@ -306,7 +326,9 @@ final class RouteStore {
         vias.remove(at: index)
 
         do {
-            let routed = try await router.route(from: startC, to: endC, vias: vias, preference: routePreference.rawValue)
+            let routed = try await router.route(
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue
+            )
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             snapped = await classified(routed)
             isManuallyEdited = !vias.isEmpty
@@ -315,6 +337,42 @@ final class RouteStore {
             vias = previousVias
             snapped = previousSnapped
         }
+    }
+
+    /// Long-press on the line: drop a PRECISE anchor exactly there (no snap) so
+    /// the route is forced through that point (e.g. a median crossing), then
+    /// re-route. Ordered by arc-length; reverts on failure.
+    func insertPreciseVia(_ at: CLLocationCoordinate2D) async {
+        guard vias.count < Self.maxVias,
+              let startC = start?.coordinate, let endC = end?.coordinate else { return }
+
+        let previousVias = vias
+        let previousSnapped = snapped
+        let routeCoords = snapped?.coordinates ?? []
+        let key = GeoMath.arcLength(of: at, in: routeCoords)
+        let insertAt = vias.filter { GeoMath.arcLength(of: $0.coordinate, in: routeCoords) < key }.count
+        vias.insert(Via(coordinate: at, precise: true), at: min(insertAt, vias.count))
+        isManuallyEdited = true
+        phase = .routed
+
+        do {
+            let routed = try await router.route(
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue
+            )
+            guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
+            snapped = await classified(routed)
+            isManuallyEdited = false
+        } catch {
+            vias = previousVias
+            snapped = previousSnapped
+        }
+    }
+
+    /// Long-press on a pin: flip it between snap and precise. No re-route — the
+    /// coordinate is unchanged; only the kind (and pin color) changes.
+    func toggleViaPrecise(at index: Int) {
+        guard vias.indices.contains(index) else { return }
+        vias[index].precise.toggle()
     }
 
     func finishDrawing() async {

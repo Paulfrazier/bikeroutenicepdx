@@ -15,8 +15,16 @@ import { DirectionsPanel } from "./components/DirectionsPanel";
 import { useRoute } from "./hooks/useRoute";
 import { useFriendliness } from "./hooks/useFriendliness";
 import { toTierFeatureCollection, snapToNetwork } from "./friendliness";
-import { nearestVertexIndex, MAX_VIAS } from "./geo";
-import type { LngLat } from "./types";
+import { arcLengthAt, haversineLength, MAX_VIAS } from "./geo";
+import type { LngLat, Via } from "./types";
+
+// Monotonic id source for waypoints — gives each via a stable identity so
+// re-routes never reorder or lose it.
+let viaIdCounter = 0;
+const nextViaId = () => `via-${++viaIdCounter}`;
+// A snapped insert landing within this many meters of an existing waypoint is
+// treated as a duplicate; we keep the raw drop point so two pins never collapse.
+const VIA_DEDUPE_M = 8;
 
 export default function App() {
   // ── Endpoints ──────────────────────────────────────────────────────────────
@@ -25,21 +33,25 @@ export default function App() {
   const [to, setTo] = useState<LngLat | null>(null);
   const [toLabel, setToLabel] = useState("");
 
-  // ── Drag-to-reshape via points ───────────────────────────────────────────
+  // ── Drag-to-reshape waypoints ──────────────────────────────────────────────
   // Each drag drops (or moves) a pass-through waypoint; the route is re-fetched
-  // start → vias → end, snapped to real roads. Cleared when endpoints change.
-  const [vias, setVias] = useState<LngLat[]>([]);
+  // start → vias → end. Waypoints carry a stable id + a `precise` flag and
+  // PERSIST across endpoint tweaks (only an explicit reset clears them), so a
+  // careful edit isn't wiped when you nudge start/end.
+  const [vias, setVias] = useState<Via[]>([]);
   const [editing, setEditing] = useState(false);
+  // Leaving edit mode on an endpoint change is fine (pins persist in state and
+  // reappear on re-enter); we deliberately do NOT clear `vias` here.
   useEffect(() => {
-    setVias([]);
     setEditing(false);
   }, [from, to]);
 
   // ── Route ──────────────────────────────────────────────────────────────────
+  const viaCoords = useMemo(() => vias.map((v) => v.at), [vias]);
   const { route, loading: routeLoading, error: routeError } = useRoute(
     from,
     to,
-    vias
+    viaCoords
   );
   const reshaped = vias.length > 0;
 
@@ -51,37 +63,71 @@ export default function App() {
     [route]
   );
 
-  // A drag finished: update the via list (move an existing one or insert a new
-  // one in along-route order) and let useRoute re-route + snap. The dragged point
-  // is first snapped to the nearest bike-network edge so the via lands on a real
-  // path (not mid-block), which keeps the re-route from taking weird detours.
-  const handleReshape = useCallback(
-    (dragged: LngLat, movingViaIndex: number | null) => {
-      const snapped = snapToNetwork(dragged) ?? dragged;
+  // Insert a fresh waypoint along the route at arc-length position. `precise`
+  // anchors are pinned exactly where dropped; normal ones snap to the nearest
+  // bike-network edge (≤20m) so they land on a real path. Ordering uses
+  // arc-length (monotonic) so a re-snap can't reorder existing waypoints.
+  const insertViaOrdered = useCallback(
+    (prev: Via[], rawAt: LngLat, precise: boolean): Via[] => {
+      if (prev.length >= MAX_VIAS) return prev;
       const routeCoords = route?.geometry.coordinates ?? [];
-      setVias((prev) => {
-        if (movingViaIndex !== null && movingViaIndex < prev.length) {
-          const next = prev.slice();
-          next[movingViaIndex] = snapped;
-          return next;
+      let at = rawAt;
+      if (!precise) {
+        const snapped = snapToNetwork(rawAt);
+        // Don't collapse onto an existing waypoint — fall back to the raw point.
+        if (snapped && !prev.some((v) => haversineLength([v.at, snapped]) < VIA_DEDUPE_M)) {
+          at = snapped;
         }
-        // Cap inserts so the route stays uncluttered (the Map also gates new
-        // drags at this cap; this is a defensive backstop).
-        if (prev.length >= MAX_VIAS) return prev;
-        // Insert in along-route order: count existing vias that come before the
-        // dragged point along the current route geometry (mirrors iOS reshape).
-        const draggedKey = nearestVertexIndex(snapped, routeCoords);
-        let insertAt = 0;
-        for (const v of prev) {
-          if (nearestVertexIndex(v, routeCoords) <= draggedKey) insertAt++;
-        }
-        const next = prev.slice();
-        next.splice(Math.min(insertAt, next.length), 0, snapped);
-        return next;
+      }
+      const key = arcLengthAt(at, routeCoords);
+      let insertAt = 0;
+      for (const v of prev) {
+        if (arcLengthAt(v.at, routeCoords) <= key) insertAt++;
+      }
+      const next = prev.slice();
+      next.splice(Math.min(insertAt, next.length), 0, {
+        id: nextViaId(),
+        at,
+        precise,
       });
+      return next;
     },
     [route]
   );
+
+  // A drag finished: move an existing waypoint (keeping its identity + kind) or
+  // insert a new snapped one. A precise waypoint is never re-snapped on move.
+  const handleReshape = useCallback(
+    (dragged: LngLat, movingViaIndex: number | null) => {
+      setVias((prev) => {
+        if (movingViaIndex !== null && movingViaIndex < prev.length) {
+          const moving = prev[movingViaIndex];
+          const at = moving.precise ? dragged : snapToNetwork(dragged) ?? dragged;
+          const next = prev.slice();
+          next[movingViaIndex] = { ...moving, at };
+          return next;
+        }
+        return insertViaOrdered(prev, dragged, false);
+      });
+    },
+    [insertViaOrdered]
+  );
+
+  // Long-press on the bare line: drop a PRECISE anchor exactly there (no snap),
+  // so the route is forced through that point (e.g. a median crossing).
+  const handleInsertPrecise = useCallback(
+    (at: LngLat) => {
+      setVias((prev) => insertViaOrdered(prev, at, true));
+    },
+    [insertViaOrdered]
+  );
+
+  // Long-press on a pin: flip it between snap and precise.
+  const handleToggleVia = useCallback((index: number) => {
+    setVias((prev) =>
+      prev.map((v, i) => (i === index ? { ...v, precise: !v.precise } : v))
+    );
+  }, []);
 
   // A waypoint pin was tapped (pressed without dragging): drop that via and
   // re-route. Endpoints stay put — only the through-waypoint is removed.
@@ -110,10 +156,12 @@ export default function App() {
         setTo(lngLat);
         setToLabel(`${lngLat[1].toFixed(5)}, ${lngLat[0].toFixed(5)}`);
       } else {
+        // Explicit reset — this is the one place waypoints are cleared.
         setFrom(null);
         setFromLabel("");
         setTo(null);
         setToLabel("");
+        setVias([]);
         clickCount.current = -1; // will be incremented to 0 below
       }
       clickCount.current += 1;
@@ -224,6 +272,8 @@ export default function App() {
           vias={vias}
           onReshape={handleReshape}
           onDeleteVia={handleDeleteVia}
+          onInsertPrecise={handleInsertPrecise}
+          onToggleVia={handleToggleVia}
         />
 
         {/* ── Mobile bottom drawer ── */}

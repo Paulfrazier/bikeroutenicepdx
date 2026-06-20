@@ -67,6 +67,17 @@ struct MapView: UIViewRepresentable {
         map.addGestureRecognizer(editPan)
         context.coordinator.editPanGesture = editPan
 
+        // Long-press in edit mode: toggle a pin's precise flag, or drop a precise
+        // (non-snapping) anchor on the line to force a crossing.
+        let longPress = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(MapCoordinator.handleLongPress(_:))
+        )
+        longPress.minimumPressDuration = 0.45
+        longPress.delegate = context.coordinator
+        map.addGestureRecognizer(longPress)
+        context.coordinator.editLongPressGesture = longPress
+
         context.coordinator.mapView = map
         return map
     }

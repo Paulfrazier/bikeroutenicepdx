@@ -80,6 +80,31 @@ export function closestPointOnSegmentMeters(
 }
 
 /**
+ * Position of `target` ALONG the polyline `coords`, as cumulative great-circle
+ * distance (meters) from the start to the closest projection of `target` onto
+ * the line. Monotonic along the route — unlike `nearestVertexIndex` it can't
+ * invert when the geometry re-snaps, so it gives stable waypoint ordering.
+ */
+export function arcLengthAt(target: LngLat, coords: LngLat[]): number {
+  if (coords.length < 2) return 0;
+  let cumulative = 0;
+  let bestDist = Infinity;
+  let bestArc = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const a = coords[i];
+    const b = coords[i + 1];
+    const proj = closestPointOnSegmentMeters(target, a, b);
+    const d = haversineLength([target, proj]);
+    if (d < bestDist) {
+      bestDist = d;
+      bestArc = cumulative + haversineLength([a, proj]);
+    }
+    cumulative += haversineLength([a, b]);
+  }
+  return bestArc;
+}
+
+/**
  * Index of the vertex in `coords` closest to `target` (great-circle).
  *
  * Mirrors iOS `GeoMath.nearestIndex`. Used to order drag-to-reshape via points:
@@ -126,8 +151,8 @@ export function pointToSegmentDistancePx(p: Px, a: Px, b: Px): number {
 
 // ── Hit-test ───────────────────────────────────────────────────────────────
 
-/** Max number of drag-to-reshape waypoints — keeps the route uncluttered. */
-export const MAX_VIAS = 6;
+/** Max number of drag-to-reshape waypoints. Generous — complex routes need many. */
+export const MAX_VIAS = 40;
 
 /** Grab radius (px) around an existing vertex — generous, fingers are fat. */
 export const VERTEX_HIT_PX = 22;

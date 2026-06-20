@@ -12,6 +12,18 @@ export interface RouteRequest {
   via?: LngLat[];
 }
 
+/**
+ * A drag-to-reshape waypoint. Unlike the bare `[lng,lat]` sent to the server,
+ * this carries a stable `id` (so re-routes never reorder/lose it) and a
+ * `precise` flag: precise waypoints are pinned exactly where dropped (never
+ * snapped to the network) so the user can force a route through an exact point.
+ */
+export interface Via {
+  id: string;
+  at: LngLat;
+  precise: boolean;
+}
+
 export interface RouteStep {
   instruction: string;
   distance_m: number;

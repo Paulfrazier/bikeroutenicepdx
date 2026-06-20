@@ -27,7 +27,7 @@ import maplibregl, {
   LngLatLike,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { LngLat, RouteResponse } from "../types";
+import type { LngLat, RouteResponse, Via } from "../types";
 import { hitTestRoute, VERTEX_HIT_PX, MAX_VIAS, type Px } from "../geo";
 
 // Protocol handler for PMTiles (lazy-import to keep bundle splittable)
@@ -163,14 +163,15 @@ function lineFeature(coords: LngLat[]): GeoJSON.Feature {
   };
 }
 
-/** Point features for each waypoint pin (the "route-waypoints" handle layer). */
-function waypointFeatures(coords: LngLat[]): GeoJSON.FeatureCollection {
+/** Point features for each waypoint pin (the "route-waypoints" handle layer).
+ * Carries `precise` so the layer can color snap (emerald) vs precise (amber). */
+function waypointFeatures(vias: Via[]): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
-    features: coords.map((c) => ({
+    features: vias.map((v) => ({
       type: "Feature",
-      geometry: { type: "Point", coordinates: c },
-      properties: {},
+      geometry: { type: "Point", coordinates: v.at },
+      properties: { precise: v.precise },
     })),
   };
 }
@@ -249,14 +250,18 @@ interface MapProps {
   /** When true, the route line is draggable; otherwise it's locked and the map
    * pans freely over it (prevents accidental moves). */
   editing: boolean;
-  /** Ordered drag-to-reshape pass-through waypoints (owned by App). */
-  vias: LngLat[];
+  /** Ordered drag-to-reshape waypoints (owned by App). */
+  vias: Via[];
   /** A drag finished: `dragged` is the released point; `movingViaIndex` is the
    * index of an existing via that was grabbed, or null to insert a new one. App
    * updates its via list and re-routes (snapping to real roads). */
   onReshape: (dragged: LngLat, movingViaIndex: number | null) => void;
   /** A waypoint pin was tapped (pressed without dragging): remove that via. */
   onDeleteVia: (index: number) => void;
+  /** Long-press on the bare line: drop a PRECISE anchor there (no snap). */
+  onInsertPrecise: (at: LngLat) => void;
+  /** Long-press on a pin: flip it between snap and precise. */
+  onToggleVia: (index: number) => void;
 }
 
 export function Map({
@@ -270,6 +275,8 @@ export function Map({
   vias,
   onReshape,
   onDeleteVia,
+  onInsertPrecise,
+  onToggleVia,
 }: MapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -290,15 +297,23 @@ export function Map({
   // tap on the line (in edit mode) doesn't insert a spurious via.
   const dragStartPxRef = useRef<Px | null>(null);
   const draggedFarRef = useRef(false);
+  // Long-press support: a press held in place (no movement) for LONG_PRESS_MS
+  // toggles a grabbed pin's precise flag, or drops a precise anchor on the line.
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressLngLatRef = useRef<LngLat | null>(null);
   // Props that map listeners read live (identities change every render).
   const onReshapeRef = useRef(onReshape);
   const onDeleteViaRef = useRef(onDeleteVia);
+  const onInsertPreciseRef = useRef(onInsertPrecise);
+  const onToggleViaRef = useRef(onToggleVia);
   const editingRef = useRef(editing);
   const viasRef = useRef(vias);
   const tierFeaturesRef = useRef(tierFeatures);
   useEffect(() => {
     onReshapeRef.current = onReshape;
     onDeleteViaRef.current = onDeleteVia;
+    onInsertPreciseRef.current = onInsertPrecise;
+    onToggleViaRef.current = onToggleVia;
     editingRef.current = editing;
     viasRef.current = vias;
     tierFeaturesRef.current = tierFeatures;
@@ -306,6 +321,8 @@ export function Map({
 
   /** Movement (px) before a press becomes a reshape rather than a tap. */
   const DRAG_THRESHOLD_PX = 6;
+  /** Hold time (ms) before a stationary press becomes a long-press. */
+  const LONG_PRESS_MS = 450;
 
   // ── Initialize map ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -516,8 +533,10 @@ export function Map({
         // Hidden until the user enters edit mode (toggled by the `editing` effect).
         layout: { visibility: "none" },
         paint: {
-          "circle-radius": 7,
-          "circle-color": "#10b981",
+          // Precise (forced, non-snapping) anchors read amber + larger; normal
+          // snap waypoints stay emerald.
+          "circle-radius": ["case", ["get", "precise"], 8, 7],
+          "circle-color": ["case", ["get", "precise"], "#f59e0b", "#10b981"],
           "circle-stroke-color": "#ffffff",
           "circle-stroke-width": 2.5,
         },
@@ -537,7 +556,7 @@ export function Map({
       let best = VERTEX_HIT_PX;
       let idx: number | null = null;
       viasRef.current.forEach((v, i) => {
-        const pt = map.project(v as LngLatLike);
+        const pt = map.project(v.at as LngLatLike);
         const d = Math.hypot(p.x - pt.x, p.y - pt.y);
         if (d <= best) {
           best = d;
@@ -559,6 +578,11 @@ export function Map({
         const dpx = Math.hypot(e.point.x - start.x, e.point.y - start.y);
         if (dpx < DRAG_THRESHOLD_PX) return;
         draggedFarRef.current = true;
+        // Movement cancels a pending long-press — this is a drag, not a hold.
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current);
+          longPressTimerRef.current = null;
+        }
       }
       const cursor: LngLat = [e.lngLat.lng, e.lngLat.lat];
       coords[idx] = cursor;
@@ -572,8 +596,11 @@ export function Map({
       // show a provisional new pin where a fresh one will be inserted.
       const liveVias = viasRef.current.slice();
       const mv = movingViaIndexRef.current;
-      if (mv !== null && mv < liveVias.length) liveVias[mv] = cursor;
-      else liveVias.push(cursor);
+      if (mv !== null && mv < liveVias.length) {
+        liveVias[mv] = { ...liveVias[mv], at: cursor };
+      } else {
+        liveVias.push({ id: "__drag__", at: cursor, precise: false });
+      }
       const vsrc = map.getSource("route-waypoints") as
         | maplibregl.GeoJSONSource
         | undefined;
@@ -581,6 +608,11 @@ export function Map({
     };
 
     const onEnd = () => {
+      // Released before the hold window — cancel any pending long-press.
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
       map.off("mousemove", onMove);
       map.off("touchmove", onMove);
       map.off("mouseup", onEnd);
@@ -633,6 +665,39 @@ export function Map({
       onReshapeRef.current(coords[idx], movingVia);
     };
 
+    // A press held in place (no movement) for LONG_PRESS_MS: toggle a grabbed
+    // pin's precise flag, or drop a precise anchor on the bare line. Tears down
+    // the in-progress drag without reshaping, and restores the route display
+    // (a toggle doesn't change geometry, so nothing else would refill it).
+    const fireLongPress = () => {
+      longPressTimerRef.current = null;
+      if (draggedFarRef.current) return; // became a drag — not a hold
+      const mv = movingViaIndexRef.current;
+      const at = pressLngLatRef.current;
+      map.off("mousemove", onMove);
+      map.off("touchmove", onMove);
+      map.off("mouseup", onEnd);
+      map.off("touchend", onEnd);
+      map.dragPan.enable();
+      dragCoordsRef.current = null;
+      dragIndexRef.current = -1;
+      dragStartPxRef.current = null;
+      draggedFarRef.current = false;
+      movingViaIndexRef.current = null;
+      (map.getSource("route") as maplibregl.GeoJSONSource | undefined)?.setData(
+        tierFeaturesRef.current
+      );
+      (
+        map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
+      )?.setData(emptyGeojson());
+      (
+        map.getSource("route-waypoints") as maplibregl.GeoJSONSource | undefined
+      )?.setData(waypointFeatures(viasRef.current));
+      suppressClickRef.current = true;
+      if (mv !== null) onToggleViaRef.current(mv);
+      else if (at) onInsertPreciseRef.current(at);
+    };
+
     const onDown = (
       e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
     ) => {
@@ -681,6 +746,12 @@ export function Map({
         map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
       )?.setData(lineFeature(coords));
 
+      // Arm the long-press: held in place it toggles a grabbed pin or drops a
+      // precise anchor; a drag or early release cancels it (cleared above).
+      pressLngLatRef.current = [e.lngLat.lng, e.lngLat.lat];
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = setTimeout(fireLongPress, LONG_PRESS_MS);
+
       map.on("mousemove", onMove);
       map.on("touchmove", onMove);
       map.on("mouseup", onEnd);
@@ -702,6 +773,7 @@ export function Map({
 
     return () => {
       // Make sure a drag-in-progress can't leave the map unpannable.
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
       map.off("mousemove", onMove);
       map.off("touchmove", onMove);
       map.off("mouseup", onEnd);

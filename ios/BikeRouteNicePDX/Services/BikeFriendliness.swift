@@ -142,7 +142,7 @@ actor BikeFriendliness {
     /// so the re-route doesn't take weird detours from a mid-block via.
     func nearestNetworkPoint(
         _ target: CLLocationCoordinate2D,
-        maxMeters: Double = 60
+        maxMeters: Double = 20
     ) -> CLLocationCoordinate2D? {
         loadIfNeeded()
         let cosLat = cos(target.latitude * .pi / 180)

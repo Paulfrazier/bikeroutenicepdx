@@ -10,6 +10,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     var tapGesture: UITapGestureRecognizer?
     var panGesture: UIPanGestureRecognizer?
     var editPanGesture: UIPanGestureRecognizer?
+    var editLongPressGesture: UILongPressGestureRecognizer?
 
     private let locationManager = CLLocationManager()
     private var lastRecenterTick = 0
@@ -209,7 +210,8 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         guard store.isEditMode else { return }
         for via in store.vias {
             let annotation = ViaAnnotation()
-            annotation.coordinate = via
+            annotation.coordinate = via.coordinate
+            annotation.precise = via.precise
             map.addAnnotation(annotation)
             viaAnnotations.append(annotation)
         }
@@ -254,6 +256,25 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         }
         let coordinate = map.convert(point, toCoordinateFrom: map)
         store.handleMapTap(coordinate)
+    }
+
+    /// Long-press in edit mode: on a pin → toggle precise (amber/emerald); on the
+    /// bare route line → drop a PRECISE anchor there (no snap) to force the route
+    /// through that point. Elsewhere it's ignored (map handles its own gestures).
+    @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began, store.isEditMode, !store.isDrawMode,
+              let map = mapView else { return }
+        let point = gesture.location(in: map)
+        if let viaIndex = nearestViaIndex(point, map: map) {
+            store.toggleViaPrecise(at: viaIndex)
+            syncViaAnnotations(map) // recolor immediately
+            return
+        }
+        guard let coords = store.snapped?.coordinates,
+              nearestLineDistance(point, coords: coords, map: map)
+                <= max(Self.vertexGrabPx, Self.lineGrabPx) else { return }
+        let at = map.convert(point, toCoordinateFrom: map)
+        Task { await store.insertPreciseVia(at) }
     }
 
     // MARK: - Finger draw
@@ -416,7 +437,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         var best = Self.vertexGrabPx
         var idx: Int?
         for (i, via) in store.vias.enumerated() {
-            let p = map.convert(via, toPointTo: map)
+            let p = map.convert(via.coordinate, toPointTo: map)
             let d = hypot(point.x - p.x, point.y - p.y)
             if d <= best { best = d; idx = i }
         }
@@ -603,17 +624,19 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
         // Waypoint handle: a small emerald dot with a white ring. Non-interactive
         // so touches pass through to the edit-pan / tap gestures on the line.
-        if annotation is ViaAnnotation {
+        if let via = annotation as? ViaAnnotation {
             let id = "via"
             let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
                 ?? MKAnnotationView(annotation: annotation, reuseIdentifier: id)
             view.annotation = annotation
-            let size: CGFloat = 16
+            let size: CGFloat = via.precise ? 18 : 16
             view.frame = CGRect(x: 0, y: 0, width: size, height: size)
             view.backgroundColor = .clear
             view.layer.cornerRadius = size / 2
-            view.layer.backgroundColor = UIColor(
-                red: 0.063, green: 0.725, blue: 0.506, alpha: 1 // #10b981 emerald
+            // Precise (forced) anchors read amber; normal snap waypoints emerald.
+            view.layer.backgroundColor = (via.precise
+                ? UIColor(red: 0.961, green: 0.620, blue: 0.043, alpha: 1) // #f59e0b amber
+                : UIColor(red: 0.063, green: 0.725, blue: 0.506, alpha: 1) // #10b981 emerald
             ).cgColor
             view.layer.borderColor = UIColor.white.cgColor
             view.layer.borderWidth = 2.5
@@ -663,8 +686,11 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 }
 
 /// A drag-to-reshape waypoint handle. Subclass so `viewFor` can render it as a
-/// distinct emerald dot (vs. the start/end marker pins).
-final class ViaAnnotation: MKPointAnnotation {}
+/// distinct dot (vs. the start/end marker pins) — emerald for snap waypoints,
+/// amber for precise (forced, non-snapping) anchors.
+final class ViaAnnotation: MKPointAnnotation {
+    var precise = false
+}
 
 /// Shortest distance from point `p` to the line segment `a`–`b`, in the same
 /// (screen) coordinate space. Free function — pure CGPoint math.
