@@ -1,4 +1,16 @@
 --[[
+  ⚠️  SUPERSEDED / NOT WIRED IN  ⚠️
+  As of the baked-tag pipeline, greenway preference is written directly onto OSM
+  ways in portland-tagged.osm.pbf by scripts/build-graph.ts (bakeTagsIntoPbf),
+  so STOCK Valhalla with its default Lua already prefers greenways. This file is
+  no longer referenced by routing/valhalla.json and is retained only because it
+  documents the class→standard-tag costing rationale (mirrored in build-graph's
+  CLASS_TAGS). Using a custom Lua with Valhalla is fragile: the key is
+  `graph_lua_name`, and a custom file REPLACES Valhalla's entire default tag
+  transform (so it would need to be the full default Lua + these edits, version-
+  matched to the image). The bake approach avoids all of that.
+
+  ── Original header ────────────────────────────────────────────────────────
   graph.lua — Valhalla Lua tagging callback for BikeRouteNicePDX
   Loaded by mjolnir at tile-build time via valhalla.json -> mjolnir.lua
 

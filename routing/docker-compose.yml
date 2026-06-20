@@ -9,7 +9,11 @@
 #   - Both images are FROM the same upstream source; gisops adds a thin
 #     entrypoint wrapper that handles "build tiles if absent, then serve".
 #
-# To rebuild tiles after the PBF changes (e.g. after npm run build:graph):
+# Greenway preference is baked into portland-tagged.osm.pbf as standard OSM tags
+# (cycleway/bicycle/lcn) by scripts/build-graph.ts, so this runs STOCK Valhalla
+# with its default Lua — no custom tag-transform needed.
+#
+# To (re)build tiles after the PBF changes (e.g. after npm run build:graph):
 #   docker compose down -v && docker compose up --build
 #
 # The -v flag removes the valhalla_tiles volume so tiles are rebuilt from
@@ -21,12 +25,10 @@ services:
     container_name: bikeroutenice-valhalla
 
     volumes:
-      # PBF + sidecar files produced by scripts/build-graph.ts
+      # Tagged PBF produced by scripts/build-graph.ts (greenway tags baked in)
       - ../data/reconciled/current:/data:ro
-      # Our custom config (overrides any image-default valhalla.json)
+      # Service-limits / costing config (overrides any image-default valhalla.json)
       - ./valhalla.json:/data/valhalla.json:ro
-      # Lua tagging callbacks (graph.lua runs at tile-build time)
-      - ./conf:/conf:ro
       # Named volume holds built tile set; survives container restarts
       - valhalla_tiles:/data/valhalla_tiles
 

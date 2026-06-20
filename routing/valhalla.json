@@ -6,8 +6,6 @@
 
     "pbf_file_paths": ["/data/portland-tagged.osm.pbf"],
 
-    "lua": "/conf/graph.lua",
-
     "admin": "/data/valhalla_tiles/admin.sqlite",
     "timezone": "/data/valhalla_tiles/not_needed.sqlite",
 

@@ -61,6 +61,8 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "child_process";
 import * as turf from "@turf/turf";
 import type {
@@ -91,9 +93,12 @@ const CROSSING_SEARCH_M = 30;
 /** Penalty applied per difficult crossing on a way (seconds) */
 const CROSSING_PENALTY_S = 60;
 
-// PBOT field that holds the bike facility classification.
-// Run with --list-classes if you're unsure what your fetched data calls it.
-const PBOT_CLASS_FIELD = "FacilityType";
+// Field holding the bike facility classification in the source network.
+// We now consume web/public/bike-network.geojson (produced by
+// scripts/export-bike-network.ts from the LIVE portlandmaps layer 75), whose
+// features carry a normalized `class` field. The old data/pbot fetch hit a
+// retired ArcGIS FeatureServer (HTTP 400) and is no longer used for routing.
+const PBOT_CLASS_FIELD = "class";
 
 type NormalizedClass =
   | "off_street"
@@ -103,10 +108,20 @@ type NormalizedClass =
   | "standard";
 
 /**
- * Maps raw PBOT FacilityType values to our internal NormalizedClass.
- * Keys are lower-cased for case-insensitive matching.
+ * Maps a source classification value to our internal NormalizedClass.
+ * Keys are lower-cased for case-insensitive matching. The first group is the
+ * bike-network.geojson `class` vocabulary; the second is the legacy PBOT
+ * `FacilityType` vocabulary, kept for backward compatibility.
  */
 const CLASS_MAP: Record<string, NormalizedClass> = {
+  // bike-network.geojson `class` values (current source of truth)
+  greenway: "greenway",
+  protected: "protected",
+  buffered: "buffered",
+  lane: "standard",
+  shared: "standard",
+  path: "off_street",
+  // legacy PBOT FacilityType values
   "neighborhood greenway": "greenway",
   "protected bike lane": "protected",
   "buffered bike lane": "buffered",
@@ -116,18 +131,21 @@ const CLASS_MAP: Record<string, NormalizedClass> = {
   "multi-use path": "off_street",
   "shared use path": "off_street",
   trail: "off_street",
-  path: "off_street",
 };
 
 // ---------------------------------------------------------------------------
 // Path helpers
 // ---------------------------------------------------------------------------
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "..");
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA_PBOT_CURRENT = path.join(REPO_ROOT, "data", "pbot", "current");
 const DATA_OSM_CURRENT = path.join(REPO_ROOT, "data", "osm", "current");
 const DATA_RECONCILED = path.join(REPO_ROOT, "data", "reconciled");
 const CURRENT_LINK = path.join(DATA_RECONCILED, "current");
+// Live classified bike network (from `npm run export:bike-network`). This is the
+// PBOT classification source for the routing graph — single source of truth
+// shared with the web/iOS display overlay.
+const BIKE_NETWORK_PATH = path.join(REPO_ROOT, "web", "public", "bike-network.geojson");
 
 function todayString(): string {
   return new Date().toISOString().slice(0, 10);
@@ -178,6 +196,22 @@ function osmiumExportWays(pbfPath: string, geojsonPath: string): void {
   console.log(`         ${pbfPath}`);
   console.log(`         → ${geojsonPath}`);
 
+  // Pre-filter to highway ways only. We only ever bake tags onto roads/paths,
+  // and the full extract (~1M ways incl. buildings/water/landuse) makes both the
+  // JSON parse and the spatial join blow up in memory/time. This cuts it to the
+  // ~150k routable ways.
+  const highwaysPbf = path.join(path.dirname(geojsonPath), ".highways.osm.pbf");
+  console.log(`[osmium] filtering to highway ways → ${path.basename(highwaysPbf)}`);
+  const filt = spawnSync(
+    "osmium",
+    ["tags-filter", pbfPath, "w/highway", "-o", highwaysPbf, "--overwrite"],
+    { stdio: "inherit" }
+  );
+  if (filt.error) throw new Error(`osmium tags-filter: ${filt.error.message}`);
+  if (filt.status !== 0)
+    throw new Error(`osmium tags-filter exited with status ${filt.status}`);
+  pbfPath = highwaysPbf;
+
   // CRITICAL: by default `osmium export` does NOT emit the OSM object id into
   // feature properties — only tags. Without this, props["@id"] is undefined and
   // the wayId below silently falls back to a synthetic sequential index, so the
@@ -221,6 +255,119 @@ function osmiumExportWays(pbfPath: string, geojsonPath: string): void {
   console.log(
     `[OK]     ways GeoJSON — ${(stat.size / 1024 / 1024).toFixed(1)} MB`
   );
+}
+
+// ---------------------------------------------------------------------------
+// Tag baking: write standard OSM bike tags onto matched ways in the PBF
+// ---------------------------------------------------------------------------
+//
+// Valhalla's bicycle costing ignores custom per-edge tags and only reads
+// standard OSM tags (cycleway / bicycle / lcn). Rather than maintain a custom
+// Lua tag-transform (which must REPLACE Valhalla's full default Lua and be kept
+// version-matched), we bake the standard tags straight into the PBF here, so
+// STOCK Valhalla with its default Lua already prefers our greenways.
+//
+// Mapping mirrors routing/conf/graph.lua's intent. Crucially, greenways get
+// cycleway=track so they outrank painted bike lanes (cycleway=lane), which
+// Valhalla would otherwise prefer — the main cause of mid-route defection.
+
+const CLASS_TAGS: Record<NormalizedClass, Record<string, string>> = {
+  off_street: { cycleway: "track", bicycle: "designated", lcn: "yes" },
+  greenway: { cycleway: "track", bicycle: "designated", lcn: "yes" },
+  protected: { cycleway: "track", bicycle: "designated" },
+  buffered: { cycleway: "lane" },
+  standard: { cycleway: "lane" },
+};
+
+function runOsmium(args: string[], label: string): void {
+  const result = spawnSync("osmium", args, { stdio: "inherit" });
+  if (result.error) throw new Error(`osmium ${label}: ${result.error.message}`);
+  if (result.status !== 0)
+    throw new Error(`osmium ${label} exited with status ${result.status}`);
+}
+
+/**
+ * Stream the OSM PBF through OPL (osmium's line-based text format), merging the
+ * per-class standard tags onto each matched way, and write a tagged PBF.
+ * Existing tags are preserved; our keys overwrite any same-named tags.
+ */
+async function bakeTagsIntoPbf(
+  osmPbfPath: string,
+  wayTags: WayTagMap,
+  taggedPbfPath: string,
+  outDir: string
+): Promise<void> {
+  const oplPath = path.join(outDir, "portland.opl");
+  const taggedOplPath = path.join(outDir, "portland-tagged.opl");
+
+  console.log(`\n[bake]   PBF → OPL…`);
+  runOsmium(["cat", "-f", "opl", osmPbfPath, "-o", oplPath, "--overwrite"], "cat→opl");
+
+  // way_id → tags to set
+  const wayClass = new Map<string, Record<string, string>>();
+  for (const [id, tag] of wayTags) {
+    wayClass.set(id, CLASS_TAGS[tag.bicycle_network_class]);
+  }
+
+  console.log(`[bake]   injecting tags onto ${wayClass.size} ways…`);
+  const rl = createInterface({
+    input: fs.createReadStream(oplPath),
+    crlfDelay: Infinity,
+  });
+  const out = fs.createWriteStream(taggedOplPath);
+  let taggedWays = 0;
+
+  for await (const line of rl) {
+    let toWrite = line;
+    if (line.charCodeAt(0) === 119 /* 'w' */) {
+      const sp = line.split(" ");
+      const id = sp[0].slice(1);
+      const overrides = wayClass.get(id);
+      if (overrides) {
+        // Tags live in the token beginning with 'T'; nodes in the 'N' token.
+        let ti = sp.findIndex((t) => t.charCodeAt(0) === 84 /* 'T' */);
+        if (ti === -1) {
+          // No tags column (unexpected): insert one before the nodes token.
+          const ni = sp.findIndex((t) => t.charCodeAt(0) === 78 /* 'N' */);
+          ti = ni === -1 ? sp.length : ni;
+          sp.splice(ti, 0, "T");
+        }
+        const body = sp[ti].slice(1);
+        const tags = new Map<string, string>();
+        if (body) {
+          for (const kv of body.split(",")) {
+            const eq = kv.indexOf("=");
+            tags.set(kv.slice(0, eq), kv.slice(eq + 1));
+          }
+        }
+        for (const [k, v] of Object.entries(overrides)) tags.set(k, v);
+        sp[ti] = "T" + [...tags].map(([k, v]) => `${k}=${v}`).join(",");
+        toWrite = sp.join(" ");
+        taggedWays++;
+      }
+    }
+    if (!out.write(toWrite + "\n")) {
+      await new Promise<void>((res) => out.once("drain", () => res()));
+    }
+  }
+  await new Promise<void>((res) => out.end(res));
+
+  console.log(`[bake]   OPL → PBF (${taggedWays} ways tagged)…`);
+  runOsmium(
+    ["cat", "-f", "pbf", taggedOplPath, "-o", taggedPbfPath, "--overwrite"],
+    "cat→pbf"
+  );
+
+  // Clean up the large intermediate OPL files.
+  for (const p of [oplPath, taggedOplPath]) {
+    try {
+      fs.unlinkSync(p);
+    } catch {
+      /* ignore */
+    }
+  }
+  const mb = (fs.statSync(taggedPbfPath).size / 1024 / 1024).toFixed(1);
+  console.log(`[write]  portland-tagged.osm.pbf — ${mb} MB (${taggedWays} ways tagged)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -303,14 +450,17 @@ function buildPbotBuffers(
   poly: BufferFeature;
   cls: NormalizedClass;
   rawClass: string;
+  bbox: [number, number, number, number];
 }> {
   const buffers: Array<{
     poly: BufferFeature;
     cls: NormalizedClass;
     rawClass: string;
+    bbox: [number, number, number, number];
   }> = [];
 
   const unknownClasses = new Set<string>();
+  let bufferFailures = 0;
 
   for (const feature of pbotNetwork.features) {
     if (
@@ -334,15 +484,32 @@ function buildPbotBuffers(
     // Cast through unknown to select the single-Feature buffer overload.
     // When input is a Feature (not FeatureCollection), turf.buffer always
     // returns Feature<Polygon|MultiPolygon>|undefined — never a FeatureCollection.
-    const poly = turf.buffer(
-      feature as unknown as Feature<LineString>,
-      JOIN_BUFFER_M / 1000, // turf uses km
-      { units: "kilometers" }
-    ) as BufferFeature | undefined;
+    // A few source features have degenerate geometry that makes turf throw
+    // ("coordinates must contain numbers"); skip those rather than abort.
+    let poly: BufferFeature | undefined;
+    try {
+      poly = turf.buffer(
+        feature as unknown as Feature<LineString>,
+        JOIN_BUFFER_M / 1000, // turf uses km
+        { units: "kilometers" }
+      ) as BufferFeature | undefined;
+    } catch {
+      bufferFailures++;
+      continue;
+    }
 
     if (poly) {
-      buffers.push({ poly, cls, rawClass: String(rawClass ?? "") });
+      buffers.push({
+        poly,
+        cls,
+        rawClass: String(rawClass ?? ""),
+        bbox: turf.bbox(poly) as [number, number, number, number],
+      });
     }
+  }
+
+  if (bufferFailures > 0) {
+    console.log(`[WARN]   ${bufferFailures} PBOT features skipped (un-bufferable geometry)`);
   }
 
   if (unknownClasses.size > 0) {
@@ -429,12 +596,18 @@ function spatialJoin(
     // Normalize a possible "type_id" form (e.g. "w987654") to the bare number.
     const wayId: string = String(rawId).replace(/^[a-z]/i, "");
 
-    // Find best-priority PBOT match
+    // Find best-priority PBOT match. Prefilter candidate buffers by bbox so we
+    // don't run the expensive overlapFraction against all ~6k buffers per way.
+    const [wMinX, wMinY, wMaxX, wMaxY] = turf.bbox(wayLine);
     let bestClass: NormalizedClass | null = null;
     let bestPriority = -1;
 
-    for (const { poly, cls } of pbotBuffers) {
+    for (const { poly, cls, bbox } of pbotBuffers) {
       if (classPriority[cls] <= bestPriority) continue; // can't beat current
+      // bbox = [minX, minY, maxX, maxY]; skip if disjoint from the way's bbox.
+      if (bbox[0] > wMaxX || bbox[2] < wMinX || bbox[1] > wMaxY || bbox[3] < wMinY) {
+        continue;
+      }
 
       const fraction = overlapFraction(wayLine, poly as BufferFeature);
       if (fraction >= OVERLAP_THRESHOLD) {
@@ -553,20 +726,18 @@ async function main(): Promise<void> {
 
   checkOsmium();
 
-  // Resolve input paths
-  const pbotNetworkPath = path.join(
-    DATA_PBOT_CURRENT,
-    "bicycle-network.geojson"
-  );
+  // Resolve input paths. Network classification comes from the live
+  // bike-network.geojson; difficult crossings are optional (the penalty is
+  // deferred, and the legacy PBOT crossings layer is retired).
+  const pbotNetworkPath = BIKE_NETWORK_PATH;
   const pbotCrossingsPath = path.join(
     DATA_PBOT_CURRENT,
     "difficult-crossings.geojson"
   );
   const osmPbfPath = path.join(DATA_OSM_CURRENT, "portland.osm.pbf");
 
-  requireFile(pbotNetworkPath, "PBOT bicycle network GeoJSON");
-  requireFile(pbotCrossingsPath, "PBOT difficult crossings GeoJSON");
-  requireFile(osmPbfPath, "Portland OSM PBF");
+  requireFile(pbotNetworkPath, "bike-network GeoJSON (run: npm run export:bike-network)");
+  requireFile(osmPbfPath, "Portland OSM PBF (run: npm run fetch:osm)");
 
   // Output paths
   const dateStr = todayString();
@@ -607,9 +778,12 @@ async function main(): Promise<void> {
   );
 
   console.log(`[load]   PBOT difficult crossings…`);
-  const pbotCrossings = loadGeojson(pbotCrossingsPath);
+  const pbotCrossings: FeatureCollection = fs.existsSync(pbotCrossingsPath)
+    ? loadGeojson(pbotCrossingsPath)
+    : { type: "FeatureCollection", features: [] };
   console.log(
-    `         ${pbotCrossings.features.length} crossing features loaded`
+    `         ${pbotCrossings.features.length} crossing features loaded` +
+      (fs.existsSync(pbotCrossingsPath) ? "" : " (none — file absent, penalty deferred)")
   );
 
   // Step 3: Load OSM ways GeoJSON
@@ -667,11 +841,9 @@ async function main(): Promise<void> {
   );
   console.log(`[write]  osm-lcn-ways.json — ${lcnWays.length} LCN ways`);
 
-  // Step 8: Copy/symlink input PBF as "tagged" (v0.1: no actual tag injection)
-  // The real enrichment is in way-tags.json.
-  if (fs.existsSync(taggedPbfPath)) fs.unlinkSync(taggedPbfPath);
-  fs.copyFileSync(osmPbfPath, taggedPbfPath);
-  console.log(`[write]  portland-tagged.osm.pbf (copy of input — v0.1)`);
+  // Step 8: Bake standard OSM bike tags onto matched ways in the PBF, so STOCK
+  // Valhalla (its default Lua) prefers greenways without any custom costing.
+  await bakeTagsIntoPbf(osmPbfPath, wayTags, taggedPbfPath, outDir);
 
   // Step 9: Manifest
   const manifest = {
@@ -698,8 +870,9 @@ async function main(): Promise<void> {
       byClass: classCounters,
     },
     valhallaNotes:
-      "Consume way-tags.json via a Lua tagging callback in routing/valhalla.json. " +
-      "Map bicycle_network_class to Valhalla cost overrides per docs/routing-model.md.",
+      "portland-tagged.osm.pbf has standard bike tags (cycleway/bicycle/lcn) " +
+      "baked onto matched ways, so STOCK Valhalla prefers greenways with no " +
+      "custom Lua. way-tags.json is the way_id→class sidecar used for the bake.",
   };
   await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
   console.log(`[write]  manifest.json`);
