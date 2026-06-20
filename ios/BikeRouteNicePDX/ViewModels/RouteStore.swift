@@ -298,7 +298,12 @@ final class RouteStore {
     private func recomputeDisplay() async {
         guard let auto = autoRoute else { snapped = nil; return }
         let coords = Self.applyManualSegments(auto.coordinates, manualSegments)
-        let base = SnappedRoute(coordinates: coords, distanceMeters: GeoMath.length(coords))
+        var base = SnappedRoute(coordinates: coords, distanceMeters: GeoMath.length(coords))
+        // Carry the server's time estimate + turn-by-turn steps from the auto
+        // route so the duration label and Directions button survive the rebuild.
+        // (Exact when there are no manual splices; a close approximation when there are.)
+        base.durationSeconds = auto.durationSeconds
+        base.steps = auto.steps
         snapped = await classified(base)
     }
 
