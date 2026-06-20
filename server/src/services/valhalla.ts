@@ -530,6 +530,155 @@ export async function traceRouteSteps(
   return steps;
 }
 
+// ---------------------------------------------------------------------------
+// Corridor resolution: turn two tapped points into an ordered chain of vias
+// ---------------------------------------------------------------------------
+// "Route through this section": the user taps point A then point B on a street;
+// we resolve the literal ground path between them and sample it into ordered
+// pass-through points. Those points are then injected as `via`s into the master
+// /route call, which forces the bike route to traverse that street (through-
+// waypoints are mandatory) while the from→corridor and corridor→to legs stay
+// normally bike-optimized.
+//
+// Costing is "pedestrian" — the most permissive "follow the ground between two
+// close taps": it won't avoid arterials (unlike bicycle costing) and routes on
+// paths/sidewalks too, so it hugs whatever street the user actually tapped.
+
+export interface CorridorResult {
+  /** Ordered [lng,lat] pass-through points sampled along the street. */
+  points: [number, number][];
+  /** The full resolved street geometry (for the highlight preview). */
+  geometry: GeoJSONLineString;
+}
+
+/** Distance in metres between two [lng,lat] points (equirectangular, city-scale). */
+function corridorDistM(a: [number, number], b: [number, number]): number {
+  const mLat = 111_320;
+  const mLng = 111_320 * Math.cos(((a[1] + b[1]) / 2) * (Math.PI / 180));
+  return Math.hypot((a[0] - b[0]) * mLng, (a[1] - b[1]) * mLat);
+}
+
+/**
+ * Sample a polyline to ~1 point every `spacingM` metres, always keeping the
+ * first and last vertex. If that would exceed `maxPoints`, the spacing is
+ * widened so the cap is never breached.
+ */
+function sampleAlong(
+  coords: [number, number][],
+  spacingM: number,
+  maxPoints: number
+): [number, number][] {
+  if (coords.length <= 2) return coords.slice();
+
+  let total = 0;
+  for (let i = 0; i < coords.length - 1; i++) total += corridorDistM(coords[i], coords[i + 1]);
+
+  // Widen spacing if needed so we stay within the cap (interior points only).
+  const interiorCap = Math.max(1, maxPoints - 2);
+  const spacing = Math.max(spacingM, total / (interiorCap + 1));
+
+  const out: [number, number][] = [coords[0]];
+  let acc = 0;
+  let nextAt = spacing;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const segLen = corridorDistM(coords[i], coords[i + 1]);
+    while (acc + segLen >= nextAt && out.length < maxPoints - 1) {
+      const t = (nextAt - acc) / segLen;
+      out.push([
+        coords[i][0] + (coords[i + 1][0] - coords[i][0]) * t,
+        coords[i][1] + (coords[i + 1][1] - coords[i][1]) * t,
+      ]);
+      nextAt += spacing;
+    }
+    acc += segLen;
+  }
+  out.push(coords[coords.length - 1]);
+  return out;
+}
+
+export async function resolveCorridor(
+  a: [number, number], // [lng, lat] — first tap
+  b: [number, number], // [lng, lat] — second tap
+  spacingM = 110,
+  maxPoints = 40
+): Promise<CorridorResult> {
+  const body = {
+    locations: [
+      { lon: a[0], lat: a[1], type: "break" },
+      { lon: b[0], lat: b[1], type: "break" },
+    ],
+    costing: "pedestrian",
+    directions_options: { units: "kilometers" },
+    shape_match: "edge_walk",
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(`${config.valhallaUrl}/route`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new ValhallaError(`Valhalla unreachable: ${message}`, "unreachable", 502);
+  }
+
+  if (!res.ok) {
+    let errBody: ValhallaErrorResponse = {};
+    try {
+      errBody = (await res.json()) as ValhallaErrorResponse;
+    } catch {
+      // ignore parse failure
+    }
+    if (res.status === 400 || errBody.error_code === 442) {
+      throw new ValhallaError(
+        "Couldn't find a street between those two points — try tapping closer together along one road",
+        "no_route",
+        422
+      );
+    }
+    throw new ValhallaError(
+      errBody.error ?? `Valhalla returned HTTP ${res.status}`,
+      "upstream_error",
+      502
+    );
+  }
+
+  let data: ValhallaResponse;
+  try {
+    data = (await res.json()) as ValhallaResponse;
+  } catch {
+    throw new ValhallaError("Valhalla returned invalid JSON", "upstream_error", 502);
+  }
+
+  const trip = data.trip;
+  if (!trip?.legs?.length) {
+    throw new ValhallaError("No path found between the corridor points", "no_route", 422);
+  }
+
+  // Concatenate leg geometries (skip the duplicated first point of later legs).
+  const allCoords: [number, number][] = [];
+  for (const leg of trip.legs) {
+    const legCoords = decodePolyline6(leg.shape);
+    if (allCoords.length === 0) {
+      allCoords.push(...legCoords);
+    } else {
+      allCoords.push(...legCoords.slice(1));
+    }
+  }
+
+  if (allCoords.length < 2) {
+    throw new ValhallaError("Corridor path too short to use", "no_route", 422);
+  }
+
+  return {
+    points: sampleAlong(allCoords, spacingM, maxPoints),
+    geometry: { type: "LineString", coordinates: allCoords },
+  };
+}
+
 /** Lightweight ping to check if Valhalla is up. */
 export async function pingValhalla(): Promise<boolean> {
   try {

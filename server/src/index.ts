@@ -15,6 +15,7 @@ import { serve } from "@hono/node-server";
 import { config } from "./config.js";
 import routeHandler from "./routes/route.js";
 import matchHandler from "./routes/match.js";
+import corridorHandler from "./routes/corridor.js";
 import searchHandler from "./routes/search.js";
 import healthHandler from "./routes/health.js";
 
@@ -49,6 +50,7 @@ app.use(
 
 app.route("/route", routeHandler);
 app.route("/match", matchHandler);
+app.route("/corridor", corridorHandler);
 app.route("/search", searchHandler);
 app.route("/health", healthHandler);
 
