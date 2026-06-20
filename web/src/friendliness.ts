@@ -19,7 +19,7 @@
  *   5. Coverage = fraction NOT on a busy road (green + amber + calm) / total.
  */
 
-import { haversineLength } from "./geo";
+import { closestPointOnSegmentMeters, haversineLength } from "./geo";
 import type { LngLat } from "./types";
 
 // ── Tuning constants (KEEP IN SYNC WITH iOS) ────────────────────────────────
@@ -176,13 +176,62 @@ async function buildIndex(url: string): Promise<Grid> {
 }
 
 let indexPromise: Promise<Grid> | null = null;
+// Resolved grid cached for synchronous use (snapToNetwork during a drag). Set
+// once the async build completes; null until then (snap falls back to raw).
+let resolvedGrid: Grid | null = null;
 
 /** Fetch + index the bike network once; cached for the page lifetime. */
 export function loadNetworkIndex(
   url = "/bike-network.geojson"
 ): Promise<Grid> {
-  if (!indexPromise) indexPromise = buildIndex(url);
+  if (!indexPromise) {
+    indexPromise = buildIndex(url).then((grid) => {
+      resolvedGrid = grid;
+      return grid;
+    });
+  }
   return indexPromise;
+}
+
+/**
+ * Snap `target` onto the nearest bike-network edge, in lng/lat. Returns the
+ * snapped point if a segment lies within `maxMeters`, else null (caller keeps
+ * the raw point so off-network drags still route).
+ *
+ * Synchronous: uses the resolved grid if it's loaded, otherwise kicks off the
+ * load and returns null this time. Snaps to ANY facility tier — we want the
+ * waypoint on a real path, not necessarily a greenway.
+ */
+export function snapToNetwork(
+  target: LngLat,
+  maxMeters = 60
+): LngLat | null {
+  const grid = resolvedGrid;
+  if (!grid) {
+    void loadNetworkIndex(); // warm the cache for next time
+    return null;
+  }
+  const cellLat = Math.floor(target[1] / CELL);
+  const cellLng = Math.floor(target[0] / CELL);
+  // Search a neighborhood wide enough to cover maxMeters (CELL ≈ 33 m).
+  const reach = Math.max(1, Math.ceil(maxMeters / (CELL * M_PER_DEG_LAT)));
+  let bestDist = maxMeters;
+  let best: LngLat | null = null;
+  for (let dy = -reach; dy <= reach; dy++) {
+    for (let dx = -reach; dx <= reach; dx++) {
+      const bucket = grid.get(`${cellLat + dy},${cellLng + dx}`);
+      if (!bucket) continue;
+      for (const seg of bucket) {
+        const pt = closestPointOnSegmentMeters(target, seg.a, seg.b);
+        const d = haversineLength([target, pt]);
+        if (d < bestDist) {
+          bestDist = d;
+          best = pt;
+        }
+      }
+    }
+  }
+  return best;
 }
 
 // ── Arterial spatial index ──────────────────────────────────────────────────

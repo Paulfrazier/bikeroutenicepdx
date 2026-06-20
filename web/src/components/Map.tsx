@@ -28,7 +28,7 @@ import maplibregl, {
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { LngLat, RouteResponse } from "../types";
-import { hitTestRoute, VERTEX_HIT_PX, type Px } from "../geo";
+import { hitTestRoute, VERTEX_HIT_PX, MAX_VIAS, type Px } from "../geo";
 
 // Protocol handler for PMTiles (lazy-import to keep bundle splittable)
 let pmtilesProtocolAdded = false;
@@ -163,8 +163,8 @@ function lineFeature(coords: LngLat[]): GeoJSON.Feature {
   };
 }
 
-/** Point features for each vertex (for the "route-vertices" grab-dot layer). */
-function vertexFeatures(coords: LngLat[]): GeoJSON.FeatureCollection {
+/** Point features for each waypoint pin (the "route-waypoints" handle layer). */
+function waypointFeatures(coords: LngLat[]): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
     features: coords.map((c) => ({
@@ -255,6 +255,8 @@ interface MapProps {
    * index of an existing via that was grabbed, or null to insert a new one. App
    * updates its via list and re-routes (snapping to real roads). */
   onReshape: (dragged: LngLat, movingViaIndex: number | null) => void;
+  /** A waypoint pin was tapped (pressed without dragging): remove that via. */
+  onDeleteVia: (index: number) => void;
 }
 
 export function Map({
@@ -267,6 +269,7 @@ export function Map({
   editing,
   vias,
   onReshape,
+  onDeleteVia,
 }: MapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -289,11 +292,13 @@ export function Map({
   const draggedFarRef = useRef(false);
   // Props that map listeners read live (identities change every render).
   const onReshapeRef = useRef(onReshape);
+  const onDeleteViaRef = useRef(onDeleteVia);
   const editingRef = useRef(editing);
   const viasRef = useRef(vias);
   const tierFeaturesRef = useRef(tierFeatures);
   useEffect(() => {
     onReshapeRef.current = onReshape;
+    onDeleteViaRef.current = onDeleteVia;
     editingRef.current = editing;
     viasRef.current = vias;
     tierFeaturesRef.current = tierFeatures;
@@ -497,23 +502,24 @@ export function Map({
         },
       });
 
-      // ── Grab-dot vertices (drawn above the route line) ───────────────────
-      // Small white dots mark each editable vertex, hinting the line is draggable.
-      map.addSource("route-vertices", {
+      // ── Waypoint pins (drawn above the route line) ───────────────────────
+      // Emerald handles mark each user-placed waypoint (via). Drag a pin to move
+      // it, drag the bare line to add one, tap a pin to delete it.
+      map.addSource("route-waypoints", {
         type: "geojson",
         data: emptyGeojson(),
       });
       map.addLayer({
-        id: "route-vertices",
+        id: "route-waypoints",
         type: "circle",
-        source: "route-vertices",
+        source: "route-waypoints",
         // Hidden until the user enters edit mode (toggled by the `editing` effect).
         layout: { visibility: "none" },
         paint: {
-          "circle-radius": 6,
-          "circle-color": "#ffffff",
-          "circle-stroke-color": "#2563eb",
-          "circle-stroke-width": 2,
+          "circle-radius": 7,
+          "circle-color": "#10b981",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2.5,
         },
       });
     });
@@ -554,17 +560,24 @@ export function Map({
         if (dpx < DRAG_THRESHOLD_PX) return;
         draggedFarRef.current = true;
       }
-      coords[idx] = [e.lngLat.lng, e.lngLat.lat];
+      const cursor: LngLat = [e.lngLat.lng, e.lngLat.lat];
+      coords[idx] = cursor;
       // Draw the live line on the transient drag source (the tier source is
       // cleared during the drag and refilled once the re-route completes).
       const dsrc = map.getSource("route-drag") as
         | maplibregl.GeoJSONSource
         | undefined;
       dsrc?.setData(lineFeature(coords));
-      const vsrc = map.getSource("route-vertices") as
+      // Track the dragged waypoint pin under the cursor: move the grabbed via, or
+      // show a provisional new pin where a fresh one will be inserted.
+      const liveVias = viasRef.current.slice();
+      const mv = movingViaIndexRef.current;
+      if (mv !== null && mv < liveVias.length) liveVias[mv] = cursor;
+      else liveVias.push(cursor);
+      const vsrc = map.getSource("route-waypoints") as
         | maplibregl.GeoJSONSource
         | undefined;
-      vsrc?.setData(vertexFeatures(coords));
+      vsrc?.setData(waypointFeatures(liveVias));
     };
 
     const onEnd = () => {
@@ -585,7 +598,21 @@ export function Map({
       if (!coords || idx < 0) return;
 
       if (!moved) {
-        // A tap, not a drag — restore the route line and drop nothing.
+        if (movingVia !== null) {
+          // Tapped an existing waypoint pin → delete it and re-route. Keep the
+          // drag preview line on screen until the new route arrives (no flicker),
+          // and optimistically drop the tapped pin from the handle layer.
+          suppressClickRef.current = true;
+          const remaining = viasRef.current.filter((_, i) => i !== movingVia);
+          (
+            map.getSource("route-waypoints") as
+              | maplibregl.GeoJSONSource
+              | undefined
+          )?.setData(waypointFeatures(remaining));
+          onDeleteViaRef.current(movingVia);
+          return;
+        }
+        // A tap on the bare line — restore the route line and drop nothing.
         (
           map.getSource("route") as maplibregl.GeoJSONSource | undefined
         )?.setData(tierFeaturesRef.current);
@@ -593,8 +620,8 @@ export function Map({
           map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
         )?.setData(emptyGeojson());
         (
-          map.getSource("route-vertices") as maplibregl.GeoJSONSource | undefined
-        )?.setData(vertexFeatures(displayCoordsRef.current));
+          map.getSource("route-waypoints") as maplibregl.GeoJSONSource | undefined
+        )?.setData(waypointFeatures(viasRef.current));
         return;
       }
 
@@ -618,11 +645,17 @@ export function Map({
       );
       if (!hit) return; // not on the line — let MapLibre pan normally
 
+      // Did the press grab an existing via? Decide before any insertion.
+      const movingVia = nearestViaIndexPx({ x: e.point.x, y: e.point.y });
+      // Inserting a new waypoint? Refuse once we're at the cap so the route can't
+      // get cluttered — let the map pan normally instead. Moving an existing pin
+      // is always allowed.
+      if (movingVia === null && viasRef.current.length >= MAX_VIAS) return;
+
       e.preventDefault();
       map.dragPan.disable();
 
-      // Did the press grab an existing via? Decide before any insertion.
-      movingViaIndexRef.current = nearestViaIndexPx({ x: e.point.x, y: e.point.y });
+      movingViaIndexRef.current = movingVia;
       dragStartPxRef.current = { x: e.point.x, y: e.point.y };
       draggedFarRef.current = false;
 
@@ -712,18 +745,16 @@ export function Map({
   }, [tierFeatures]);
 
   // ── Server route: track coords + fit bounds (only for a fresh route) ──
+  // The route geometry drives hit-testing for drags; the waypoint pins are
+  // driven separately from `vias` below (handles mark user waypoints, not every
+  // geometry vertex).
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
 
-    const vsrc = map.getSource("route-vertices") as
-      | maplibregl.GeoJSONSource
-      | undefined;
-
     if (route) {
       const coords = route.geometry.coordinates;
       displayCoordsRef.current = coords;
-      vsrc?.setData(vertexFeatures(coords));
       // Fit map to route bounds ONLY for a fresh route (no vias). A reshape
       // re-route has vias set — refitting then would yank the viewport.
       if (coords.length > 1 && viasRef.current.length === 0) {
@@ -735,18 +766,27 @@ export function Map({
       }
     } else {
       displayCoordsRef.current = [];
-      vsrc?.setData(emptyGeojson());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route]);
 
-  // ── Toggle the grab-dot handles' visibility with edit mode ──
+  // ── Waypoint pins: repaint the handle layer whenever the via list changes ──
+  // (a reshape adds/moves a via, a tap deletes one, endpoint changes clear them).
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
-    if (map.getLayer("route-vertices")) {
+    (
+      map.getSource("route-waypoints") as maplibregl.GeoJSONSource | undefined
+    )?.setData(waypointFeatures(vias));
+  }, [vias]);
+
+  // ── Toggle the waypoint handles' visibility with edit mode ──
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    if (map.getLayer("route-waypoints")) {
       map.setLayoutProperty(
-        "route-vertices",
+        "route-waypoints",
         "visibility",
         editing ? "visible" : "none"
       );

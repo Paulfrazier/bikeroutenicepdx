@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { fetchRoute } from "../api";
 import type { LngLat, RouteResponse } from "../types";
 
@@ -7,9 +7,14 @@ import type { LngLat, RouteResponse } from "../types";
  * are ordered pass-through waypoints from drag-to-reshape — changing them
  * re-routes start → vias → end (snapped to real roads).
  *
- * A short debounce (400ms) prevents hammering the API while markers/vias are
- * being updated rapidly.
+ * The debounce is split by what changed: typing in the address boxes (which
+ * mutates `from`/`to` keystroke-by-keystroke) waits 400ms so we don't hammer the
+ * API, but a deliberate drag-release/delete (which only mutates `vias`) fires the
+ * re-route immediately so editing feels snappy.
  */
+const ENDPOINT_DEBOUNCE_MS = 400;
+const VIA_DEBOUNCE_MS = 0;
+
 export function useRoute(
   from: LngLat | null,
   to: LngLat | null,
@@ -22,12 +27,21 @@ export function useRoute(
   // Serialize vias so the effect re-runs on value change, not array identity.
   const viaKey = JSON.stringify(vias);
 
+  // Track the previous endpoints so we can tell whether THIS change came from
+  // the endpoints (debounce) or only from a via edit (fire immediately).
+  const prevEndpointsRef = useRef<string>("");
+
   useEffect(() => {
     if (!from || !to) {
       setRoute(null);
       setError(null);
       return;
     }
+
+    const endpointKey = JSON.stringify([from, to]);
+    const endpointsChanged = endpointKey !== prevEndpointsRef.current;
+    prevEndpointsRef.current = endpointKey;
+    const delay = endpointsChanged ? ENDPOINT_DEBOUNCE_MS : VIA_DEBOUNCE_MS;
 
     setLoading(true);
     setError(null);
@@ -50,7 +64,7 @@ export function useRoute(
         .finally(() => {
           if (!cancelled) setLoading(false);
         });
-    }, 400);
+    }, delay);
 
     return () => {
       cancelled = true;

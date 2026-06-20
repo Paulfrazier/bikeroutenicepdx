@@ -14,8 +14,8 @@ import { RouteSummary } from "./components/RouteSummary";
 import { DirectionsPanel } from "./components/DirectionsPanel";
 import { useRoute } from "./hooks/useRoute";
 import { useFriendliness } from "./hooks/useFriendliness";
-import { toTierFeatureCollection } from "./friendliness";
-import { nearestVertexIndex } from "./geo";
+import { toTierFeatureCollection, snapToNetwork } from "./friendliness";
+import { nearestVertexIndex, MAX_VIAS } from "./geo";
 import type { LngLat } from "./types";
 
 export default function App() {
@@ -52,30 +52,42 @@ export default function App() {
   );
 
   // A drag finished: update the via list (move an existing one or insert a new
-  // one in along-route order) and let useRoute re-route + snap.
+  // one in along-route order) and let useRoute re-route + snap. The dragged point
+  // is first snapped to the nearest bike-network edge so the via lands on a real
+  // path (not mid-block), which keeps the re-route from taking weird detours.
   const handleReshape = useCallback(
     (dragged: LngLat, movingViaIndex: number | null) => {
+      const snapped = snapToNetwork(dragged) ?? dragged;
       const routeCoords = route?.geometry.coordinates ?? [];
       setVias((prev) => {
         if (movingViaIndex !== null && movingViaIndex < prev.length) {
           const next = prev.slice();
-          next[movingViaIndex] = dragged;
+          next[movingViaIndex] = snapped;
           return next;
         }
+        // Cap inserts so the route stays uncluttered (the Map also gates new
+        // drags at this cap; this is a defensive backstop).
+        if (prev.length >= MAX_VIAS) return prev;
         // Insert in along-route order: count existing vias that come before the
         // dragged point along the current route geometry (mirrors iOS reshape).
-        const draggedKey = nearestVertexIndex(dragged, routeCoords);
+        const draggedKey = nearestVertexIndex(snapped, routeCoords);
         let insertAt = 0;
         for (const v of prev) {
           if (nearestVertexIndex(v, routeCoords) <= draggedKey) insertAt++;
         }
         const next = prev.slice();
-        next.splice(Math.min(insertAt, next.length), 0, dragged);
+        next.splice(Math.min(insertAt, next.length), 0, snapped);
         return next;
       });
     },
     [route]
   );
+
+  // A waypoint pin was tapped (pressed without dragging): drop that via and
+  // re-route. Endpoints stay put — only the through-waypoint is removed.
+  const handleDeleteVia = useCallback((index: number) => {
+    setVias((prev) => prev.filter((_, i) => i !== index));
+  }, []);
   const friendliness = useFriendliness(activeCoords);
   const tierFeatures = useMemo(
     () =>
@@ -211,6 +223,7 @@ export default function App() {
           editing={editing}
           vias={vias}
           onReshape={handleReshape}
+          onDeleteVia={handleDeleteVia}
         />
 
         {/* ── Mobile bottom drawer ── */}

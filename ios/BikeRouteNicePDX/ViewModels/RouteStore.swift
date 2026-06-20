@@ -46,6 +46,10 @@ final class RouteStore {
     /// moves) one of these; the route is re-routed start → vias → end cleanly.
     var vias: [CLLocationCoordinate2D] = []
 
+    /// Cap on drag-to-reshape waypoints — keeps the route uncluttered. The map
+    /// coordinator refuses to start a new-via drag once this many exist.
+    static let maxVias = 6
+
     // Result
     var snapped: SnappedRoute? {
         didSet { routeVersion += 1 }
@@ -253,18 +257,23 @@ final class RouteStore {
         let previousVias = vias
         let previousSnapped = snapped
 
+        // Snap the dragged point onto the nearest bike-network edge so the via
+        // lands on a real path (not mid-block), which keeps the re-route from
+        // taking weird detours. Off-network drags keep the raw point.
+        let snappedDrag = await BikeFriendliness.shared.nearestNetworkPoint(dragged) ?? dragged
+
         // Update the via list.
         if let i = movingViaIndex, vias.indices.contains(i) {
-            vias[i] = dragged
+            vias[i] = snappedDrag
         } else {
             // Insert in along-route order: count existing vias that come before
             // the dragged point along the current route geometry.
             let routeCoords = previousSnapped?.coordinates ?? preview
-            let draggedKey = GeoMath.nearestIndex(of: dragged, in: routeCoords)
+            let draggedKey = GeoMath.nearestIndex(of: snappedDrag, in: routeCoords)
             let insertAt = vias.filter {
                 GeoMath.nearestIndex(of: $0, in: routeCoords) <= draggedKey
             }.count
-            vias.insert(dragged, at: min(insertAt, vias.count))
+            vias.insert(snappedDrag, at: min(insertAt, vias.count))
         }
 
         // Show the rubber-banded preview immediately (no snap-back flicker).
@@ -282,6 +291,29 @@ final class RouteStore {
             vias = previousVias
             snapped = previousSnapped
             isManuallyEdited = previousVias.isEmpty ? false : isManuallyEdited
+        }
+    }
+
+    /// Remove a waypoint (tapped pin) and re-route start → remaining vias → end.
+    /// The old route stays on screen until the new one lands (no snap-back); on
+    /// failure we restore the via and the previous route.
+    func deleteVia(at index: Int) async {
+        guard vias.indices.contains(index),
+              let startC = start?.coordinate, let endC = end?.coordinate else { return }
+
+        let previousVias = vias
+        let previousSnapped = snapped
+        vias.remove(at: index)
+
+        do {
+            let routed = try await router.route(from: startC, to: endC, vias: vias, preference: routePreference.rawValue)
+            guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
+            snapped = await classified(routed)
+            isManuallyEdited = !vias.isEmpty
+            phase = .routed
+        } catch {
+            vias = previousVias
+            snapped = previousSnapped
         }
     }
 

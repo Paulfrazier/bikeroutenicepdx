@@ -20,6 +20,9 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
     private var startAnnotation: MKPointAnnotation?
     private var endAnnotation: MKPointAnnotation?
+    /// Emerald handle dots at each drag-to-reshape waypoint (via). Shown only in
+    /// edit mode; drag a pin to move it, tap it to delete it.
+    private var viaAnnotations: [ViaAnnotation] = []
     /// The displayed route, one overlay per contiguous bike-friendliness tier
     /// run (replaces the old single blue line).
     private var routeOverlays: [MKOverlay] = []
@@ -91,6 +94,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
         syncAnnotation(&startAnnotation, waypoint: store.start, title: "Start", map: map)
         syncAnnotation(&endAnnotation, waypoint: store.end, title: "End", map: map)
+        syncViaAnnotations(map)
 
         if let snapped = store.snapped {
             // Rebuild when the route identity changes (routeVersion), not just its
@@ -195,6 +199,22 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         return rect
     }
 
+    /// Rebuild the waypoint handle pins from `store.vias`. Shown only in edit
+    /// mode (mirrors the web app). Rebuilt wholesale — the list is tiny (≤ maxVias).
+    private func syncViaAnnotations(_ map: MKMapView) {
+        if !viaAnnotations.isEmpty {
+            map.removeAnnotations(viaAnnotations)
+            viaAnnotations = []
+        }
+        guard store.isEditMode else { return }
+        for via in store.vias {
+            let annotation = ViaAnnotation()
+            annotation.coordinate = via
+            map.addAnnotation(annotation)
+            viaAnnotations.append(annotation)
+        }
+    }
+
     private func syncAnnotation(
         _ annotation: inout MKPointAnnotation?,
         waypoint: Waypoint?,
@@ -222,6 +242,16 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     @objc func handleTap(_ gesture: UITapGestureRecognizer) {
         guard !store.isDrawMode, let map = mapView else { return }
         let point = gesture.location(in: map)
+        // In edit mode, tapping a waypoint pin deletes it (and re-routes).
+        if store.isEditMode, let viaIndex = nearestViaIndex(point, map: map) {
+            // Optimistically drop the tapped pin so it disappears immediately.
+            if viaIndex < viaAnnotations.count {
+                map.removeAnnotation(viaAnnotations[viaIndex])
+                viaAnnotations.remove(at: viaIndex)
+            }
+            Task { await store.deleteVia(at: viaIndex) }
+            return
+        }
         let coordinate = map.convert(point, toCoordinateFrom: map)
         store.handleMapTap(coordinate)
     }
@@ -298,6 +328,14 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
             guard let hit = hitTest(point, coords: coords, map: map) else {
                 // shouldBegin should have prevented this; bail safely.
+                editingIndex = nil
+                editingViaIndex = nil
+                return
+            }
+            // Refuse to add a NEW via once we're at the cap (moving an existing
+            // one is always fine) — keeps the route uncluttered. Leaving isEditing
+            // false makes the rest of the drag inert and the map pans normally.
+            if editingViaIndex == nil && store.vias.count >= RouteStore.maxVias {
                 editingIndex = nil
                 editingViaIndex = nil
                 return
@@ -562,6 +600,28 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
     func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
         if annotation is MKUserLocation { return nil }
+
+        // Waypoint handle: a small emerald dot with a white ring. Non-interactive
+        // so touches pass through to the edit-pan / tap gestures on the line.
+        if annotation is ViaAnnotation {
+            let id = "via"
+            let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
+                ?? MKAnnotationView(annotation: annotation, reuseIdentifier: id)
+            view.annotation = annotation
+            let size: CGFloat = 16
+            view.frame = CGRect(x: 0, y: 0, width: size, height: size)
+            view.backgroundColor = .clear
+            view.layer.cornerRadius = size / 2
+            view.layer.backgroundColor = UIColor(
+                red: 0.063, green: 0.725, blue: 0.506, alpha: 1 // #10b981 emerald
+            ).cgColor
+            view.layer.borderColor = UIColor.white.cgColor
+            view.layer.borderWidth = 2.5
+            view.canShowCallout = false
+            view.isUserInteractionEnabled = false
+            return view
+        }
+
         let identifier = "waypoint"
         let view = (mapView.dequeueReusableAnnotationView(withIdentifier: identifier)
             as? MKMarkerAnnotationView)
@@ -601,6 +661,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         return nearestLineDistance(point, coords: coords, map: map) <= grab
     }
 }
+
+/// A drag-to-reshape waypoint handle. Subclass so `viewFor` can render it as a
+/// distinct emerald dot (vs. the start/end marker pins).
+final class ViaAnnotation: MKPointAnnotation {}
 
 /// Shortest distance from point `p` to the line segment `a`–`b`, in the same
 /// (screen) coordinate space. Free function — pure CGPoint math.

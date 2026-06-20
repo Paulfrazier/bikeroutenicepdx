@@ -36,6 +36,49 @@ export function haversineLength(coords: LngLat[]): number {
   return total;
 }
 
+// ── Meter-space closest point (for snapping to the network) ─────────────────
+
+const DEG2RAD = Math.PI / 180;
+// Equirectangular meters-per-degree factors (scaled by cos(lat) at use-site).
+const M_PER_DEG_LNG = 111320;
+const M_PER_DEG_LAT = 110540;
+
+/**
+ * Closest point to `p` on the lng/lat segment a→b, returned in lng/lat.
+ *
+ * Projects locally to an equirectangular plane centered on `p` (meters), clamps
+ * to the segment, then unprojects. The lng/lat companion to the pixel-space
+ * `closestPointOnSegment`; used to snap a dragged waypoint onto a network edge.
+ */
+export function closestPointOnSegmentMeters(
+  p: LngLat,
+  a: LngLat,
+  b: LngLat
+): LngLat {
+  const cosLat = Math.cos(p[1] * DEG2RAD);
+  // Project relative to p (the origin) in meters.
+  const ax = (a[0] - p[0]) * cosLat * M_PER_DEG_LNG;
+  const ay = (a[1] - p[1]) * M_PER_DEG_LAT;
+  const bx = (b[0] - p[0]) * cosLat * M_PER_DEG_LNG;
+  const by = (b[1] - p[1]) * M_PER_DEG_LAT;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  let cx: number;
+  let cy: number;
+  if (lenSq === 0) {
+    cx = ax;
+    cy = ay;
+  } else {
+    let t = (-ax * dx + -ay * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    cx = ax + t * dx;
+    cy = ay + t * dy;
+  }
+  // Unproject back to lng/lat.
+  return [p[0] + cx / (cosLat * M_PER_DEG_LNG), p[1] + cy / M_PER_DEG_LAT];
+}
+
 /**
  * Index of the vertex in `coords` closest to `target` (great-circle).
  *
@@ -82,6 +125,9 @@ export function pointToSegmentDistancePx(p: Px, a: Px, b: Px): number {
 }
 
 // ── Hit-test ───────────────────────────────────────────────────────────────
+
+/** Max number of drag-to-reshape waypoints — keeps the route uncluttered. */
+export const MAX_VIAS = 6;
 
 /** Grab radius (px) around an existing vertex — generous, fingers are fat. */
 export const VERTEX_HIT_PX = 22;

@@ -135,6 +135,40 @@ actor BikeFriendliness {
         return (smoothed, coverage)
     }
 
+    /// Snap `target` onto the nearest bike-network edge, returned in lat/lng.
+    /// Returns nil when no segment lies within `maxMeters` (the caller keeps the
+    /// raw point so off-network drags still route). Snaps to ANY facility tier —
+    /// we want the dragged waypoint on a real path, not necessarily a greenway —
+    /// so the re-route doesn't take weird detours from a mid-block via.
+    func nearestNetworkPoint(
+        _ target: CLLocationCoordinate2D,
+        maxMeters: Double = 60
+    ) -> CLLocationCoordinate2D? {
+        loadIfNeeded()
+        let cosLat = cos(target.latitude * .pi / 180)
+        let cx = Int(floor(target.longitude / Self.cell))
+        let cy = Int(floor(target.latitude / Self.cell))
+        // Cell ≈ 33 m; widen the search neighborhood to cover maxMeters.
+        let reach = max(1, Int(ceil(maxMeters / (Self.cell * 110_540))))
+
+        var bestDist = maxMeters
+        var best: CLLocationCoordinate2D?
+        var seen = Set<Int>()
+        for gx in (cx - reach)...(cx + reach) {
+            for gy in (cy - reach)...(cy + reach) {
+                guard let bucket = grid[CellKey(x: gx, y: gy)] else { continue }
+                for idx in bucket {
+                    if !seen.insert(idx).inserted { continue }
+                    let seg = segs[idx]
+                    let pt = closestPointMeters(target: target, a: seg.a, b: seg.b, cosLat: cosLat)
+                    let d = distanceMeters(target, pt)
+                    if d < bestDist { bestDist = d; best = pt }
+                }
+            }
+        }
+        return best
+    }
+
     // MARK: - Classification core
 
     /// Tier for a route-segment midpoint. First try to match a nearby bike
@@ -437,6 +471,44 @@ actor BikeFriendliness {
         let projX = pa.x + t * dx
         let projY = pa.y + t * dy
         return hypot(projX, projY)
+    }
+
+    /// Closest point to `target` on segment a→b, returned in lat/lng, via a
+    /// local equirectangular projection centered on `target` (the lat/lng
+    /// companion to `perpDistanceMeters`, which returns only the distance).
+    private func closestPointMeters(
+        target: CLLocationCoordinate2D,
+        a: CLLocationCoordinate2D,
+        b: CLLocationCoordinate2D,
+        cosLat: Double
+    ) -> CLLocationCoordinate2D {
+        func project(_ c: CLLocationCoordinate2D) -> (x: Double, y: Double) {
+            let dx = (c.longitude - target.longitude) * cosLat * 111_320
+            let dy = (c.latitude - target.latitude) * 110_540
+            return (dx, dy)
+        }
+        let pa = project(a)
+        let pb = project(b)
+        // target projects to the origin.
+        let dx = pb.x - pa.x
+        let dy = pb.y - pa.y
+        let lenSq = dx * dx + dy * dy
+        let projX: Double
+        let projY: Double
+        if lenSq == 0 {
+            projX = pa.x
+            projY = pa.y
+        } else {
+            var t = (-pa.x * dx - pa.y * dy) / lenSq
+            t = max(0, min(1, t))
+            projX = pa.x + t * dx
+            projY = pa.y + t * dy
+        }
+        // Unproject back to lat/lng.
+        return CLLocationCoordinate2D(
+            latitude: target.latitude + projY / 110_540,
+            longitude: target.longitude + projX / (cosLat * 111_320)
+        )
     }
 
     /// Initial bearing a→b, degrees in 0..<360.
