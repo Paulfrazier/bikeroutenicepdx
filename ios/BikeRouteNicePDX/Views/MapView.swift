@@ -78,6 +78,11 @@ struct MapView: UIViewRepresentable {
         map.addGestureRecognizer(longPress)
         context.coordinator.editLongPressGesture = longPress
 
+        // A hold must NOT also fire the tap (which deletes the pin). Make the tap
+        // wait for the long-press to fail: a quick tap still deletes (long-press
+        // fails on early lift), but a hold toggles precise without deleting.
+        tap.require(toFail: longPress)
+
         context.coordinator.mapView = map
         return map
     }
