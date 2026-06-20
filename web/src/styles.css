@@ -218,12 +218,16 @@ button {
 }
 
 /* ── Corridor ("route through a section") pick banner ──────────────────────── */
+/* Mobile-first: anchored to the BOTTOM (thumb zone), floated above the bottom
+   drawer — "Route through here" is a commit action, not passive status, so it
+   belongs near the thumb, not up top. Desktop (≥768px, mouse + no drawer)
+   moves it back to top-center. */
 .corridor-bar {
   position: absolute;
-  top: 12px;
+  bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 5;
+  z-index: 25; /* above the bottom drawer (z-index 20) */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -236,6 +240,14 @@ button {
   box-shadow: var(--shadow-md, 0 4px 16px rgba(0, 0, 0, 0.25));
   font-size: 0.92rem;
   text-align: center;
+}
+
+@media (min-width: 768px) {
+  .corridor-bar {
+    top: 12px;
+    bottom: auto;
+    z-index: 5;
+  }
 }
 
 .corridor-bar__msg strong {

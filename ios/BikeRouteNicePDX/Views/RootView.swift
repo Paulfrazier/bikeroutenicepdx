@@ -26,7 +26,6 @@ struct RootView: View {
             }
 
             topBanner
-            corridorBanner
 
             VStack(spacing: 12) {
                 Spacer()
@@ -36,6 +35,10 @@ struct RootView: View {
                         locateButton
                     }
                 }
+                // Corridor pick/confirm sits just above the controls — in the
+                // thumb zone — since "Route through here" is a commit action, not
+                // passive status (top is a reach + far from where the eye is).
+                corridorBanner
                 ControlsBar(showSearch: $showSearch, showDirections: $showDirections)
             }
         }
@@ -161,8 +164,7 @@ struct RootView: View {
             .padding(.vertical, 12)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .transition(.move(edge: .top).combined(with: .opacity))
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
