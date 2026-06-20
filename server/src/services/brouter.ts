@@ -13,7 +13,7 @@
  */
 
 import { config } from "../config.js";
-import { ValhallaError } from "./valhalla.js";
+import { ValhallaError, traceRouteSteps } from "./valhalla.js";
 import type { RouteResult, RouteStep } from "./valhalla.js";
 import {
   classifyPoint,
@@ -99,7 +99,16 @@ export async function getRouteBrouter(
   const distance_m = Math.round(Number(feat.properties?.["track-length"] ?? 0));
   const duration_s = Math.round(Number(feat.properties?.["total-time"] ?? 0));
 
-  const { steps, greenwayMeters } = buildSteps(coords);
+  // Coverage is always computed from BRouter's geometry. Steps prefer named
+  // turn-by-turn from Valhalla trace_route; fall back to class-only runs.
+  const fallback = buildSteps(coords);
+  let steps: RouteStep[] = fallback.steps;
+  try {
+    const named = await traceRouteSteps(coords);
+    if (named.length) steps = named;
+  } catch {
+    // Valhalla unavailable / no match — keep the class-only steps.
+  }
   const totalForCoverage = distance_m > 0 ? distance_m : sumLength(coords);
 
   return {
@@ -107,7 +116,8 @@ export async function getRouteBrouter(
     steps,
     distance_m,
     duration_s,
-    greenway_coverage: totalForCoverage > 0 ? greenwayMeters / totalForCoverage : 0,
+    greenway_coverage:
+      totalForCoverage > 0 ? fallback.greenwayMeters / totalForCoverage : 0,
   };
 }
 

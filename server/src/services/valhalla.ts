@@ -476,6 +476,60 @@ export async function matchTrace(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Name a route geometry via Valhalla trace_route
+// ---------------------------------------------------------------------------
+// BRouter picks the (greenway-preferring) route but its data has no street
+// names. We map-match BRouter's geometry onto Valhalla's graph with
+// /trace_route to recover turn-by-turn maneuvers WITH street names + turn text,
+// then attach our PBOT greenway class per step. Best-effort: the caller falls
+// back to class-only steps if this throws.
+
+export async function traceRouteSteps(
+  coords: [number, number][] // [lng, lat] route geometry to name
+): Promise<RouteStep[]> {
+  const body = {
+    shape: coords.map(([lng, lat]) => ({ lat, lon: lng })),
+    costing: "bicycle",
+    costing_options: { bicycle: { bicycle_type: "Hybrid", use_roads: 0.5 } },
+    // Tight match so it follows BRouter's line rather than re-routing.
+    shape_match: "map_snap",
+    trace_options: { search_radius: 20, gps_accuracy: 8, breakage_distance: 2000 },
+    directions_options: { units: "kilometers" },
+  };
+
+  const res = await fetch(`${config.valhallaUrl}/trace_route`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new ValhallaError(`trace_route HTTP ${res.status}`, "upstream_error", 502);
+
+  const data = (await res.json()) as ValhallaResponse;
+  const trip = data.trip;
+  if (!trip?.legs?.length) throw new ValhallaError("no matched legs", "no_route", 422);
+
+  const steps: RouteStep[] = [];
+  for (const leg of trip.legs) {
+    const legCoords = decodePolyline6(leg.shape);
+    for (const m of leg.maneuvers) {
+      const stepCoord = legCoords[m.begin_shape_index] ?? legCoords[0];
+      const slice = legCoords.slice(m.begin_shape_index, m.end_shape_index + 1);
+      steps.push({
+        instruction: m.instruction,
+        distance_m: Math.round(m.length * 1000),
+        duration_s: Math.round(m.time),
+        street_name: m.street_names?.[0] ?? null,
+        maneuver_type: maneuverTypeName(m.type),
+        location: stepCoord,
+        bicycle_network_class: dominantClass(slice),
+      });
+    }
+  }
+  return steps;
+}
+
 /** Lightweight ping to check if Valhalla is up. */
 export async function pingValhalla(): Promise<boolean> {
   try {
