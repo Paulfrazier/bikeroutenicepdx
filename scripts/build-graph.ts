@@ -271,6 +271,14 @@ function osmiumExportWays(pbfPath: string, geojsonPath: string): void {
 // cycleway=track so they outrank painted bike lanes (cycleway=lane), which
 // Valhalla would otherwise prefer — the main cause of mid-route defection.
 
+// NOTE (validated 2026-06-20 against a local stock-Valhalla tile build): baking
+// these tags does NOT reliably bias routes onto greenways — Valhalla scores a
+// quiet residential and a residential-with-bike-infra as near-equal, and
+// use_roads 0 vs 1 produced identical routes on test ODs. highway=cycleway (a
+// stronger lever) made coverage WORSE on several routes. Conclusion: strong
+// greenway adherence needs custom costing (BRouter-style per-tag profile) or a
+// route-snapping post-process, not stock-Valhalla tag injection. These tags are
+// kept as a mild, harmless preference; see routing/VALIDATION.md.
 const CLASS_TAGS: Record<NormalizedClass, Record<string, string>> = {
   off_street: { cycleway: "track", bicycle: "designated", lcn: "yes" },
   greenway: { cycleway: "track", bicycle: "designated", lcn: "yes" },

@@ -1,7 +1,28 @@
 # Validating the greenway-tuned Valhalla (local, Docker)
 
-Goal: confirm that routes prefer PBOT greenways **before** paying to host a
-custom Valhalla. Greenway preference is baked into the OSM ways as standard tags
+> ## ⚠️ Validation result (2026-06-20): baked-tag approach does NOT work well
+> A full local tile build + `npm run test:routes` (8 canonical routes) was run
+> against stock Valhalla with the tagged PBF. Result: **1/8 pass**, coverage
+> mostly 20–35% — often *worse* than the public Valhalla baseline (~38%).
+> Diagnostics:
+> - Tags land correctly: a greenway edge reports `cycle_lane=separated`,
+>   `bike_network=true`. So Valhalla reads them.
+> - But `use_roads=0` and `use_roads=1` produce **identical routes** — Valhalla
+>   scores quiet residential ≈ greenway, so the preference barely moves routing.
+> - The stronger lever `highway=cycleway` made coverage **worse** (route 1:
+>   24% → 2%).
+>
+> **Conclusion:** strong greenway adherence is not achievable by injecting OSM
+> tags into stock Valhalla. Real options: (a) a custom per-tag bike profile in
+> **BRouter** (designed for exactly this), (b) a **route-snapping post-process**
+> that pulls Valhalla's path onto the PBOT greenway network, or (c) genuine
+> custom Valhalla costing (fork). **Do not host the baked-tag Valhalla** — it
+> would regress routing vs the current public server.
+
+---
+
+Goal (original): confirm that routes prefer PBOT greenways **before** paying to
+host a custom Valhalla. Greenway preference is baked into the OSM ways as standard tags
 (`cycleway=track` / `bicycle=designated` / `lcn=yes`) by `scripts/build-graph.ts`,
 so this runs **stock** `gisops/valhalla` — no custom Lua.
 
