@@ -15,13 +15,15 @@ import { DirectionsPanel } from "./components/DirectionsPanel";
 import { useRoute } from "./hooks/useRoute";
 import { useFriendliness } from "./hooks/useFriendliness";
 import { toTierFeatureCollection, snapToNetwork } from "./friendliness";
-import { arcLengthAt, haversineLength, MAX_VIAS } from "./geo";
-import type { LngLat, Via } from "./types";
+import { arcLengthAt, haversineLength, applyManualSegments, MAX_VIAS } from "./geo";
+import type { LngLat, Via, ManualSegment } from "./types";
 
 // Monotonic id source for waypoints — gives each via a stable identity so
 // re-routes never reorder or lose it.
 let viaIdCounter = 0;
 const nextViaId = () => `via-${++viaIdCounter}`;
+let segIdCounter = 0;
+const nextSegId = () => `seg-${++segIdCounter}`;
 // A snapped insert landing within this many meters of an existing waypoint is
 // treated as a duplicate; we keep the raw drop point so two pins never collapse.
 const VIA_DEDUPE_M = 8;
@@ -40,6 +42,10 @@ export default function App() {
   // careful edit isn't wiped when you nudge start/end.
   const [vias, setVias] = useState<Via[]>([]);
   const [editing, setEditing] = useState(false);
+  // Hand-drawn stretches spliced into the auto route (manual mode). Persist
+  // across edits; cleared only on an explicit reset.
+  const [manualSegments, setManualSegments] = useState<ManualSegment[]>([]);
+  const [drawMode, setDrawMode] = useState(false);
   // Leaving edit mode on an endpoint change is fine (pins persist in state and
   // reappear on re-enter); we deliberately do NOT clear `vias` here.
   useEffect(() => {
@@ -58,9 +64,23 @@ export default function App() {
   // ── Bike-friendliness classification (client-side) ────────────────────────
   // Classify the active (snapped) route geometry so tiers + coverage update
   // after every reshape re-route.
-  const activeCoords = useMemo<LngLat[] | null>(
-    () => route?.geometry.coordinates ?? null,
-    [route]
+  // Display geometry = the auto route with hand-drawn segments spliced in.
+  const activeCoords = useMemo<LngLat[] | null>(() => {
+    const auto = route?.geometry.coordinates ?? null;
+    if (!auto) return null;
+    return manualSegments.length
+      ? applyManualSegments(auto, manualSegments)
+      : auto;
+  }, [route, manualSegments]);
+
+  // Once a manual stretch is spliced, the server distance no longer matches —
+  // measure the displayed geometry instead.
+  const displayDistanceM = useMemo(
+    () =>
+      manualSegments.length && activeCoords
+        ? haversineLength(activeCoords)
+        : route?.distance_m ?? 0,
+    [manualSegments, activeCoords, route]
   );
 
   // Insert a fresh waypoint along the route at arc-length position. `precise`
@@ -135,6 +155,28 @@ export default function App() {
     setVias((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  // Finished a freehand draw: keep it VERBATIM as a manual segment spliced into
+  // the route (forces that stretch). Exit draw mode after one stroke.
+  const handleDrawSegment = useCallback((coords: LngLat[]) => {
+    if (coords.length < 2) return;
+    setManualSegments((prev) => [...prev, { id: nextSegId(), coords }]);
+    setDrawMode(false);
+  }, []);
+
+  // Raw-nudge a point on a manual segment (drag) — verbatim, no re-route.
+  const handleManualNudge = useCallback(
+    (segId: string, vertexIndex: number, at: LngLat) => {
+      setManualSegments((prev) =>
+        prev.map((s) =>
+          s.id === segId
+            ? { ...s, coords: s.coords.map((c, i) => (i === vertexIndex ? at : c)) }
+            : s
+        )
+      );
+    },
+    []
+  );
+
   // Dragged the start/end marker to fine-tune an endpoint (e.g. onto the real
   // driveway). Waypoints persist, so the route re-routes through them.
   const handleMoveEndpoint = useCallback(
@@ -178,6 +220,8 @@ export default function App() {
         setTo(null);
         setToLabel("");
         setVias([]);
+        setManualSegments([]);
+        setDrawMode(false);
         clickCount.current = -1; // will be incremented to 0 below
       }
       clickCount.current += 1;
@@ -250,10 +294,10 @@ export default function App() {
         {hasRoute && (
           <div className="side-panel__results">
             <RouteSummary
-              distance_m={route.distance_m}
+              distance_m={displayDistanceM}
               duration_s={route.duration_s}
               coverage={friendliness?.coverage}
-              reshaped={reshaped}
+              reshaped={reshaped || manualSegments.length > 0}
             />
             <button
               type="button"
@@ -262,6 +306,14 @@ export default function App() {
               onClick={() => setEditing((e) => !e)}
             >
               {editing ? "✓ Done editing" : "✎ Edit route"}
+            </button>
+            <button
+              type="button"
+              className={`edit-route-btn ${drawMode ? "edit-route-btn--active" : ""}`}
+              aria-pressed={drawMode}
+              onClick={() => setDrawMode((d) => !d)}
+            >
+              {drawMode ? "✓ Drawing — draw on map" : "✏️ Draw segment"}
             </button>
             <DirectionsPanel steps={route.steps} onStepClick={handleStepClick} />
           </div>
@@ -291,6 +343,10 @@ export default function App() {
           onInsertPrecise={handleInsertPrecise}
           onToggleVia={handleToggleVia}
           onMoveEndpoint={handleMoveEndpoint}
+          drawMode={drawMode}
+          manualSegments={manualSegments}
+          onDrawSegment={handleDrawSegment}
+          onManualNudge={handleManualNudge}
         />
 
         {/* ── Mobile bottom drawer ── */}
@@ -315,10 +371,10 @@ export default function App() {
 
             <div id="drawer-content" className="bottom-drawer__content">
               <RouteSummary
-                distance_m={route.distance_m}
+                distance_m={displayDistanceM}
                 duration_s={route.duration_s}
                 coverage={friendliness?.coverage}
-                reshaped={reshaped}
+                reshaped={reshaped || manualSegments.length > 0}
               />
               <button
                 type="button"
@@ -327,6 +383,14 @@ export default function App() {
                 onClick={() => setEditing((e) => !e)}
               >
                 {editing ? "✓ Done editing" : "✎ Edit route"}
+              </button>
+              <button
+                type="button"
+                className={`edit-route-btn ${drawMode ? "edit-route-btn--active" : ""}`}
+                aria-pressed={drawMode}
+                onClick={() => setDrawMode((d) => !d)}
+              >
+                {drawMode ? "✓ Drawing — draw on map" : "✏️ Draw segment"}
               </button>
               {drawerExpanded && (
                 <DirectionsPanel

@@ -17,6 +17,20 @@ struct Via: Identifiable {
     }
 }
 
+/// A hand-drawn stretch kept VERBATIM and spliced into the auto-route — for
+/// forcing a path the router can't take (data gaps: a cycle track tagged as
+/// sharrows, a median/crosswalk crossing not in the graph). The auto route
+/// handles everything before/after; only this stretch is overridden.
+struct ManualSegment: Identifiable {
+    let id: UUID
+    var coords: [CLLocationCoordinate2D]
+
+    init(id: UUID = UUID(), coords: [CLLocationCoordinate2D]) {
+        self.id = id
+        self.coords = coords
+    }
+}
+
 /// Greenway-vs-speed preference for routing. Maps to the server's `use_roads`.
 enum RoutePreference: String, CaseIterable, Identifiable {
     case comfort, balanced, fast
@@ -65,6 +79,14 @@ final class RouteStore {
 
     /// Cap on drag-to-reshape waypoints. Generous — complex routes need many.
     static let maxVias = 40
+
+    /// Hand-drawn stretches spliced into the auto route (manual mode). Persist
+    /// across endpoint/waypoint edits; cleared only on an explicit reset.
+    var manualSegments: [ManualSegment] = []
+
+    /// The raw auto route from the server, BEFORE manual segments are spliced in.
+    /// `snapped` is the display geometry = `applyManualSegments(autoRoute, …)`.
+    private var autoRoute: SnappedRoute?
 
     // Result
     var snapped: SnappedRoute? {
@@ -182,7 +204,8 @@ final class RouteStore {
             )
             if Task.isCancelled { return }
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
-            snapped = await classified(routed)
+            autoRoute = routed
+            await recomputeDisplay()
             if Task.isCancelled { return }
             phase = .routed
         } catch {
@@ -203,35 +226,68 @@ final class RouteStore {
         return enriched
     }
 
+    // MARK: - Manual-segment splice
+
+    /// Splice each drawn segment into `auto` by nearest-point anchoring: replace
+    /// the stretch between the points closest to the segment's ends with the
+    /// drawn coords (oriented to match). Segments applied by descending start
+    /// index so earlier splices don't shift later ones. Non-overlapping for v1.
+    static func applyManualSegments(
+        _ auto: [CLLocationCoordinate2D],
+        _ segments: [ManualSegment]
+    ) -> [CLLocationCoordinate2D] {
+        guard !segments.isEmpty, auto.count >= 2 else { return auto }
+        let placed: [(i: Int, j: Int, coords: [CLLocationCoordinate2D])] = segments.compactMap { seg in
+            guard let first = seg.coords.first, let last = seg.coords.last, seg.coords.count >= 2 else { return nil }
+            var i = GeoMath.nearestIndex(of: first, in: auto)
+            var j = GeoMath.nearestIndex(of: last, in: auto)
+            var c = seg.coords
+            if i > j { swap(&i, &j); c.reverse() }
+            return (i, j, c)
+        }.sorted { $0.i > $1.i }
+
+        var result = auto
+        for p in placed {
+            let lo = max(0, min(p.i, result.count - 1))
+            let hi = max(0, min(p.j, result.count - 1))
+            guard lo <= hi else { continue }
+            result.replaceSubrange(lo...hi, with: p.coords)
+        }
+        return result
+    }
+
+    /// Rebuild the display route from the auto route + manual segments, classify
+    /// it, and publish to `snapped`. No server call.
+    private func recomputeDisplay() async {
+        guard let auto = autoRoute else { snapped = nil; return }
+        let coords = Self.applyManualSegments(auto.coordinates, manualSegments)
+        let base = SnappedRoute(coordinates: coords, distanceMeters: GeoMath.length(coords))
+        snapped = await classified(base)
+    }
+
     // MARK: - Draw mode
 
+    /// Enter manual-draw mode: a stroke drawn now becomes a ManualSegment spliced
+    /// into the current auto route (forcing that stretch). Requires an existing
+    /// route to splice into; KEEPS the route visible under the draft.
     func enterDrawMode() {
         autoRouteTask?.cancel()
-        guard bothPinsSet else { return }
+        guard bothPinsSet, autoRoute != nil else { return }
         isDrawMode = true
         drawnTrace = []
-        snapped = nil
-        isManuallyEdited = false
-        vias = []
         errorMessage = nil
         phase = .drawing
     }
 
-    /// Clear the drawn trace + route but keep the pins; re-enter draw mode.
+    /// Clear manual segments (and the drawn trace), keep the auto route + pins.
     func clearDraw() {
         autoRouteTask?.cancel()
+        isDrawMode = false
         drawnTrace = []
-        snapped = nil
-        isManuallyEdited = false
-        vias = []
+        manualSegments = []
         errorMessage = nil
-        if bothPinsSet {
-            isDrawMode = true
-            phase = .drawing
-        } else {
-            isDrawMode = false
-            recomputeIdlePhase()
-        }
+        Task { await recomputeDisplay() }
+        if autoRoute != nil { phase = .routed } else { recomputeIdlePhase() }
     }
 
     /// Reset everything.
@@ -240,6 +296,8 @@ final class RouteStore {
         start = nil
         end = nil
         drawnTrace = []
+        manualSegments = []
+        autoRoute = nil
         snapped = nil
         isManuallyEdited = false
         isEditMode = false
@@ -273,10 +331,11 @@ final class RouteStore {
 
         let previousVias = vias
         let previousSnapped = snapped
+        let previousAuto = autoRoute
 
         if let i = movingViaIndex, vias.indices.contains(i) {
             // Move: respect the via's kind. A precise anchor stays exactly where
-            // dropped; a snap waypoint re-snaps to the nearest path (≤20m).
+            // dropped; a snap waypoint re-snaps to the nearest path (≤100m).
             let moving = vias[i]
             let at = moving.precise
                 ? dragged
@@ -286,9 +345,10 @@ final class RouteStore {
             // Insert a new snapped waypoint, ordered by arc-length along the route
             // (stable — a re-snap can't reorder it). Don't collapse onto a
             // neighbor: if the snap lands within 8m of an existing via, keep raw.
-            let snapped = await BikeFriendliness.shared.nearestNetworkPoint(dragged) ?? dragged
-            let at = vias.contains(where: { GeoMath.distance($0.coordinate, snapped) < 8 }) ? dragged : snapped
-            let routeCoords = previousSnapped?.coordinates ?? preview
+            let snappedPt = await BikeFriendliness.shared.nearestNetworkPoint(dragged) ?? dragged
+            let at = vias.contains(where: { GeoMath.distance($0.coordinate, snappedPt) < 8 }) ? dragged : snappedPt
+            // Order against the routable auto geometry (not the spliced display).
+            let routeCoords = autoRoute?.coordinates ?? preview
             let key = GeoMath.arcLength(of: at, in: routeCoords)
             let insertAt = vias.filter { GeoMath.arcLength(of: $0.coordinate, in: routeCoords) < key }.count
             vias.insert(Via(coordinate: at, precise: false), at: min(insertAt, vias.count))
@@ -304,11 +364,13 @@ final class RouteStore {
                 from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue
             )
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
-            snapped = await classified(routed)
+            autoRoute = routed
+            await recomputeDisplay() // re-splice any manual segments onto the fresh route
             isManuallyEdited = false // it's a clean road route now
         } catch {
             // Re-route failed (e.g. via unreachable) — undo this drag.
             vias = previousVias
+            autoRoute = previousAuto
             snapped = previousSnapped
             isManuallyEdited = previousVias.isEmpty ? false : isManuallyEdited
         }
@@ -323,6 +385,7 @@ final class RouteStore {
 
         let previousVias = vias
         let previousSnapped = snapped
+        let previousAuto = autoRoute
         vias.remove(at: index)
 
         do {
@@ -330,11 +393,13 @@ final class RouteStore {
                 from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue
             )
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
-            snapped = await classified(routed)
+            autoRoute = routed
+            await recomputeDisplay()
             isManuallyEdited = !vias.isEmpty
             phase = .routed
         } catch {
             vias = previousVias
+            autoRoute = previousAuto
             snapped = previousSnapped
         }
     }
@@ -348,7 +413,8 @@ final class RouteStore {
 
         let previousVias = vias
         let previousSnapped = snapped
-        let routeCoords = snapped?.coordinates ?? []
+        let previousAuto = autoRoute
+        let routeCoords = autoRoute?.coordinates ?? snapped?.coordinates ?? []
         let key = GeoMath.arcLength(of: at, in: routeCoords)
         let insertAt = vias.filter { GeoMath.arcLength(of: $0.coordinate, in: routeCoords) < key }.count
         vias.insert(Via(coordinate: at, precise: true), at: min(insertAt, vias.count))
@@ -360,12 +426,23 @@ final class RouteStore {
                 from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue
             )
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
-            snapped = await classified(routed)
+            autoRoute = routed
+            await recomputeDisplay()
             isManuallyEdited = false
         } catch {
             vias = previousVias
+            autoRoute = previousAuto
             snapped = previousSnapped
         }
+    }
+
+    /// Raw-nudge a point on a manual segment (drag). No re-route, no snap — keeps
+    /// the drawn stretch verbatim, then re-splices.
+    func nudgeManualPoint(segmentID: UUID, vertexIndex: Int, to coord: CLLocationCoordinate2D) async {
+        guard let si = manualSegments.firstIndex(where: { $0.id == segmentID }),
+              manualSegments[si].coords.indices.contains(vertexIndex) else { return }
+        manualSegments[si].coords[vertexIndex] = coord
+        await recomputeDisplay()
     }
 
     /// Long-press on a pin: flip it between snap and precise. No re-route — the
@@ -375,61 +452,52 @@ final class RouteStore {
         vias[index].precise.toggle()
     }
 
+    /// Finish a manual draw: the stroke becomes a ManualSegment kept VERBATIM and
+    /// spliced into the auto route (no /match, no server). Editing/endpoint
+    /// changes re-splice it. Too short a stroke is dropped.
     func finishDrawing() async {
-        guard drawnTrace.count >= 2 else {
-            // Not enough of a stroke to snap — stay in draw mode.
-            phase = .drawing
+        isDrawMode = false
+        let stroke = drawnTrace
+        drawnTrace = []
+        guard stroke.count >= 2 else {
+            phase = autoRoute != nil ? .routed : .drawing
             return
         }
-        isDrawMode = false
-        phase = .snapping
-        errorMessage = nil
-        do {
-            let result = try await match.snap(
-                trace: drawnTrace,
-                start: start?.coordinate,
-                end: end?.coordinate
-            )
-            snapped = await classified(result)
-            phase = .routed
-        } catch {
-            let message = (error as? APIError)?.errorDescription ?? error.localizedDescription
-            errorMessage = message
-            phase = .failed(message)
-        }
+        manualSegments.append(ManualSegment(coords: stroke))
+        await recomputeDisplay()
+        phase = .routed
     }
 
     // MARK: - Search
 
     #if DEBUG
-    /// Verification hook: seed sample pins + a rough trace and snap it, without
-    /// needing a finger drag. Triggered by the BRN_DEMO launch env var so the
-    /// full iOS→server→Valhalla→display path can be exercised in the simulator.
+    /// Verification hook: auto-route between sample pins, then splice in a manual
+    /// drawn stretch (verbatim) — exercising the manual-segment path without a
+    /// finger drag. Triggered by the BRN_DEMO launch env var.
     func runDemoSnap() async {
-        setPin(CLLocationCoordinate2D(latitude: 45.5415, longitude: -122.6485), kind: .start, label: "Demo start")
-        setPin(CLLocationCoordinate2D(latitude: 45.5505, longitude: -122.6493), kind: .end, label: "Demo end")
-        isDrawMode = false
-        drawnTrace = [
-            CLLocationCoordinate2D(latitude: 45.5419, longitude: -122.6486),
-            CLLocationCoordinate2D(latitude: 45.5440, longitude: -122.6486),
-            CLLocationCoordinate2D(latitude: 45.5460, longitude: -122.6488),
-            CLLocationCoordinate2D(latitude: 45.5480, longitude: -122.6490),
-            CLLocationCoordinate2D(latitude: 45.5500, longitude: -122.6492),
-        ]
-        await finishDrawing()
+        let startC = CLLocationCoordinate2D(latitude: 45.5415, longitude: -122.6485)
+        let endC = CLLocationCoordinate2D(latitude: 45.5505, longitude: -122.6493)
+        setPin(startC, kind: .start, label: "Demo start")
+        setPin(endC, kind: .end, label: "Demo end")
+        await performAutoRoute(from: startC, to: endC)
+        // A drawn stretch that bulges west — kept verbatim, spliced into the route.
+        manualSegments.append(ManualSegment(coords: [
+            CLLocationCoordinate2D(latitude: 45.5450, longitude: -122.6500),
+            CLLocationCoordinate2D(latitude: 45.5465, longitude: -122.6515),
+            CLLocationCoordinate2D(latitude: 45.5480, longitude: -122.6500),
+        ]))
+        await recomputeDisplay()
+        phase = .routed
     }
 
-    /// Verification hook: run the demo snap, then exercise the manual-edit
-    /// commit path by nudging the middle vertex. Triggered by BRN_DEMO=edit.
+    /// Verification hook: run the demo, then raw-nudge the manual segment's
+    /// middle point. Triggered by BRN_DEMO=edit.
     func runDemoEdit() async {
         await runDemoSnap()
-        guard let coords = snapped?.coordinates, coords.count >= 3 else { return }
-        let mid = coords.count / 2
-        var dragged = coords[mid]
-        dragged.longitude -= 0.0015 // shove the middle of the line west → drop a via
-        var preview = coords
-        preview[mid] = dragged
-        await reshape(to: dragged, preview: preview, movingViaIndex: nil)
+        guard let seg = manualSegments.first, seg.coords.count >= 3 else { return }
+        var p = seg.coords[1]
+        p.longitude -= 0.001
+        await nudgeManualPoint(segmentID: seg.id, vertexIndex: 1, to: p)
     }
     #endif
 

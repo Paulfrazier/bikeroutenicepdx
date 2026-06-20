@@ -27,6 +27,8 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     /// The displayed route, one overlay per contiguous bike-friendliness tier
     /// run (replaces the old single blue line).
     private var routeOverlays: [MKOverlay] = []
+    /// Dashed-violet overlays marking the hand-drawn (manual) stretches.
+    private var manualOverlays: [ManualPolyline] = []
     /// Single rubber-banded preview line shown while a hand-edit drag is live.
     private var editPreviewOverlay: RoutePolyline?
     /// True while a route is on screen — fades the bike-network overlay back so
@@ -47,6 +49,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     private var editCoords: [CLLocationCoordinate2D] = []
     private var editingIndex: Int?
     private var editingViaIndex: Int? // set when the drag grabbed an existing via
+    // Set when the drag grabbed a point on a manual (drawn) segment → raw nudge
+    // of that segment's vertex instead of a via re-route.
+    private var editingManualSegID: UUID?
+    private var editingManualVertex: Int?
     private var isEditing = false
 
     private static let vertexGrabPx: CGFloat = 22 // tap radius to grab a vertex
@@ -96,6 +102,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         syncAnnotation(&startAnnotation, waypoint: store.start, title: "Start", map: map)
         syncAnnotation(&endAnnotation, waypoint: store.end, title: "End", map: map)
         syncViaAnnotations(map)
+        syncManualOverlays(map)
 
         if let snapped = store.snapped {
             // Rebuild when the route identity changes (routeVersion), not just its
@@ -151,6 +158,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             map.removeOverlay(preview)
             editPreviewOverlay = nil
         }
+        if !manualOverlays.isEmpty {
+            map.removeOverlays(manualOverlays)
+            manualOverlays = []
+        }
         setNetworkFaded(false, on: map)
     }
 
@@ -198,6 +209,22 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             rect = rect.union(overlay.boundingMapRect)
         }
         return rect
+    }
+
+    /// Rebuild the dashed-violet manual overlays from `store.manualSegments` so
+    /// the forced (hand-drawn) stretches are visually distinct from routed ones.
+    private func syncManualOverlays(_ map: MKMapView) {
+        if !manualOverlays.isEmpty {
+            map.removeOverlays(manualOverlays)
+            manualOverlays = []
+        }
+        // Hide while a hand-edit drag owns the overlay (avoids a stale duplicate).
+        guard !isEditing else { return }
+        for seg in store.manualSegments where seg.coords.count >= 2 {
+            let overlay = ManualPolyline(coordinates: seg.coords, count: seg.coords.count)
+            manualOverlays.append(overlay)
+            map.addOverlay(overlay, level: .aboveLabels)
+        }
     }
 
     /// Rebuild the waypoint handle pins from `store.vias`. Shown only in edit
@@ -346,19 +373,30 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             // Did the touch grab an existing via? If so we'll move it; otherwise
             // the drag will drop a new via.
             editingViaIndex = nearestViaIndex(point, map: map)
+            // Did the touch grab a point on a hand-drawn (manual) segment?
+            let manual = manualHit(point, map: map)
 
             guard let hit = hitTest(point, coords: coords, map: map) else {
                 // shouldBegin should have prevented this; bail safely.
                 editingIndex = nil
                 editingViaIndex = nil
+                editingManualSegID = nil
+                editingManualVertex = nil
                 return
             }
-            // Refuse to add a NEW via once we're at the cap (moving an existing
-            // one is always fine) — keeps the route uncluttered. Leaving isEditing
-            // false makes the rest of the drag inert and the map pans normally.
-            if editingViaIndex == nil && store.vias.count >= RouteStore.maxVias {
-                editingIndex = nil
+            // Grabbed a manual segment → raw nudge that vertex (no via, no cap, no
+            // re-route). Uses the display vertex for live preview; commits to the
+            // segment's own vertex on release.
+            if let manual = manual {
+                editingManualSegID = manual.segID
+                editingManualVertex = manual.vertex
                 editingViaIndex = nil
+            } else if editingViaIndex == nil && store.vias.count >= RouteStore.maxVias {
+                // Refuse to add a NEW via once we're at the cap (moving an existing
+                // one is always fine). Leaving isEditing false keeps the drag inert.
+                editingIndex = nil
+                editingManualSegID = nil
+                editingManualVertex = nil
                 return
             }
             switch hit {
@@ -394,19 +432,30 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             let dragged = editCoords[idx]
             let preview = editCoords
             let viaIndex = editingViaIndex
+            let manualSegID = editingManualSegID
+            let manualVertex = editingManualVertex
             isEditing = false
             editingIndex = nil
             editingViaIndex = nil
+            editingManualSegID = nil
+            editingManualVertex = nil
             map.isScrollEnabled = true
-            // Drop/move a via and re-route: shows the rubber-banded preview, then
-            // replaces it with the clean road route. sync() rebuilds on each update.
-            Task { await store.reshape(to: dragged, preview: preview, movingViaIndex: viaIndex) }
+            if let manualSegID, let manualVertex {
+                // Raw-nudge the drawn segment's vertex — verbatim, no re-route.
+                Task { await store.nudgeManualPoint(segmentID: manualSegID, vertexIndex: manualVertex, to: dragged) }
+            } else {
+                // Drop/move a via and re-route: shows the rubber-banded preview,
+                // then replaces it with the clean road route.
+                Task { await store.reshape(to: dragged, preview: preview, movingViaIndex: viaIndex) }
+            }
             editCoords = []
 
         case .cancelled, .failed:
             isEditing = false
             editingIndex = nil
             editingViaIndex = nil
+            editingManualSegID = nil
+            editingManualVertex = nil
             editCoords = []
             map.isScrollEnabled = true
             // Rebuild the overlay from the store's untouched route.
@@ -442,6 +491,21 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             if d <= best { best = d; idx = i }
         }
         return idx
+    }
+
+    /// The manual-segment vertex within grab range of `point`, else nil. Grabbing
+    /// one raw-nudges it (no re-route) rather than dropping a via.
+    private func manualHit(_ point: CGPoint, map: MKMapView) -> (segID: UUID, vertex: Int)? {
+        var best = Self.vertexGrabPx
+        var result: (UUID, Int)?
+        for seg in store.manualSegments {
+            for (vi, c) in seg.coords.enumerated() {
+                let p = map.convert(c, toPointTo: map)
+                let d = hypot(point.x - p.x, point.y - p.y)
+                if d <= best { best = d; result = (seg.id, vi) }
+            }
+        }
+        return result
     }
 
     private enum EditHit {
@@ -588,6 +652,15 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             renderer.lineWidth = 6
             renderer.lineCap = .round
             renderer.lineJoin = .round
+            return renderer
+        case let polyline as ManualPolyline:
+            // Forced (hand-drawn) stretch: dashed violet over the tier route.
+            let renderer = MKPolylineRenderer(polyline: polyline)
+            renderer.strokeColor = UIColor(red: 0.545, green: 0.361, blue: 0.965, alpha: 1) // #8B5CF6
+            renderer.lineWidth = 5
+            renderer.lineCap = .round
+            renderer.lineJoin = .round
+            renderer.lineDashPattern = [2, 8]
             return renderer
         case let polyline as DraftPolyline:
             let renderer = MKPolylineRenderer(polyline: polyline)

@@ -7,6 +7,10 @@ final class GreenwayPolyline: MKPolyline {}
 final class RoutePolyline: MKPolyline {}
 final class DraftPolyline: MKPolyline {}
 
+/// A hand-drawn (manual) stretch, overlaid in a distinct dashed violet so it's
+/// clear which part of the route is forced verbatim vs. routed.
+final class ManualPolyline: MKPolyline {}
+
 /// Wide, low-alpha underlay drawn beneath the casing to fake a soft outer glow
 /// (MKPolylineRenderer has no real blur), lifting the route off the basemap so
 /// it reads as a raised ribbon regardless of the bike-network color beneath.

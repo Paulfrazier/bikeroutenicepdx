@@ -10,7 +10,7 @@
  * a fresh vertex at the pointer.
  */
 
-import type { LngLat } from "./types";
+import type { LngLat, ManualSegment } from "./types";
 
 // ── Great-circle length ────────────────────────────────────────────────────
 
@@ -123,6 +123,41 @@ export function nearestVertexIndex(target: LngLat, coords: LngLat[]): number {
     }
   }
   return bestIndex;
+}
+
+/**
+ * Splice each drawn segment into `auto` by nearest-point anchoring: replace the
+ * stretch between the points closest to the segment's ends with the drawn coords
+ * (oriented to match). Segments applied by descending start index so earlier
+ * splices don't shift later ones. Non-overlapping assumed (v1).
+ */
+export function applyManualSegments(
+  auto: LngLat[],
+  segments: ManualSegment[]
+): LngLat[] {
+  if (!segments.length || auto.length < 2) return auto;
+  const placed = segments
+    .filter((s) => s.coords.length >= 2)
+    .map((s) => {
+      let i = nearestVertexIndex(s.coords[0], auto);
+      let j = nearestVertexIndex(s.coords[s.coords.length - 1], auto);
+      let coords = s.coords;
+      if (i > j) {
+        [i, j] = [j, i];
+        coords = coords.slice().reverse();
+      }
+      return { i, j, coords };
+    })
+    .sort((a, b) => b.i - a.i); // descending so splices don't shift earlier indices
+
+  let result = auto;
+  for (const p of placed) {
+    const lo = Math.max(0, Math.min(p.i, result.length - 1));
+    const hi = Math.max(0, Math.min(p.j, result.length - 1));
+    if (lo > hi) continue;
+    result = [...result.slice(0, lo), ...p.coords, ...result.slice(hi + 1)];
+  }
+  return result;
 }
 
 // ── Screen-pixel geometry ──────────────────────────────────────────────────

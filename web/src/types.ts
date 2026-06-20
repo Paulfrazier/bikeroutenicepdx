@@ -24,6 +24,17 @@ export interface Via {
   precise: boolean;
 }
 
+/**
+ * A hand-drawn stretch kept VERBATIM and spliced into the auto-route — for
+ * forcing a path the router can't take (data gaps: a cycle track tagged as
+ * sharrows, a median/crosswalk crossing not in the graph). The auto route
+ * handles everything before/after; only this stretch is overridden.
+ */
+export interface ManualSegment {
+  id: string;
+  coords: LngLat[];
+}
+
 export interface RouteStep {
   instruction: string;
   distance_m: number;
