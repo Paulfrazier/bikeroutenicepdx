@@ -27,15 +27,19 @@ const app = new Hono();
 
 app.use("*", logger());
 
-// CORS: allow the Vite dev server and the production web frontend.
-// Both origins are needed so the same server binary works in dev and prod.
+// CORS: allow the Vite dev server + every production web origin. WEB_ORIGIN is a
+// comma-separated list so the same server serves the vercel.app alias AND the
+// branded custom domains (pdxbikemap.frazierideas.com, pdxbikemap.fairpoint.website).
 app.use(
   "*",
   cors({
     origin: (origin) => {
       const allowed = [
         "http://localhost:5173", // Vite default
-        config.webOrigin,        // override via WEB_ORIGIN env var
+        ...config.webOrigin
+          .split(",")
+          .map((o) => o.trim())
+          .filter(Boolean),
       ];
       return allowed.includes(origin) ? origin : null;
     },
