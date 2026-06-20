@@ -91,6 +91,11 @@ struct ControlsBar: View {
                     HStack {
                         Label(snapped.distanceLabel, systemImage: "bicycle")
                             .font(.headline)
+                        if !snapped.durationLabel.isEmpty {
+                            Label(snapped.durationLabel, systemImage: "clock")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
                         Spacer()
                         if let coverage = snapped.coverage {
                             Text("🚲 \(Int((coverage * 100).rounded()))% comfortable")

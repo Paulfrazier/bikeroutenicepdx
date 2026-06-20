@@ -21,7 +21,11 @@ struct MatchService {
             guard pair.count == 2 else { return nil }
             return CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0])
         }
-        return SnappedRoute(coordinates: coords, distanceMeters: response.distance_m)
+        return SnappedRoute(
+            coordinates: coords,
+            distanceMeters: response.distance_m,
+            durationSeconds: response.duration_s
+        )
     }
 }
 
@@ -48,7 +52,11 @@ struct RouteService {
             guard pair.count == 2 else { return nil }
             return CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0])
         }
-        var route = SnappedRoute(coordinates: coords, distanceMeters: response.distance_m)
+        var route = SnappedRoute(
+            coordinates: coords,
+            distanceMeters: response.distance_m,
+            durationSeconds: response.duration_s
+        )
         route.steps = response.steps
         return route
     }
