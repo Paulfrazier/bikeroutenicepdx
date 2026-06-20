@@ -12,11 +12,14 @@ import { Map, useMapClickHandler } from "./components/Map";
 import { EndpointInputs } from "./components/EndpointInputs";
 import { RouteSummary } from "./components/RouteSummary";
 import { DirectionsPanel } from "./components/DirectionsPanel";
+import { Tour, GestureGuide, HelpButton, useFirstRunTour } from "./components/Help";
+import { MapBoundary } from "./components/MapBoundary";
 import { useRoute } from "./hooks/useRoute";
 import { useFriendliness } from "./hooks/useFriendliness";
 import { toTierFeatureCollection, snapToNetwork } from "./friendliness";
 import { arcLengthAt, haversineLength, applyManualSegments, MAX_VIAS } from "./geo";
-import type { LngLat, Via, ManualSegment } from "./types";
+import { fetchCorridor } from "./api";
+import type { LngLat, Via, ManualSegment, CorridorResponse } from "./types";
 
 // Monotonic id source for waypoints — gives each via a stable identity so
 // re-routes never reorder or lose it.
@@ -24,6 +27,8 @@ let viaIdCounter = 0;
 const nextViaId = () => `via-${++viaIdCounter}`;
 let segIdCounter = 0;
 const nextSegId = () => `seg-${++segIdCounter}`;
+let corridorIdCounter = 0;
+const nextCorridorId = () => `corr-${++corridorIdCounter}`;
 // A snapped insert landing within this many meters of an existing waypoint is
 // treated as a duplicate; we keep the raw drop point so two pins never collapse.
 const VIA_DEDUPE_M = 8;
@@ -46,11 +51,35 @@ export default function App() {
   // across edits; cleared only on an explicit reset.
   const [manualSegments, setManualSegments] = useState<ManualSegment[]>([]);
   const [drawMode, setDrawMode] = useState(false);
+
+  // ── "Route through this section" (corridor) ────────────────────────────────
+  // Tap point A then point B on a street; the server resolves the street between
+  // them into an ordered chain of pass-through points (the preview). On confirm
+  // those points are injected as a grouped block of `precise` vias, so the route
+  // recomputes to flow through that street.
+  const [corridorMode, setCorridorMode] = useState(false);
+  const [corridorA, setCorridorA] = useState<LngLat | null>(null);
+  const [corridorB, setCorridorB] = useState<LngLat | null>(null);
+  const [corridorPreview, setCorridorPreview] = useState<CorridorResponse | null>(null);
+  const [corridorLoading, setCorridorLoading] = useState(false);
+  const [corridorError, setCorridorError] = useState<string | null>(null);
+
+  const clearCorridorPick = useCallback(() => {
+    setCorridorA(null);
+    setCorridorB(null);
+    setCorridorPreview(null);
+    setCorridorLoading(false);
+    setCorridorError(null);
+  }, []);
+
   // Leaving edit mode on an endpoint change is fine (pins persist in state and
-  // reappear on re-enter); we deliberately do NOT clear `vias` here.
+  // reappear on re-enter); we deliberately do NOT clear `vias` here. An in-
+  // progress corridor pick IS abandoned (its preview is anchored to the old route).
   useEffect(() => {
     setEditing(false);
-  }, [from, to]);
+    setCorridorMode(false);
+    clearCorridorPick();
+  }, [from, to, clearCorridorPick]);
 
   // ── Route ──────────────────────────────────────────────────────────────────
   const viaCoords = useMemo(() => vias.map((v) => v.at), [vias]);
@@ -150,9 +179,18 @@ export default function App() {
   }, []);
 
   // A waypoint pin was tapped (pressed without dragging): drop that via and
-  // re-route. Endpoints stay put — only the through-waypoint is removed.
+  // re-route. Endpoints stay put — only the through-waypoint is removed. If the
+  // tapped via belongs to a corridor ("route through this section"), the whole
+  // corridor group is removed at once so a section deletes as one unit.
   const handleDeleteVia = useCallback((index: number) => {
-    setVias((prev) => prev.filter((_, i) => i !== index));
+    setVias((prev) => {
+      const target = prev[index];
+      if (!target) return prev;
+      if (target.corridorId) {
+        return prev.filter((v) => v.corridorId !== target.corridorId);
+      }
+      return prev.filter((_, i) => i !== index);
+    });
   }, []);
 
   // Finished a freehand draw: keep it VERBATIM as a manual segment spliced into
@@ -192,6 +230,88 @@ export default function App() {
     },
     []
   );
+  // Toggle corridor ("through a section") mode. Mutually exclusive with edit/
+  // draw; entering clears any half-finished pick.
+  const handleToggleCorridorMode = useCallback(() => {
+    setCorridorMode((on) => {
+      const next = !on;
+      if (next) {
+        setEditing(false);
+        setDrawMode(false);
+      }
+      clearCorridorPick();
+      return next;
+    });
+  }, [clearCorridorPick]);
+
+  // Second corridor tap: resolve the street between A and B into ordered points.
+  const resolveCorridorPick = useCallback((a: LngLat, b: LngLat) => {
+    setCorridorB(b);
+    setCorridorLoading(true);
+    setCorridorError(null);
+    setCorridorPreview(null);
+    fetchCorridor({ a, b })
+      .then((res) => {
+        setCorridorPreview(res);
+        setCorridorLoading(false);
+      })
+      .catch((err: unknown) => {
+        setCorridorError(
+          err instanceof Error
+            ? "Couldn't find a street between those points — tap closer together along one road."
+            : String(err)
+        );
+        setCorridorLoading(false);
+        // Drop the failed pick so the next tap starts a fresh A.
+        setCorridorA(null);
+        setCorridorB(null);
+      });
+  }, []);
+
+  // Confirm the previewed corridor: inject its sampled points as a grouped block
+  // of precise vias, ordered along the current route's direction of travel, then
+  // re-route through them. The block stays contiguous (one corridorId).
+  const handleConfirmCorridor = useCallback(() => {
+    const preview = corridorPreview;
+    if (!preview || preview.points.length < 2) return;
+    setVias((prev) => {
+      const routeCoords = route?.geometry.coordinates ?? [];
+      // Orient so the endpoint nearer the route start comes first.
+      let pts = preview.points;
+      if (routeCoords.length >= 2) {
+        const headArc = arcLengthAt(pts[0], routeCoords);
+        const tailArc = arcLengthAt(pts[pts.length - 1], routeCoords);
+        if (headArc > tailArc) pts = pts.slice().reverse();
+      }
+      // Downsample to the remaining via slots (keep first + last) so a long
+      // corridor can't blow past MAX_VIAS.
+      const slots = MAX_VIAS - prev.length;
+      if (slots < 2) return prev;
+      if (pts.length > slots) {
+        const stride = (pts.length - 1) / (slots - 1);
+        pts = Array.from({ length: slots }, (_, i) => pts[Math.round(i * stride)]);
+      }
+      const cid = nextCorridorId();
+      const block: Via[] = pts.map((at) => ({
+        id: nextViaId(),
+        at,
+        precise: true,
+        corridorId: cid,
+      }));
+      // Insert the whole block at the arc-length position of its midpoint.
+      const midArc = arcLengthAt(pts[Math.floor(pts.length / 2)], routeCoords);
+      let insertAt = 0;
+      for (const v of prev) {
+        if (arcLengthAt(v.at, routeCoords) <= midArc) insertAt++;
+      }
+      const next = prev.slice();
+      next.splice(Math.min(insertAt, next.length), 0, ...block);
+      return next;
+    });
+    setCorridorMode(false);
+    clearCorridorPick();
+  }, [corridorPreview, route, clearCorridorPick]);
+
   const friendliness = useFriendliness(activeCoords);
   const tierFeatures = useMemo(
     () =>
@@ -205,6 +325,18 @@ export default function App() {
   const clickCount = useRef(0);
   const handleMapClick = useCallback(
     (lngLat: LngLat) => {
+      // Corridor mode: tap A, then tap B → resolve the street between them.
+      if (corridorMode) {
+        if (!corridorA) {
+          setCorridorA(lngLat);
+          setCorridorB(null);
+          setCorridorPreview(null);
+          setCorridorError(null);
+        } else {
+          resolveCorridorPick(corridorA, lngLat);
+        }
+        return;
+      }
       // Cycle: first tap = from, second = to, third = reset
       const n = clickCount.current % 3;
       if (n === 0) {
@@ -226,7 +358,7 @@ export default function App() {
       }
       clickCount.current += 1;
     },
-    []
+    [corridorMode, corridorA, resolveCorridorPick]
   );
 
   // Also wire the reusable handler from Map (for external use, e.g. tests)
@@ -247,6 +379,10 @@ export default function App() {
     setTo(from);
     setToLabel(fromLabel);
   }
+
+  // ── Help: first-run tour + reopenable gesture guide ────────────────────────
+  const [tourOpen, closeTour, replayTour] = useFirstRunTour();
+  const [guideOpen, setGuideOpen] = useState(false);
 
   // ── Bottom drawer state ────────────────────────────────────────────────────
   const [drawerExpanded, setDrawerExpanded] = useState(false);
@@ -298,6 +434,7 @@ export default function App() {
               duration_s={route.duration_s}
               coverage={friendliness?.coverage}
               reshaped={reshaped || manualSegments.length > 0}
+              engine={route.engine}
             />
             <button
               type="button"
@@ -314,6 +451,14 @@ export default function App() {
               onClick={() => setDrawMode((d) => !d)}
             >
               {drawMode ? "✓ Drawing — draw on map" : "✏️ Draw segment"}
+            </button>
+            <button
+              type="button"
+              className={`edit-route-btn ${corridorMode ? "edit-route-btn--active" : ""}`}
+              aria-pressed={corridorMode}
+              onClick={handleToggleCorridorMode}
+            >
+              {corridorMode ? "✓ Pick a section on the map" : "↦ Route through a section"}
             </button>
             <DirectionsPanel steps={route.steps} onStepClick={handleStepClick} />
           </div>
@@ -333,10 +478,12 @@ export default function App() {
 
       {/* ── Map ── */}
       <main className="map-area">
+        <MapBoundary>
         <Map
           from={from}
           to={to}
           route={route}
+          routeLoading={routeLoading}
           tierFeatures={tierFeatures}
           onMapClick={handleMapClick}
           onStepFlyTo={flyTo}
@@ -351,7 +498,54 @@ export default function App() {
           manualSegments={manualSegments}
           onDrawSegment={handleDrawSegment}
           onManualNudge={handleManualNudge}
+          corridorA={corridorA}
+          corridorB={corridorB}
+          corridorPreview={corridorPreview}
         />
+        </MapBoundary>
+
+        <HelpButton onClick={() => setGuideOpen(true)} />
+
+        {/* ── Corridor ("route through a section") pick banner ── */}
+        {corridorMode && (
+          <div className="corridor-bar" role="status" aria-live="polite">
+            {corridorPreview ? (
+              <>
+                <span className="corridor-bar__msg">Route through this section?</span>
+                <div className="corridor-bar__actions">
+                  <button
+                    type="button"
+                    className="corridor-bar__btn corridor-bar__btn--primary"
+                    onClick={handleConfirmCorridor}
+                  >
+                    Route through here
+                  </button>
+                  <button
+                    type="button"
+                    className="corridor-bar__btn"
+                    onClick={clearCorridorPick}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : corridorLoading ? (
+              <span className="corridor-bar__msg">Finding the street…</span>
+            ) : corridorError ? (
+              <span className="corridor-bar__msg corridor-bar__msg--error">
+                {corridorError}
+              </span>
+            ) : corridorA ? (
+              <span className="corridor-bar__msg">
+                Now tap the <strong>end</strong> of the section
+              </span>
+            ) : (
+              <span className="corridor-bar__msg">
+                Tap the <strong>start</strong> of the section on a street
+              </span>
+            )}
+          </div>
+        )}
 
         {/* ── Mobile bottom drawer ── */}
         {hasRoute && (
@@ -379,6 +573,7 @@ export default function App() {
                 duration_s={route.duration_s}
                 coverage={friendliness?.coverage}
                 reshaped={reshaped || manualSegments.length > 0}
+                engine={route.engine}
               />
               <button
                 type="button"
@@ -396,6 +591,14 @@ export default function App() {
               >
                 {drawMode ? "✓ Drawing — draw on map" : "✏️ Draw segment"}
               </button>
+              <button
+                type="button"
+                className={`edit-route-btn ${corridorMode ? "edit-route-btn--active" : ""}`}
+                aria-pressed={corridorMode}
+                onClick={handleToggleCorridorMode}
+              >
+                {corridorMode ? "✓ Pick a section on the map" : "↦ Route through a section"}
+              </button>
               {drawerExpanded && (
                 <DirectionsPanel
                   steps={route.steps}
@@ -406,6 +609,14 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* ── Help overlays ── */}
+      <Tour open={tourOpen} onClose={closeTour} />
+      <GestureGuide
+        open={guideOpen}
+        onClose={() => setGuideOpen(false)}
+        onReplayTour={replayTour}
+      />
     </div>
   );
 }

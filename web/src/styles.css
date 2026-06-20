@@ -217,6 +217,64 @@ button {
   background: #dc2626;
 }
 
+/* ── Corridor ("route through a section") pick banner ──────────────────────── */
+.corridor-bar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
+  box-shadow: var(--shadow-md, 0 4px 16px rgba(0, 0, 0, 0.25));
+  font-size: 0.92rem;
+  text-align: center;
+}
+
+.corridor-bar__msg strong {
+  color: #5eead4;
+}
+
+.corridor-bar__msg--error {
+  color: #fca5a5;
+}
+
+.corridor-bar__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.corridor-bar__btn {
+  padding: 7px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  background: transparent;
+  color: #f8fafc;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.corridor-bar__btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.corridor-bar__btn--primary {
+  background: #0d9488;
+  border-color: #0d9488;
+}
+
+.corridor-bar__btn--primary:hover {
+  background: #0f766e;
+}
+
 /* ── Bottom drawer (mobile only) ───────────────────────────────────────────── */
 .bottom-drawer {
   position: absolute;
@@ -476,6 +534,13 @@ button {
   opacity: 0.65;
 }
 
+.route-summary__pill--engine {
+  background: #ede9fe;
+  color: #6d28d9;
+  font-weight: 500;
+  text-transform: lowercase;
+}
+
 .route-summary__note {
   display: inline-flex;
   align-items: center;
@@ -645,7 +710,37 @@ button {
   padding: 8px 10px;
   z-index: 10;
   min-width: 178px;
-  pointer-events: none; /* let map clicks pass through */
+  pointer-events: none; /* let map clicks pass through the swatch area */
+}
+
+/* Header doubles as the show/hide control. Full-width, ≥44px tap target
+   (the rest of the card stays click-through). */
+.bike-legend__toggle {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--color-text-muted);
+}
+
+.bike-legend__toggle-icon {
+  font-size: 13px;
+}
+
+.bike-legend__chevron {
+  margin-left: auto;
+  font-size: 12px;
 }
 
 .bike-legend__title {
@@ -714,4 +809,304 @@ button {
   .maplibregl-ctrl-bottom-right {
     bottom: 60px !important;
   }
+}
+
+/* ── Help: floating "?" button ──────────────────────────────────────────────── */
+.help-fab {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 15;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: background var(--transition), transform var(--transition);
+}
+.help-fab:hover {
+  background: var(--color-surface);
+  transform: scale(1.05);
+}
+.help-fab:active {
+  transform: scale(0.96);
+}
+
+/* ── Tour (first-run walkthrough) ───────────────────────────────────────────── */
+.tour-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+  animation: tour-fade 160ms ease;
+}
+@keyframes tour-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.tour-card {
+  position: relative;
+  width: 100%;
+  max-width: 380px;
+  background: var(--color-bg);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  padding: 28px 24px 20px;
+  text-align: center;
+  animation: tour-pop 200ms ease;
+}
+@keyframes tour-pop {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.tour-card__skip {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  background: none;
+  border: none;
+  color: var(--color-text-light);
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+.tour-card__skip:hover {
+  color: var(--color-text-muted);
+}
+.tour-card__icon {
+  font-size: 2.6rem;
+  line-height: 1;
+  margin-bottom: 12px;
+}
+.tour-card__title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin: 0 0 8px;
+}
+.tour-card__body {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  margin: 0 0 18px;
+}
+.tour-card__body strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+.tour-card__dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.tour-card__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-border);
+  transition: background var(--transition);
+}
+.tour-card__dot--on {
+  background: var(--color-green);
+}
+.tour-card__nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tour-card__count {
+  font-size: 0.8rem;
+  color: var(--color-text-light);
+}
+.tour-card__btn {
+  padding: 9px 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.tour-card__btn:hover:not(:disabled) {
+  background: var(--color-surface);
+}
+.tour-card__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.tour-card__btn--primary {
+  background: var(--color-green);
+  border-color: var(--color-green);
+  color: #fff;
+}
+.tour-card__btn--primary:hover:not(:disabled) {
+  background: #15803d;
+}
+
+/* ── Gesture guide (reopenable cheat sheet) ─────────────────────────────────── */
+.guide-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+  animation: tour-fade 160ms ease;
+}
+.guide-card {
+  width: 100%;
+  max-width: 440px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  animation: tour-pop 200ms ease;
+  overflow: hidden;
+}
+.guide-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.guide-card__title {
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin: 0;
+  color: var(--color-text);
+}
+.guide-card__close {
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  color: var(--color-text-light);
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+}
+.guide-card__close:hover {
+  color: var(--color-text);
+}
+.guide-card__body {
+  padding: 8px 20px 4px;
+  overflow-y: auto;
+}
+.guide-group {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.guide-group:last-child {
+  border-bottom: none;
+}
+.guide-group__mode {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin: 0 0 2px;
+}
+.guide-group__hint {
+  font-size: 0.78rem;
+  color: var(--color-text-light);
+  margin: 0 0 8px;
+  font-style: italic;
+}
+.guide-group__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.guide-row {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 10px;
+  align-items: baseline;
+}
+.guide-row__do {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-green);
+}
+.guide-row__gets {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+.guide-card__footer {
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--color-border);
+}
+.guide-card__replay {
+  width: 100%;
+  padding: 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-green);
+  background: var(--color-green-dim);
+  color: #15803d;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.guide-card__replay:hover {
+  background: var(--color-green-light);
+}
+
+@media (max-width: 767px) {
+  .guide-row {
+    grid-template-columns: 110px 1fr;
+  }
+}
+
+/* ── Map fallback (WebGL unavailable) ───────────────────────────────────────── */
+.map-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+}
+.map-fallback__icon {
+  font-size: 3rem;
+  margin-bottom: 12px;
+}
+.map-fallback__title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--color-text);
+  margin: 0 0 6px;
+}
+.map-fallback__body {
+  font-size: 0.9rem;
+  max-width: 320px;
+  line-height: 1.5;
+  margin: 0;
 }

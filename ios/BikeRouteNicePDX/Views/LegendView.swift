@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Collapsible legend for the bike-network overlay. Tap to expand/collapse.
 struct LegendView: View {
+    @Environment(RouteStore.self) private var store
     @State private var expanded = true
 
     var body: some View {
@@ -17,8 +18,11 @@ struct LegendView: View {
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(expanded ? "Hide bike map key" : "Show bike map key")
 
             if expanded {
                 VStack(alignment: .leading, spacing: 6) {
@@ -52,6 +56,13 @@ struct LegendView: View {
         .padding(.vertical, 10)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+        .onChange(of: store.phase) { _, newPhase in
+            // Get the key out of the way the moment a route starts computing.
+            // Transition-only, so a deliberate re-expand isn't fought.
+            if newPhase == .snapping {
+                withAnimation(.snappy(duration: 0.2)) { expanded = false }
+            }
+        }
     }
 
     /// 4-tier route color key, matching the colored route line.

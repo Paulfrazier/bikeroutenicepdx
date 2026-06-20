@@ -9,11 +9,23 @@ struct Via: Identifiable {
     let id: UUID
     var coordinate: CLLocationCoordinate2D
     var precise: Bool
+    /// Set when this via belongs to a "route through this section" corridor — a
+    /// chain of pass-through points sampled along a street the user picked. All
+    /// vias sharing a `corridorId` are styled together (teal) and deleted as one
+    /// unit. Corridor vias are always `precise` (anchored on the chosen road,
+    /// never re-snapped to a parallel greenway).
+    var corridorId: UUID?
 
-    init(id: UUID = UUID(), coordinate: CLLocationCoordinate2D, precise: Bool = false) {
+    init(
+        id: UUID = UUID(),
+        coordinate: CLLocationCoordinate2D,
+        precise: Bool = false,
+        corridorId: UUID? = nil
+    ) {
         self.id = id
         self.coordinate = coordinate
         self.precise = precise
+        self.corridorId = corridorId
     }
 }
 
@@ -110,6 +122,18 @@ final class RouteStore {
     /// accidental grabs). Reset whenever a fresh route or new endpoint appears.
     var isEditMode = false
 
+    // ── "Route through a section" (corridor) ───────────────────────────────
+    // Tap point A then point B on a street; the server resolves the street
+    // between them into an ordered chain of pass-through points (the preview).
+    // On confirm those points are injected as a grouped block of `precise` vias,
+    // so the route recomputes to flow through that street.
+    var isCorridorMode = false
+    var corridorA: CLLocationCoordinate2D?
+    var corridorB: CLLocationCoordinate2D?
+    var corridorPreview: CorridorPreview?
+    var corridorLoading = false
+    var corridorError: String?
+
     // Search
     var searchResults: [SearchResult] = []
 
@@ -126,6 +150,11 @@ final class RouteStore {
     private let match = MatchService()
     private let router = RouteService()
     private let search = SearchService()
+    private let corridorService = CorridorService()
+
+    /// In-flight corridor resolve, cancellable so changing the pick mid-request
+    /// can't land a stale preview.
+    private var corridorTask: Task<Void, Never>?
 
     /// Debounce/cancel token for the auto-route. Cancelling it both aborts the
     /// pending ~350ms delay and flags the in-flight request as stale so a late
@@ -146,13 +175,21 @@ final class RouteStore {
         // auto-route re-routes start → vias → end so a careful edit isn't wiped.
         snapped = nil
         isEditMode = false
+        // An in-progress corridor pick is anchored to the old route — abandon it.
+        isCorridorMode = false
+        clearCorridorPick()
         searchResults = []
         recomputeIdlePhase()
         scheduleAutoRoute()
     }
 
-    /// Tap on the map (when not drawing): fill start, then end.
+    /// Tap on the map (when not drawing): fill start, then end. In corridor mode
+    /// a tap instead picks the section endpoints (A then B).
     func handleMapTap(_ coordinate: CLLocationCoordinate2D) {
+        if isCorridorMode {
+            handleCorridorTap(coordinate)
+            return
+        }
         if start == nil {
             setPin(coordinate, kind: .start, label: "Dropped pin")
         } else if end == nil {
@@ -305,6 +342,8 @@ final class RouteStore {
         searchResults = []
         errorMessage = nil
         isDrawMode = false
+        isCorridorMode = false
+        clearCorridorPick()
         phase = .idle
     }
 
@@ -378,7 +417,9 @@ final class RouteStore {
 
     /// Remove a waypoint (tapped pin) and re-route start → remaining vias → end.
     /// The old route stays on screen until the new one lands (no snap-back); on
-    /// failure we restore the via and the previous route.
+    /// failure we restore the via and the previous route. If the tapped via
+    /// belongs to a corridor ("route through a section"), the whole `corridorId`
+    /// group is removed at once so a section deletes as one unit.
     func deleteVia(at index: Int) async {
         guard vias.indices.contains(index),
               let startC = start?.coordinate, let endC = end?.coordinate else { return }
@@ -386,7 +427,11 @@ final class RouteStore {
         let previousVias = vias
         let previousSnapped = snapped
         let previousAuto = autoRoute
-        vias.remove(at: index)
+        if let corridorId = vias[index].corridorId {
+            vias.removeAll { $0.corridorId == corridorId }
+        } else {
+            vias.remove(at: index)
+        }
 
         do {
             let routed = try await router.route(
@@ -466,6 +511,140 @@ final class RouteStore {
         manualSegments.append(ManualSegment(coords: stroke))
         await recomputeDisplay()
         phase = .routed
+    }
+
+    // MARK: - Route through a section (corridor)
+
+    /// Toggle corridor ("route through a section") mode. Mutually exclusive with
+    /// edit/draw modes; entering clears any half-finished pick. Mirrors the web
+    /// `handleToggleCorridorMode`.
+    func toggleCorridorMode() {
+        let next = !isCorridorMode
+        if next {
+            isEditMode = false
+            isDrawMode = false
+        }
+        clearCorridorPick()
+        isCorridorMode = next
+    }
+
+    /// Clear an in-progress corridor pick (both endpoints, the preview, and any
+    /// loading/error state) and cancel any in-flight resolve. Stays in corridor
+    /// mode — used by both Cancel and an endpoint change.
+    func clearCorridorPick() {
+        corridorTask?.cancel()
+        corridorA = nil
+        corridorB = nil
+        corridorPreview = nil
+        corridorLoading = false
+        corridorError = nil
+    }
+
+    /// Cancel the previewed/in-progress pick but stay in corridor mode (web's
+    /// "Cancel" button), so the next tap starts a fresh A.
+    func cancelCorridorPick() {
+        clearCorridorPick()
+    }
+
+    /// A corridor-mode map tap: the first tap places point A; the second resolves
+    /// the street between A and B into the preview. Changing an endpoint abandons
+    /// an in-progress pick (its preview is anchored to the old pair).
+    private func handleCorridorTap(_ coordinate: CLLocationCoordinate2D) {
+        if corridorA == nil {
+            corridorA = coordinate
+            corridorB = nil
+            corridorPreview = nil
+            corridorError = nil
+        } else if let a = corridorA {
+            resolveCorridorPick(from: a, to: coordinate)
+        }
+    }
+
+    /// Second corridor tap: resolve the literal street between A and B into an
+    /// ordered chain of pass-through points (the preview). Cancellable so a fresh
+    /// pick can't land a stale result. On failure the pick resets to "tap A".
+    private func resolveCorridorPick(from a: CLLocationCoordinate2D, to b: CLLocationCoordinate2D) {
+        corridorTask?.cancel()
+        corridorB = b
+        corridorLoading = true
+        corridorError = nil
+        corridorPreview = nil
+        corridorTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let preview = try await self.corridorService.corridor(a: a, b: b)
+                if Task.isCancelled { return }
+                self.corridorPreview = preview
+                self.corridorLoading = false
+            } catch {
+                if Task.isCancelled { return }
+                self.corridorError = "Couldn't find a street between those points — tap closer together along one road."
+                self.corridorLoading = false
+                // Drop the failed pick so the next tap starts a fresh A.
+                self.corridorA = nil
+                self.corridorB = nil
+            }
+        }
+    }
+
+    /// Confirm the previewed corridor: inject its sampled points as a grouped
+    /// block of `precise` vias, ordered along the current route's direction of
+    /// travel, then re-route through them. The block stays contiguous (one
+    /// shared `corridorId`) so it deletes as one unit. Mirrors the web
+    /// `handleConfirmCorridor`; reverts the splice on a re-route failure.
+    func confirmCorridor() async {
+        guard let preview = corridorPreview, preview.points.count >= 2,
+              let startC = start?.coordinate, let endC = end?.coordinate else { return }
+
+        // Order against the routable auto geometry (not the spliced display).
+        let routeCoords = autoRoute?.coordinates ?? snapped?.coordinates ?? []
+        var pts = preview.points
+        // Orient so the endpoint nearer the route start comes first.
+        if routeCoords.count >= 2 {
+            let headArc = GeoMath.arcLength(of: pts[0], in: routeCoords)
+            let tailArc = GeoMath.arcLength(of: pts[pts.count - 1], in: routeCoords)
+            if headArc > tailArc { pts.reverse() }
+        }
+        // Downsample to the remaining via slots (keep first + last) so a long
+        // corridor can't blow past maxVias.
+        let slots = Self.maxVias - vias.count
+        guard slots >= 2 else { return }
+        if pts.count > slots {
+            let stride = Double(pts.count - 1) / Double(slots - 1)
+            pts = (0..<slots).map { pts[Int((Double($0) * stride).rounded())] }
+        }
+        let corridorId = UUID()
+        let block = pts.map { Via(coordinate: $0, precise: true, corridorId: corridorId) }
+        // Insert the whole block at the arc-length position of its midpoint.
+        let midArc = GeoMath.arcLength(of: pts[pts.count / 2], in: routeCoords)
+        let insertAt = vias.filter { GeoMath.arcLength(of: $0.coordinate, in: routeCoords) <= midArc }.count
+
+        // The block is committed to vias now — leave corridor mode + clear the pick.
+        isCorridorMode = false
+        clearCorridorPick()
+
+        let previousVias = vias
+        let previousSnapped = snapped
+        let previousAuto = autoRoute
+        vias.insert(contentsOf: block, at: min(insertAt, vias.count))
+        isManuallyEdited = true
+        phase = .routed
+
+        do {
+            let routed = try await router.route(
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue
+            )
+            guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
+            autoRoute = routed
+            await recomputeDisplay() // re-splice any manual segments onto the fresh route
+            isManuallyEdited = false // it's a clean road route now
+        } catch {
+            // Re-route failed (e.g. the section is unreachable) — undo the splice.
+            vias = previousVias
+            autoRoute = previousAuto
+            snapped = previousSnapped
+            isManuallyEdited = previousVias.isEmpty ? false : isManuallyEdited
+        }
     }
 
     // MARK: - Search

@@ -20,6 +20,14 @@ final class RouteGlowPolyline: MKPolyline {}
 /// reads as a distinct ribbon on top of the colored bike-network overlay.
 final class RouteCasingPolyline: MKPolyline {}
 
+/// The resolved street highlight shown while picking a "route through a section"
+/// (corridor) — a teal line over a white casing, mirroring the web preview.
+final class CorridorPolyline: MKPolyline {}
+
+/// White casing drawn beneath the teal `CorridorPolyline` so the highlighted
+/// section reads clearly over the colored bike-network overlay.
+final class CorridorCasingPolyline: MKPolyline {}
+
 /// One contiguous same-tier run of the routed line. The route is rendered as a
 /// sequence of these so its color tracks bike-friendliness along its length.
 final class RouteTierPolyline: MKPolyline {

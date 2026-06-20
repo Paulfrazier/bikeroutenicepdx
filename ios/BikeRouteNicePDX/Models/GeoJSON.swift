@@ -54,6 +54,25 @@ struct RouteResponse: Decodable {
     let steps: [RouteStep]
 }
 
+/// Request body for POST /corridor. Tap point A then point B on a street; the
+/// server resolves the literal street between them. Coordinates are [lng, lat].
+struct CorridorRequest: Encodable {
+    let a: [Double]
+    let b: [Double]
+}
+
+/// Response from POST /corridor — the ordered pass-through points sampled along
+/// the resolved street (≈ every 110m, ≤40, includes first+last) to inject as a
+/// grouped block of vias, plus the full street geometry for the highlight preview.
+struct CorridorResponse: Decodable {
+    struct Geometry: Decodable {
+        let type: String
+        let coordinates: [[Double]] // [lng, lat]
+    }
+    let points: [[Double]] // [lng, lat], ordered
+    let geometry: Geometry
+}
+
 /// The server's error envelope: { error, code }.
 struct APIErrorBody: Decodable {
     let error: String

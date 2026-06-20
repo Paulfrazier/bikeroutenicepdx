@@ -8,6 +8,8 @@
 import type {
   RouteRequest,
   RouteResponse,
+  CorridorRequest,
+  CorridorResponse,
   SearchResult,
   HealthResponse,
 } from "./types";
@@ -33,6 +35,16 @@ async function request<T>(
 /** POST /route — compute a bike route between two points */
 export async function fetchRoute(req: RouteRequest): Promise<RouteResponse> {
   return request<RouteResponse>("/route", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/** POST /corridor — resolve the street between two tapped points into ordered vias */
+export async function fetchCorridor(
+  req: CorridorRequest
+): Promise<CorridorResponse> {
+  return request<CorridorResponse>("/corridor", {
     method: "POST",
     body: JSON.stringify(req),
   });

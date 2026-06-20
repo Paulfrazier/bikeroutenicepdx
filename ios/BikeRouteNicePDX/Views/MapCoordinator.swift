@@ -29,6 +29,11 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     private var routeOverlays: [MKOverlay] = []
     /// Dashed-violet overlays marking the hand-drawn (manual) stretches.
     private var manualOverlays: [ManualPolyline] = []
+    /// Teal highlight (line + white casing) of the picked "route through a
+    /// section" street, shown only while in corridor mode.
+    private var corridorOverlays: [MKOverlay] = []
+    /// The two tapped corridor endpoints (A, B), shown as teal dots while picking.
+    private var corridorAnnotations: [CorridorEndpointAnnotation] = []
     /// Single rubber-banded preview line shown while a hand-edit drag is live.
     private var editPreviewOverlay: RoutePolyline?
     /// True while a route is on screen — fades the bike-network overlay back so
@@ -96,13 +101,15 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         // Hand-edit pan is live only when a finished route is on screen, we're not
         // drawing, AND the user has explicitly entered edit mode. Outside edit mode
         // the route is non-interactive so the map pans freely over it (no accidental
-        // grabs). shouldBegin further gates it to touches that land on the line.
-        editPanGesture?.isEnabled = (store.snapped != nil && !drawing && store.isEditMode)
+        // grabs). It's also off in corridor mode so taps pick the section instead of
+        // being swallowed. shouldBegin further gates it to touches on the line.
+        editPanGesture?.isEnabled = (store.snapped != nil && !drawing && store.isEditMode && !store.isCorridorMode)
 
         syncAnnotation(&startAnnotation, waypoint: store.start, title: "Start", map: map)
         syncAnnotation(&endAnnotation, waypoint: store.end, title: "End", map: map)
         syncViaAnnotations(map)
         syncManualOverlays(map)
+        syncCorridorPreview(map)
 
         if let snapped = store.snapped {
             // Rebuild when the route identity changes (routeVersion), not just its
@@ -227,6 +234,33 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         }
     }
 
+    /// Rebuild the "route through a section" (corridor) preview: a teal highlight
+    /// of the resolved street (line + white casing) plus the two tapped endpoint
+    /// dots. Shown only in corridor mode; rebuilt wholesale (cheap — one street).
+    private func syncCorridorPreview(_ map: MKMapView) {
+        if !corridorOverlays.isEmpty {
+            map.removeOverlays(corridorOverlays)
+            corridorOverlays = []
+        }
+        if !corridorAnnotations.isEmpty {
+            map.removeAnnotations(corridorAnnotations)
+            corridorAnnotations = []
+        }
+        guard store.isCorridorMode else { return }
+        if let geometry = store.corridorPreview?.geometry, geometry.count >= 2 {
+            let casing = CorridorCasingPolyline(coordinates: geometry, count: geometry.count)
+            let line = CorridorPolyline(coordinates: geometry, count: geometry.count)
+            corridorOverlays = [casing, line]
+            map.addOverlays(corridorOverlays, level: .aboveLabels)
+        }
+        for coordinate in [store.corridorA, store.corridorB].compactMap({ $0 }) {
+            let annotation = CorridorEndpointAnnotation()
+            annotation.coordinate = coordinate
+            map.addAnnotation(annotation)
+            corridorAnnotations.append(annotation)
+        }
+    }
+
     /// Rebuild the waypoint handle pins from `store.vias`. Shown only in edit
     /// mode (mirrors the web app). Rebuilt wholesale — the list is tiny (≤ maxVias).
     private func syncViaAnnotations(_ map: MKMapView) {
@@ -239,6 +273,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             let annotation = ViaAnnotation()
             annotation.coordinate = via.coordinate
             annotation.precise = via.precise
+            annotation.corridor = via.corridorId != nil
             map.addAnnotation(annotation)
             viaAnnotations.append(annotation)
         }
@@ -662,6 +697,22 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             renderer.lineJoin = .round
             renderer.lineDashPattern = [2, 8]
             return renderer
+        case let polyline as CorridorCasingPolyline:
+            // White casing under the teal corridor highlight (mirrors the web).
+            let renderer = MKPolylineRenderer(polyline: polyline)
+            renderer.strokeColor = UIColor.white.withAlphaComponent(0.9)
+            renderer.lineWidth = 9
+            renderer.lineCap = .round
+            renderer.lineJoin = .round
+            return renderer
+        case let polyline as CorridorPolyline:
+            // The picked "route through a section" street, highlighted in teal.
+            let renderer = MKPolylineRenderer(polyline: polyline)
+            renderer.strokeColor = UIColor(red: 0.051, green: 0.580, blue: 0.533, alpha: 1) // #0d9488 teal
+            renderer.lineWidth = 5
+            renderer.lineCap = .round
+            renderer.lineJoin = .round
+            return renderer
         case let polyline as DraftPolyline:
             let renderer = MKPolylineRenderer(polyline: polyline)
             renderer.strokeColor = UIColor.systemBlue.withAlphaComponent(0.45)
@@ -706,13 +757,39 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             view.frame = CGRect(x: 0, y: 0, width: size, height: size)
             view.backgroundColor = .clear
             view.layer.cornerRadius = size / 2
-            // Precise (forced) anchors read amber; normal snap waypoints emerald.
-            view.layer.backgroundColor = (via.precise
-                ? UIColor(red: 0.961, green: 0.620, blue: 0.043, alpha: 1) // #f59e0b amber
-                : UIColor(red: 0.063, green: 0.725, blue: 0.506, alpha: 1) // #10b981 emerald
-            ).cgColor
+            // Corridor handles read teal; precise (forced) anchors amber; normal
+            // snap waypoints emerald (mirrors the web waypoint palette).
+            let fill: UIColor
+            if via.corridor {
+                fill = UIColor(red: 0.051, green: 0.580, blue: 0.533, alpha: 1) // #0d9488 teal
+            } else if via.precise {
+                fill = UIColor(red: 0.961, green: 0.620, blue: 0.043, alpha: 1) // #f59e0b amber
+            } else {
+                fill = UIColor(red: 0.063, green: 0.725, blue: 0.506, alpha: 1) // #10b981 emerald
+            }
+            view.layer.backgroundColor = fill.cgColor
             view.layer.borderColor = UIColor.white.cgColor
             view.layer.borderWidth = 2.5
+            view.canShowCallout = false
+            view.isUserInteractionEnabled = false
+            return view
+        }
+
+        // Corridor endpoint (A/B): a teal dot with a white ring marking a tapped
+        // end of the picked section. Non-interactive so the second tap reaches
+        // the map's tap gesture (which resolves the street).
+        if annotation is CorridorEndpointAnnotation {
+            let id = "corridorEndpoint"
+            let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
+                ?? MKAnnotationView(annotation: annotation, reuseIdentifier: id)
+            view.annotation = annotation
+            let size: CGFloat = 18
+            view.frame = CGRect(x: 0, y: 0, width: size, height: size)
+            view.backgroundColor = .clear
+            view.layer.cornerRadius = size / 2
+            view.layer.backgroundColor = UIColor(red: 0.051, green: 0.580, blue: 0.533, alpha: 1).cgColor // #0d9488 teal
+            view.layer.borderColor = UIColor.white.cgColor
+            view.layer.borderWidth = 3
             view.canShowCallout = false
             view.isUserInteractionEnabled = false
             return view
@@ -787,7 +864,14 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 /// amber for precise (forced, non-snapping) anchors.
 final class ViaAnnotation: MKPointAnnotation {
     var precise = false
+    /// True when this handle belongs to a "route through a section" corridor —
+    /// rendered teal (like the web) to read as part of a picked section.
+    var corridor = false
 }
+
+/// A tapped endpoint (A or B) of a "route through a section" pick. Subclass so
+/// `viewFor` can render it as a distinct teal dot while the section is chosen.
+final class CorridorEndpointAnnotation: MKPointAnnotation {}
 
 /// Shortest distance from point `p` to the line segment `a`–`b`, in the same
 /// (screen) coordinate space. Free function — pure CGPoint math.

@@ -13,6 +13,8 @@ data/osm/
 data/reconciled/*.pbf
 data/reconciled/*.osm
 data/reconciled/*.geojson
+# Dated reconcile runs (large, regenerable OSM extracts)
+data/reconciled/*/
 
 # Basemap tile build — large, regenerable
 data/sources/

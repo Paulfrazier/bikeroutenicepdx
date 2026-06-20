@@ -126,6 +126,7 @@ struct ControlsBar: View {
                         store.enterDrawMode()
                     }
                 }
+                corridorButton
             }
         case .failed(let message):
             VStack(spacing: 10) {
@@ -245,6 +246,25 @@ struct ControlsBar: View {
         }
         .buttonStyle(.bordered)
         .tint(store.isEditMode ? .green : .blue)
+    }
+
+    /// Toggle "route through a section" (corridor) mode: tap A then B on a street
+    /// and the master route is forced through that section. Mutually exclusive
+    /// with edit/draw; reads teal while active (mirrors the web).
+    private var corridorButton: some View {
+        Button {
+            store.toggleCorridorMode()
+        } label: {
+            Label(
+                store.isCorridorMode ? "Pick a section on the map" : "Route through a section",
+                systemImage: "point.topleft.down.to.point.bottomright.curvepath"
+            )
+            .font(.subheadline.weight(.medium))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+        }
+        .buttonStyle(.bordered)
+        .tint(store.isCorridorMode ? .teal : .blue)
     }
 
     private var clearAllButton: some View {

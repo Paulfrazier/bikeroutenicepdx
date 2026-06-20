@@ -1,59 +1,45 @@
-# BikeRouteNicePDX — Valhalla routing service
-#
-# Image choice: gisops/valhalla:latest
-#   We use gisops/valhalla rather than ghcr.io/valhalla/valhalla because:
-#   - gisops tags are more frequently updated and better tested against the
-#     current valhalla release cycle (verified stable through 3.4.x).
-#   - The ghcr.io image is the upstream CI artifact; it builds but its
-#     entrypoint script is less battle-tested for production tile-server use.
-#   - Both images are FROM the same upstream source; gisops adds a thin
-#     entrypoint wrapper that handles "build tiles if absent, then serve".
+# BikeRouteNicePDX — Valhalla routing service (local validation)
 #
 # Greenway preference is baked into portland-tagged.osm.pbf as standard OSM tags
 # (cycleway/bicycle/lcn) by scripts/build-graph.ts, so this runs STOCK Valhalla
-# with its default Lua — no custom tag-transform needed.
+# with its default Lua — no custom tag transform.
 #
-# To (re)build tiles after the PBF changes (e.g. after npm run build:graph):
-#   docker compose down -v && docker compose up --build
+# Image: gis-ops / nilsnolde docker-valhalla. It scans /custom_files for a .pbf,
+# builds routing tiles there on first run (or when force_rebuild=True), and
+# serves on :8002. The server sends costing_options (use_roads etc.) per request,
+# so no custom valhalla.json is needed here.
 #
-# The -v flag removes the valhalla_tiles volume so tiles are rebuilt from
-# scratch. Without it, stale tiles will be served even if the PBF changed.
+# Usage:
+#   ../scripts/stage-valhalla.sh   # copies the tagged PBF into ./custom_files
+#   docker compose up --build      # first run builds tiles (~minutes)
+# Force a clean rebuild after the PBF changes:
+#   set force_rebuild=True (below) or `rm -rf custom_files/*tile*` then up.
 
 services:
   valhalla:
-    image: gisops/valhalla:latest
+    image: ghcr.io/nilsnolde/docker-valhalla/valhalla:latest
     container_name: bikeroutenice-valhalla
-
-    volumes:
-      # Tagged PBF produced by scripts/build-graph.ts (greenway tags baked in)
-      - ../data/reconciled/current:/data:ro
-      # Service-limits / costing config (overrides any image-default valhalla.json)
-      - ./valhalla.json:/data/valhalla.json:ro
-      # Named volume holds built tile set; survives container restarts
-      - valhalla_tiles:/data/valhalla_tiles
 
     ports:
       - "8002:8002"
 
+    volumes:
+      # Holds the .pbf and the built tiles. Populate with the tagged PBF first.
+      - ./custom_files:/custom_files
+
     environment:
-      # Tell the entrypoint where to write/read tiles
-      - tile_dir=/data/valhalla_tiles
-      # If tiles already exist in the volume, skip the (slow) build step.
-      # Set to True only after a confirmed good build; default False so the
-      # first `docker compose up` always builds from the PBF.
+      - force_rebuild=False        # build only if tiles are absent
       - use_tiles_ignore_pbf=False
-      # Point at the tagged PBF that scripts/build-graph.ts produces
-      - pbf_files=/data/portland-tagged.osm.pbf
+      - build_elevation=False      # no SRTM download; use_hills has no effect
+      - build_admins=False         # skip admin DB (no country/state crossing logic)
+      - build_time_zones=False
+      - serve_tiles=True
 
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8002/status"]
       interval: 15s
       timeout: 5s
-      retries: 10
-      start_period: 120s  # tile build can take a few minutes on first run
+      retries: 20
+      start_period: 300s  # first tile build can take several minutes
 
     restart: unless-stopped
-
-volumes:
-  valhalla_tiles:
-    driver: local

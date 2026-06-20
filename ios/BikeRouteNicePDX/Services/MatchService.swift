@@ -53,3 +53,38 @@ struct RouteService {
         return route
     }
 }
+
+/// The resolved "route through a section" preview: the ordered pass-through
+/// points to inject (as a grouped block of precise vias) plus the full street
+/// geometry for the teal highlight line shown while picking the section.
+struct CorridorPreview: Equatable {
+    var points: [CLLocationCoordinate2D]
+    var geometry: [CLLocationCoordinate2D]
+}
+
+/// Resolves the literal street between two tapped points into an ordered chain
+/// of pass-through points via the server's /corridor endpoint. The chain is
+/// injected as a grouped block of `precise` vias so the route is forced through
+/// that street section.
+struct CorridorService {
+    func corridor(
+        a: CLLocationCoordinate2D,
+        b: CLLocationCoordinate2D
+    ) async throws -> CorridorPreview {
+        let body = CorridorRequest(
+            a: [a.longitude, a.latitude],
+            b: [b.longitude, b.latitude]
+        )
+        let response = try await APIClient.post(path: "corridor", body: body, as: CorridorResponse.self)
+        func toCoords(_ pairs: [[Double]]) -> [CLLocationCoordinate2D] {
+            pairs.compactMap { pair -> CLLocationCoordinate2D? in
+                guard pair.count == 2 else { return nil }
+                return CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0])
+            }
+        }
+        return CorridorPreview(
+            points: toCoords(response.points),
+            geometry: toCoords(response.geometry.coordinates)
+        )
+    }
+}

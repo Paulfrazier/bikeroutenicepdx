@@ -18,6 +18,7 @@
     "build:tiles": "tsx scripts/build-tiles.ts",
     "reconcile": "tsx scripts/reconcile.ts",
     "test:routes": "tsx tests/routes/run.ts",
+    "compare:engines": "tsx scripts/compare-engines.ts",
     "dev:server": "npm --workspace server run dev",
     "dev:web": "npm --workspace web run dev"
   },

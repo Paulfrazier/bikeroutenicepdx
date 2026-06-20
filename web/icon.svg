@@ -1,25 +1,139 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="80" fill="#16a34a"/>
-  <!-- Bicycle wheels -->
-  <circle cx="160" cy="320" r="80" stroke="white" stroke-width="24" fill="none"/>
-  <circle cx="352" cy="320" r="80" stroke="white" stroke-width="24" fill="none"/>
-  <!-- Wheel hubs -->
-  <circle cx="160" cy="320" r="12" fill="white"/>
-  <circle cx="352" cy="320" r="12" fill="white"/>
-  <!-- Frame: seat stay + chain stay -->
-  <line x1="160" y1="320" x2="256" y2="200" stroke="white" stroke-width="22" stroke-linecap="round"/>
-  <line x1="160" y1="320" x2="256" y2="280" stroke="white" stroke-width="22" stroke-linecap="round"/>
-  <!-- Frame: top tube + down tube -->
-  <line x1="256" y1="200" x2="352" y2="320" stroke="white" stroke-width="22" stroke-linecap="round"/>
-  <line x1="256" y1="280" x2="352" y2="320" stroke="white" stroke-width="22" stroke-linecap="round"/>
-  <!-- Seat tube -->
-  <line x1="256" y1="200" x2="256" y2="280" stroke="white" stroke-width="22" stroke-linecap="round"/>
-  <!-- Handlebar stem -->
-  <line x1="304" y1="200" x2="352" y2="230" stroke="white" stroke-width="18" stroke-linecap="round"/>
-  <line x1="304" y1="185" x2="304" y2="215" stroke="white" stroke-width="18" stroke-linecap="round"/>
-  <!-- Seat -->
-  <line x1="220" y1="195" x2="270" y2="195" stroke="white" stroke-width="18" stroke-linecap="round"/>
-  <!-- Pedals -->
-  <circle cx="256" cy="305" r="16" fill="white"/>
-  <line x1="236" y1="305" x2="276" y2="305" stroke="white" stroke-width="14" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- PDX carpet teal field -->
+    <linearGradient id="field" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d5450"/>
+      <stop offset="0.55" stop-color="#15706a"/>
+      <stop offset="1" stop-color="#0a4744"/>
+    </linearGradient>
+    <!-- River / route ribbon -->
+    <linearGradient id="river" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="0.5" stop-color="#5dd0fb"/>
+      <stop offset="1" stop-color="#2f8fe6"/>
+    </linearGradient>
+    <!-- Rose -->
+    <radialGradient id="rose" cx="0.4" cy="0.35" r="0.8">
+      <stop offset="0" stop-color="#ff7da6"/>
+      <stop offset="0.45" stop-color="#f43f5e"/>
+      <stop offset="1" stop-color="#be123c"/>
+    </radialGradient>
+    <linearGradient id="leaf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4ade80"/>
+      <stop offset="1" stop-color="#15803d"/>
+    </linearGradient>
+    <radialGradient id="vignette" cx="0.5" cy="0.42" r="0.75">
+      <stop offset="0.6" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.28"/>
+    </radialGradient>
+    <clipPath id="round">
+      <rect width="1024" height="1024" rx="220"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#round)">
+    <!-- Base teal field -->
+    <rect width="1024" height="1024" fill="url(#field)"/>
+
+    <!-- ===== PDX AIRPORT CARPET ===== abstract intersecting runways ===== -->
+    <g stroke-linecap="square">
+      <!-- subtle teal texture lines -->
+      <g stroke="#1c8a80" stroke-width="10" opacity="0.5">
+        <line x1="-60" y1="120" x2="1140" y2="420"/>
+        <line x1="-60" y1="300" x2="1140" y2="600"/>
+        <line x1="-60" y1="640" x2="1140" y2="940"/>
+        <line x1="120" y1="-60" x2="420" y2="1140"/>
+        <line x1="560" y1="-60" x2="860" y2="1140"/>
+      </g>
+      <!-- magenta runways -->
+      <g stroke="#e94d8b" stroke-width="26" opacity="0.92">
+        <line x1="-40" y1="780" x2="1120" y2="470"/>
+        <line x1="200" y1="1100" x2="640" y2="-80"/>
+      </g>
+      <!-- light-blue runways -->
+      <g stroke="#43c4e0" stroke-width="22" opacity="0.85">
+        <line x1="-40" y1="500" x2="1120" y2="250"/>
+        <line x1="780" y1="-60" x2="980" y2="1120"/>
+      </g>
+      <!-- violet accents -->
+      <g stroke="#9b6dd6" stroke-width="16" opacity="0.8">
+        <line x1="-40" y1="940" x2="1120" y2="720"/>
+        <line x1="60" y1="-40" x2="240" y2="1100"/>
+      </g>
+    </g>
+    <!-- carpet chevrons / nav markers -->
+    <g fill="none" stroke-width="16" stroke-linejoin="round" stroke-linecap="round" opacity="0.9">
+      <path d="M150 250 l44 30 l-44 30" stroke="#f4b740"/>
+      <path d="M905 360 l-44 30 l44 30" stroke="#f4b740"/>
+      <path d="M820 840 l44 30 l-44 30" stroke="#e94d8b"/>
+      <path d="M210 760 l44 30 l-44 30" stroke="#43c4e0"/>
+    </g>
+    <g fill="#f4b740" opacity="0.85">
+      <circle cx="120" cy="540" r="11"/>
+      <circle cx="930" cy="600" r="11"/>
+      <circle cx="470" cy="120" r="11"/>
+      <circle cx="560" cy="930" r="11"/>
+    </g>
+
+    <!-- ===== RIVER / ROUTE RIBBON ===== -->
+    <g>
+      <path d="M-40 880 C 240 760, 230 600, 470 540 S 760 480, 900 250"
+            fill="none" stroke="#0a3f4f" stroke-width="92" stroke-linecap="round" opacity="0.45"/>
+      <path d="M-40 880 C 240 760, 230 600, 470 540 S 760 480, 900 250"
+            fill="none" stroke="url(#river)" stroke-width="74" stroke-linecap="round"/>
+      <!-- dashed route centerline -->
+      <path d="M-40 880 C 240 760, 230 600, 470 540 S 760 480, 900 250"
+            fill="none" stroke="#ffffff" stroke-width="11" stroke-linecap="round"
+            stroke-dasharray="2 46" opacity="0.95"/>
+    </g>
+
+    <!-- ===== BIKE (hero, white) ===== -->
+    <g stroke="#ffffff" stroke-width="34" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <!-- drop shadow underlay -->
+      <g stroke="#062f2c" opacity="0.35" transform="translate(0,12)">
+        <circle cx="332" cy="690" r="150"/>
+        <circle cx="690" cy="690" r="150"/>
+      </g>
+      <!-- wheels -->
+      <circle cx="332" cy="690" r="150"/>
+      <circle cx="690" cy="690" r="150"/>
+      <!-- frame -->
+      <path d="M332 690 L470 470 L630 470"/>
+      <path d="M332 690 L560 690 L470 470"/>
+      <path d="M560 690 L690 690"/>
+      <!-- seat tube + seat -->
+      <path d="M470 470 L500 420"/>
+      <path d="M468 410 L540 410"/>
+      <!-- handlebar -->
+      <path d="M630 470 L688 690"/>
+      <path d="M610 442 L662 442"/>
+    </g>
+    <!-- hubs + crank -->
+    <g fill="#ffffff">
+      <circle cx="332" cy="690" r="20"/>
+      <circle cx="690" cy="690" r="20"/>
+      <circle cx="560" cy="690" r="26"/>
+    </g>
+
+    <!-- ===== ROSE (destination, top of route) ===== -->
+    <g transform="translate(900 250)">
+      <!-- leaf -->
+      <path d="M-6 70 C 40 64, 76 92, 80 150 C 30 146, -2 116, -6 70 Z" fill="url(#leaf)"/>
+      <path d="M-2 78 C 28 96, 50 120, 66 142" stroke="#0f5132" stroke-width="6" fill="none" stroke-linecap="round"/>
+      <!-- stem -->
+      <path d="M0 18 C 6 70, 8 110, 4 160" stroke="#15803d" stroke-width="14" fill="none" stroke-linecap="round"/>
+      <!-- bloom -->
+      <circle r="74" fill="url(#rose)"/>
+      <g fill="none" stroke="#9f1239" stroke-width="9" stroke-linecap="round" opacity="0.85">
+        <path d="M0 0 C -26 -10, -26 -42, 0 -46 C 26 -42, 26 -10, 0 0"/>
+        <path d="M0 0 C 28 -8, 50 8, 40 34 C 22 40, 4 26, 0 0"/>
+        <path d="M0 0 C 14 26, -8 50, -34 40 C -42 22, -22 6, 0 0"/>
+        <path d="M0 0 C -30 4, -48 -18, -34 -42"/>
+      </g>
+      <circle r="16" fill="#ffe4ec"/>
+    </g>
+
+    <!-- soft vignette for depth -->
+    <rect width="1024" height="1024" fill="url(#vignette)"/>
+  </g>
 </svg>

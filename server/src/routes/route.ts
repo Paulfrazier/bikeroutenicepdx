@@ -9,7 +9,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { ValhallaError } from "../services/valhalla.js";
-import { getRouteBrouter } from "../services/brouter.js";
+import { bakeoffRoute } from "../services/bakeoff.js";
 
 const app = new Hono();
 
@@ -64,7 +64,9 @@ app.post(
     }
 
     try {
-      const result = await getRouteBrouter(from, to, via ?? [], preference ?? "comfort");
+      // Per-request bake-off: race every available engine, return the best route
+      // (winner) plus the runners-up as `alternatives`. See services/bakeoff.ts.
+      const result = await bakeoffRoute(from, to, via ?? [], preference ?? "comfort");
       return c.json(result);
     } catch (err) {
       if (err instanceof ValhallaError) {

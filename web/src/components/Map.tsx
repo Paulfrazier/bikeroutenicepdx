@@ -18,7 +18,7 @@
  *   - "" (empty) → MapLibre demotiles, a minimal low-detail fallback.
  */
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import maplibregl, {
   Map as MLMap,
   GeolocateControl,
@@ -27,7 +27,7 @@ import maplibregl, {
   LngLatLike,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { LngLat, RouteResponse, Via, ManualSegment } from "../types";
+import type { LngLat, RouteResponse, RouteGeometry, Via, ManualSegment } from "../types";
 import { hitTestRoute, VERTEX_HIT_PX, MAX_VIAS, type Px } from "../geo";
 
 // Protocol handler for PMTiles (lazy-import to keep bundle splittable)
@@ -178,15 +178,25 @@ function manualFeatures(segments: ManualSegment[]): GeoJSON.FeatureCollection {
 }
 
 /** Point features for each waypoint pin (the "route-waypoints" handle layer).
- * Carries `precise` so the layer can color snap (emerald) vs precise (amber). */
+ * Carries `precise` (snap=emerald vs precise=amber) and `corridor` (a "route
+ * through a section" point, drawn teal) so the layer can color them apart. */
 function waypointFeatures(vias: Via[]): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
     features: vias.map((v) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: v.at },
-      properties: { precise: v.precise },
+      properties: { precise: v.precise, corridor: !!v.corridorId },
     })),
+  };
+}
+
+/** A single Point feature (for the corridor A/B endpoint markers). */
+function pointFeature(at: LngLat): GeoJSON.Feature {
+  return {
+    type: "Feature",
+    geometry: { type: "Point", coordinates: at },
+    properties: {},
   };
 }
 
@@ -209,10 +219,29 @@ const ROUTE_LEGEND_ITEMS = [
   { tier: "red",   color: "#DC2626", label: "Busy street",      dashed: true  },
 ] as const;
 
-function BikeNetworkLegend() {
+function BikeNetworkLegend({
+  open,
+  onToggle,
+}: {
+  open: boolean;
+  onToggle: () => void;
+}) {
   return (
     <div className="bike-legend" aria-label="Bike network legend">
-      <div className="bike-legend__title">Bike Network</div>
+      <button
+        type="button"
+        className="bike-legend__toggle"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        <span className="bike-legend__toggle-icon" aria-hidden="true">🚲</span>
+        <span className="bike-legend__toggle-label">Bike Network</span>
+        <span className="bike-legend__chevron" aria-hidden="true">
+          {open ? "▾" : "▸"}
+        </span>
+      </button>
+      {open && (
+      <>
       <ul className="bike-legend__list">
         {LEGEND_ITEMS.map(({ cls, color, label, dashed }) => (
           <li key={cls} className="bike-legend__item">
@@ -246,6 +275,8 @@ function BikeNetworkLegend() {
           </li>
         ))}
       </ul>
+      </>
+      )}
     </div>
   );
 }
@@ -254,6 +285,8 @@ interface MapProps {
   from: LngLat | null;
   to: LngLat | null;
   route: RouteResponse | null;
+  /** True while a route is being computed — auto-collapses the bike legend. */
+  routeLoading: boolean;
   /**
    * Route split into one LineString feature per contiguous friendliness tier
    * (properties.tier ∈ green|amber|red). Drives the colored route rendering.
@@ -286,12 +319,19 @@ interface MapProps {
   onDrawSegment: (coords: LngLat[]) => void;
   /** Raw-nudge a point on a manual segment (drag, no re-route). */
   onManualNudge: (segId: string, vertexIndex: number, at: LngLat) => void;
+  /** Corridor mode: first tapped point (start of the section), or null. */
+  corridorA: LngLat | null;
+  /** Corridor mode: second tapped point (end of the section), or null. */
+  corridorB: LngLat | null;
+  /** Corridor mode: the resolved street between A and B (highlight preview). */
+  corridorPreview: { geometry: RouteGeometry } | null;
 }
 
 export function Map({
   from,
   to,
   route,
+  routeLoading,
   tierFeatures,
   onMapClick,
   onStepFlyTo,
@@ -306,7 +346,18 @@ export function Map({
   manualSegments,
   onDrawSegment,
   onManualNudge,
+  corridorA,
+  corridorB,
+  corridorPreview,
 }: MapProps) {
+  // Bike-network legend: open by default; auto-collapses the moment a route
+  // starts computing so it's out of the way as the line draws. Transition-only
+  // (effect fires on routeLoading false→true), so a manual re-open isn't fought.
+  const [legendOpen, setLegendOpen] = useState(true);
+  useEffect(() => {
+    if (routeLoading) setLegendOpen(false);
+  }, [routeLoading]);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
   const fromMarkerRef = useRef<Marker | null>(null);
@@ -594,12 +645,57 @@ export function Map({
         // Hidden until the user enters edit mode (toggled by the `editing` effect).
         layout: { visibility: "none" },
         paint: {
-          // Precise (forced, non-snapping) anchors read amber + larger; normal
-          // snap waypoints stay emerald.
-          "circle-radius": ["case", ["get", "precise"], 8, 7],
-          "circle-color": ["case", ["get", "precise"], "#f59e0b", "#10b981"],
+          // Corridor points (a picked "section") read teal; precise (forced,
+          // non-snapping) anchors read amber + larger; snap waypoints stay emerald.
+          "circle-radius": ["case", ["get", "corridor"], 6, ["get", "precise"], 8, 7],
+          "circle-color": [
+            "case",
+            ["get", "corridor"],
+            "#0d9488",
+            ["get", "precise"],
+            "#f59e0b",
+            "#10b981",
+          ],
           "circle-stroke-color": "#ffffff",
           "circle-stroke-width": 2.5,
+        },
+      });
+
+      // ── Corridor ("route through a section") preview ─────────────────────
+      // Shown while the user is picking a section (tap A → tap B). A teal line
+      // highlights the resolved street; circles mark the two tapped endpoints.
+      // On confirm the section becomes a block of vias and these clear.
+      map.addSource("corridor-preview", {
+        type: "geojson",
+        data: emptyGeojson(),
+      });
+      map.addLayer({
+        id: "corridor-preview-casing",
+        type: "line",
+        source: "corridor-preview",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#ffffff", "line-width": 9, "line-opacity": 0.9 },
+      });
+      map.addLayer({
+        id: "corridor-preview-line",
+        type: "line",
+        source: "corridor-preview",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#0d9488", "line-width": 5 },
+      });
+      map.addSource("corridor-points", {
+        type: "geojson",
+        data: emptyGeojson(),
+      });
+      map.addLayer({
+        id: "corridor-points",
+        type: "circle",
+        source: "corridor-points",
+        paint: {
+          "circle-radius": 8,
+          "circle-color": "#0d9488",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 3,
         },
       });
     });
@@ -1016,6 +1112,25 @@ export function Map({
     }
   }, [editing]);
 
+  // ── Corridor preview: highlight the picked section + its tapped endpoints ──
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    (
+      map.getSource("corridor-preview") as maplibregl.GeoJSONSource | undefined
+    )?.setData(
+      corridorPreview
+        ? lineFeature(corridorPreview.geometry.coordinates)
+        : emptyGeojson()
+    );
+    const pts: GeoJSON.Feature[] = [];
+    if (corridorA) pts.push(pointFeature(corridorA));
+    if (corridorB) pts.push(pointFeature(corridorB));
+    (
+      map.getSource("corridor-points") as maplibregl.GeoJSONSource | undefined
+    )?.setData({ type: "FeatureCollection", features: pts });
+  }, [corridorA, corridorB, corridorPreview]);
+
   // ── Sync from marker ─────────────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
@@ -1076,7 +1191,10 @@ export function Map({
         role="application"
         aria-label="Bike route map"
       />
-      <BikeNetworkLegend />
+      <BikeNetworkLegend
+        open={legendOpen}
+        onToggle={() => setLegendOpen((o) => !o)}
+      />
     </div>
   );
 }

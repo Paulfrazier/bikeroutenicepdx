@@ -9,6 +9,15 @@ export const config = {
   /** BRouter engine — powers /route (greenway-preferring). /match stays on Valhalla. */
   brouterUrl: (process.env.BROUTER_URL ?? "http://localhost:17777").replace(/\/$/, ""),
   nominatimUrl: (process.env.NOMINATIM_URL ?? "https://nominatim.openstreetmap.org").replace(/\/$/, ""),
+  /**
+   * Optional bake-off engines. Both are free public APIs that require a key
+   * (no billing). An engine with no key is automatically excluded from the
+   * per-request bake-off, so the app still works on Valhalla + BRouter alone.
+   */
+  orsApiKey: process.env.ORS_API_KEY ?? "",
+  orsUrl: (process.env.ORS_URL ?? "https://api.openrouteservice.org").replace(/\/$/, ""),
+  graphhopperApiKey: process.env.GRAPHHOPPER_API_KEY ?? "",
+  graphhopperUrl: (process.env.GRAPHHOPPER_URL ?? "https://graphhopper.com").replace(/\/$/, ""),
   /** Allowed CORS origin for the web frontend. */
   webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:5173",
   /**

@@ -22,6 +22,30 @@ export interface Via {
   id: string;
   at: LngLat;
   precise: boolean;
+  /**
+   * Set when this via belongs to a "route through this section" corridor — a
+   * chain of pass-through points sampled along a street the user picked. All
+   * vias sharing a `corridorId` are styled together and deleted as one unit.
+   * Corridor vias are always `precise` (anchored on the chosen road, never
+   * re-snapped to a parallel greenway).
+   */
+  corridorId?: string;
+}
+
+// ─── /corridor ────────────────────────────────────────────────────────────────
+
+export interface CorridorRequest {
+  /** First tapped point [lng, lat]. */
+  a: LngLat;
+  /** Second tapped point [lng, lat]. */
+  b: LngLat;
+}
+
+export interface CorridorResponse {
+  /** Ordered pass-through points sampled along the street between A and B. */
+  points: LngLat[];
+  /** The full resolved street geometry (for the highlight preview). */
+  geometry: RouteGeometry;
 }
 
 /**
@@ -50,6 +74,15 @@ export interface RouteGeometry {
   coordinates: LngLat[];
 }
 
+/** Which engine produced a route (per-request bake-off). */
+export type RouteEngine = "valhalla" | "brouter" | "ors" | "graphhopper";
+
+/** A runner-up route from the bake-off — full geometry so the UI can switch instantly. */
+export interface AlternativeRoute extends RouteResponse {
+  engine: RouteEngine;
+  score: number;
+}
+
 export interface RouteResponse {
   geometry: RouteGeometry;
   steps: RouteStep[];
@@ -57,6 +90,13 @@ export interface RouteResponse {
   duration_s: number;
   /** 0–1 fraction of route on off_street | greenway | protected edges */
   greenway_coverage: number;
+  /**
+   * Winning engine of the per-request bake-off. Optional: older servers (and the
+   * /match flow) omit it; clients fall back to not showing an engine chip.
+   */
+  engine?: RouteEngine;
+  /** Runners-up from the bake-off, best-first. Optional for the same reason. */
+  alternatives?: AlternativeRoute[];
 }
 
 // ─── /search ────────────────────────────────────────────────────────────────
