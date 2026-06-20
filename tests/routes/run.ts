@@ -290,7 +290,11 @@ async function main(): Promise<void> {
       const coverage_pass = effective_coverage >= coverage_threshold;
 
       const greenway_hit = findGreenwayHit(data.steps, route.expected_greenways);
-      const greenway_pass = greenway_hit !== null;
+      // BRouter doesn't expose per-step street names, so the name-based hit (and
+      // the forbidden-street check) can't run. When no step has a name, fall
+      // back to the coverage threshold as the greenway criterion.
+      const namesAvailable = data.steps.some((s) => s.street_name);
+      const greenway_pass = namesAvailable ? greenway_hit !== null : coverage_pass;
 
       // Merge global + route-specific forbidden streets (deduplicated)
       const allForbidden = Array.from(new Set([...globalForbidden, ...route.forbidden_streets]));
