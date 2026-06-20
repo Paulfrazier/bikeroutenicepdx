@@ -1,6 +1,20 @@
 import SwiftUI
 import CoreLocation
 
+/// Greenway-vs-speed preference for routing. Maps to the server's `use_roads`.
+enum RoutePreference: String, CaseIterable, Identifiable {
+    case comfort, balanced, fast
+    var id: String { rawValue }
+    /// Short label for the segmented control.
+    var label: String {
+        switch self {
+        case .comfort: return "Comfort"
+        case .balanced: return "Balanced"
+        case .fast: return "Fast"
+        }
+    }
+}
+
 /// Single source of truth for the draw-a-route flow. Injected at the app root
 /// and read by every view via `@Environment(RouteStore.self)`.
 @MainActor
@@ -9,6 +23,20 @@ final class RouteStore {
     // Pins
     var start: Waypoint?
     var end: Waypoint?
+
+    /// Greenway-vs-speed preference (Comfort↔Fast). Persisted across launches.
+    /// Changing it while a route is shown recomputes it.
+    var routePreference: RoutePreference = {
+        let raw = UserDefaults.standard.string(forKey: "routePreference") ?? RoutePreference.comfort.rawValue
+        return RoutePreference(rawValue: raw) ?? .comfort
+    }() {
+        didSet {
+            guard oldValue != routePreference else { return }
+            UserDefaults.standard.set(routePreference.rawValue, forKey: "routePreference")
+            // Recompute the current route under the new preference.
+            if bothPinsSet, !isDrawMode { scheduleAutoRoute() }
+        }
+    }
 
     // Draw mode
     var isDrawMode = false
@@ -130,7 +158,7 @@ final class RouteStore {
         phase = .snapping
         errorMessage = nil
         do {
-            let routed = try await router.route(from: startC, to: endC, vias: [])
+            let routed = try await router.route(from: startC, to: endC, vias: [], preference: routePreference.rawValue)
             if Task.isCancelled { return }
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             snapped = await classified(routed)
@@ -245,7 +273,7 @@ final class RouteStore {
         phase = .routed
 
         do {
-            let routed = try await router.route(from: startC, to: endC, vias: vias)
+            let routed = try await router.route(from: startC, to: endC, vias: vias, preference: routePreference.rawValue)
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             snapped = await classified(routed)
             isManuallyEdited = false // it's a clean road route now

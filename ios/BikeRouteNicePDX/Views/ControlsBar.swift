@@ -102,6 +102,7 @@ struct ControlsBar: View {
                         }
                     }
                 }
+                preferencePicker
                 if store.isEditMode {
                     hint("Drag the route to reshape it — it re-snaps to roads.")
                 }
@@ -131,6 +132,23 @@ struct ControlsBar: View {
     }
 
     // MARK: - Reusable bits
+
+    /// Comfort↔Fast segmented control. Changing it recomputes the current route
+    /// (RouteStore re-routes in its didSet).
+    private var preferencePicker: some View {
+        Picker(
+            "Route style",
+            selection: Binding(
+                get: { store.routePreference },
+                set: { store.routePreference = $0 }
+            )
+        ) {
+            ForEach(RoutePreference.allCases) { pref in
+                Text(pref.label).tag(pref)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
 
     /// Caption under the routed distance. Reflects whether the route has been
     /// reshaped with drag-to-reshape via points.

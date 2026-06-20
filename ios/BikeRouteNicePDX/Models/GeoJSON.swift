@@ -16,6 +16,9 @@ struct RouteRequest: Encodable {
     let from: [Double]
     let to: [Double]
     let via: [[Double]]
+    /// "comfort" | "balanced" | "fast" — maps to the server's use_roads. Omitted
+    /// (nil) lets the server default to comfort.
+    let preference: String?
 }
 
 /// Response from POST /match (and /route) — a GeoJSON LineString + totals.
