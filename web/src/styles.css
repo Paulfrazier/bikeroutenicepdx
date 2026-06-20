@@ -57,9 +57,19 @@
 html,
 body,
 #root {
-  height: 100%;
+  /* Dynamic viewport height tracks the visible area as iOS Safari's toolbar
+     shows/hides, so the bottom drawer + map controls never get pushed off
+     screen the way 100vh/100% does. vh is the fallback for older browsers. */
+  height: 100vh;
+  height: 100dvh;
   width: 100%;
   overflow: hidden;
+}
+
+body {
+  /* Lock the page so it can't rubber-band-scroll the fixed UI out of view. */
+  position: fixed;
+  overscroll-behavior: none;
 }
 
 body {
@@ -144,6 +154,8 @@ button {
 
 .side-panel__header {
   padding: 12px 16px 8px;
+  /* Keep the title clear of the status bar / notch in standalone mode. */
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
@@ -224,7 +236,7 @@ button {
    moves it back to top-center. */
 .corridor-bar {
   position: absolute;
-  bottom: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   z-index: 25; /* above the bottom drawer (z-index 20) */
@@ -546,13 +558,6 @@ button {
   opacity: 0.65;
 }
 
-.route-summary__pill--engine {
-  background: #ede9fe;
-  color: #6d28d9;
-  font-weight: 500;
-  text-transform: lowercase;
-}
-
 .route-summary__note {
   display: inline-flex;
   align-items: center;
@@ -826,8 +831,8 @@ button {
 /* ── Help: floating "?" button ──────────────────────────────────────────────── */
 .help-fab {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: calc(16px + env(safe-area-inset-top, 0px));
+  left: 16px;
   z-index: 15;
   width: 40px;
   height: 40px;
