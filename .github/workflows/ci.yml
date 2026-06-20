@@ -1,0 +1,29 @@
+name: CI
+
+# Static guard rail before Vercel/Railway auto-deploy on push. Runs only the
+# cheap, no-infrastructure checks: TypeScript typecheck for the server + web
+# workspaces, the web↔iOS friendliness parity guard, and the shared-GeoJSON
+# data-sync guard. The route-quality suite (`npm run test:routes`) is NOT run
+# here — it needs a live Docker/Valhalla + server stack; run it locally.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run static checks (typecheck + parity + data-sync)
+        run: npm run check

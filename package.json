@@ -19,6 +19,11 @@
     "reconcile": "tsx scripts/reconcile.ts",
     "test:routes": "tsx tests/routes/run.ts",
     "compare:engines": "tsx scripts/compare-engines.ts",
+    "typecheck:server": "npm --workspace server run typecheck",
+    "typecheck:web": "npm --workspace web run typecheck",
+    "check:parity": "tsx scripts/check-parity.ts",
+    "check:data": "tsx scripts/check-data-sync.ts",
+    "check": "npm run typecheck:server && npm run typecheck:web && npm run check:parity && npm run check:data",
     "dev:server": "npm --workspace server run dev",
     "dev:web": "npm --workspace web run dev"
   },
