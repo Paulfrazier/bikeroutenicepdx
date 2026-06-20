@@ -12,6 +12,9 @@ struct SnappedRoute: Equatable {
     /// Fraction of the route length on bike infrastructure (green + amber).
     var coverage: Double? = nil
 
+    /// Turn-by-turn directions from /route (empty for /match-snapped routes).
+    var steps: [RouteStep] = []
+
     /// Human-readable distance, imperial (Portland).
     var distanceLabel: String {
         let miles = distanceMeters / 1609.344

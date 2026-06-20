@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @Environment(RouteStore.self) private var store
     @State private var showSearch = false
+    @State private var showDirections = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -26,12 +27,19 @@ struct RootView: View {
                         locateButton
                     }
                 }
-                ControlsBar(showSearch: $showSearch)
+                ControlsBar(showSearch: $showSearch, showDirections: $showDirections)
             }
         }
         .sheet(isPresented: $showSearch) {
             SearchSheet()
                 .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showDirections) {
+            DirectionsSheet(
+                steps: store.snapped?.steps ?? [],
+                distanceLabel: store.snapped?.distanceLabel ?? ""
+            )
+            .presentationDetents([.medium, .large])
         }
         .task {
             #if DEBUG

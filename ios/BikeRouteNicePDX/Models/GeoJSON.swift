@@ -32,6 +32,28 @@ struct MatchResponse: Decodable {
     let duration_s: Double
 }
 
+/// One turn-by-turn step from POST /route.
+struct RouteStep: Decodable, Equatable {
+    let instruction: String
+    let distance_m: Double
+    let street_name: String?
+    let maneuver_type: String
+    let bicycle_network_class: String?
+    let location: [Double] // [lng, lat]
+}
+
+/// Response from POST /route — geometry + totals + turn-by-turn steps.
+struct RouteResponse: Decodable {
+    struct Geometry: Decodable {
+        let type: String
+        let coordinates: [[Double]] // [lng, lat]
+    }
+    let geometry: Geometry
+    let distance_m: Double
+    let duration_s: Double
+    let steps: [RouteStep]
+}
+
 /// The server's error envelope: { error, code }.
 struct APIErrorBody: Decodable {
     let error: String

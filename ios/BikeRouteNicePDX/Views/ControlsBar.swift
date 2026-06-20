@@ -4,6 +4,7 @@ import SwiftUI
 struct ControlsBar: View {
     @Environment(RouteStore.self) private var store
     @Binding var showSearch: Bool
+    @Binding var showDirections: Bool
 
     var body: some View {
         VStack(spacing: 12) {
@@ -103,6 +104,18 @@ struct ControlsBar: View {
                     }
                 }
                 preferencePicker
+                if let steps = store.snapped?.steps, !steps.isEmpty {
+                    Button {
+                        showDirections = true
+                    } label: {
+                        Label("Directions (\(steps.count) steps)", systemImage: "list.bullet.rectangle")
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.green)
+                }
                 if store.isEditMode {
                     hint("Drag the route to reshape it — it re-snaps to roads.")
                 }
