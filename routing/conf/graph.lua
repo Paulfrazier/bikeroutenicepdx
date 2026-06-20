@@ -18,53 +18,45 @@
 
   Approach
   --------
-  We set two things Valhalla does read:
-    1. cycleway / bicycle tags — influence the edge's infrastructure class
-    2. bicycle_safety (float 0..1, lower = safer) — used as an edge-weight
-       multiplier in Valhalla's bicycle costing
-
-  The bicycle_safety mapping mirrors costing-overrides.json. Any factor
-  change must be applied here too (Lua cannot import JSON at build time).
+  The per-way bicycle_network_class is NOT present as an OSM tag on the way
+  (scripts/build-graph.ts does not rewrite the PBF). Instead it lives in the
+  way-tags.json sidecar, keyed by OSM way id. We look it up here and translate
+  it into standard OSM tags Valhalla's bicycle costing actually reads
+  (highway / cycleway / bicycle / lcn). We do NOT set bicycle_safety — Valhalla
+  ignores unknown per-edge tags, so it was a no-op.
 
   Sidecar JSON (/data/way-tags.json)
   -----------------------------------
-  For per-way lookups that cannot be expressed as simple OSM tags
-  (e.g. difficult-crossing counts which come from a PBOT point layer,
-  not the way geometry), we load a JSON sidecar at module startup.
-
-  Format:
-      { "<way_id>": { "class": "greenway", "difficult_crossings": 2 } }
+  Loaded once at module startup, keyed by OSM way id (string). Produced by
+  scripts/build-graph.ts. Each entry:
+      { "<way_id>": {
+          "bicycle_network_class": "greenway",      -- drives the tag mapping
+          "difficult_crossing_penalty_s": 60,       -- reserved (see TODO)
+          "name": "NE Going St", ...
+      } }
 
   We use cjson (shipped with gisops/valhalla) or dkjson as a fallback.
   If neither is present, or if the sidecar file is missing, we log a
-  warning and operate on OSM-tag-based classification only.
-
-  Duplicate-value note
-  --------------------
-  The SAFETY_MAP constants below must match the bicycle_safety_mapping in
-  costing-overrides.json. They are duplicated because Lua runs inside the
-  mjolnir tile-build sandbox and cannot perform cross-file JSON imports for
-  the global factor table (the sidecar is per-way data and is handled
-  separately, below).
+  warning and operate on OSM-tag-based classification only (no PBOT bias).
 --]]
 
--- ── SAFETY MAP ────────────────────────────────────────────────────────────────
--- Maps bicycle_network_class → bicycle_safety float.
--- Lower values = more preferred edges.
--- Mirror of costing-overrides.json → _notes.bicycle_safety_mapping.
-local SAFETY_MAP = {
-  off_street       = 0.1,
-  greenway         = 0.2,
-  protected        = 0.4,
-  buffered         = 0.6,
-  standard         = 0.8,
-  arterial_no_bike = 1.0,
-  -- residential has no explicit class tag; Valhalla's defaults handle it
-}
-
--- Difficult-crossing time penalty in seconds.
--- Mirror of costing-overrides.json → penalties.difficult_crossing_seconds.
-local DIFFICULT_CROSSING_PENALTY_S = 60
+-- ── COST DIFFERENTIATION VIA STANDARD TAGS ───────────────────────────────────
+-- We do NOT use a bicycle_safety tag: Valhalla's bicycle costing ignores
+-- arbitrary per-edge tags. The only levers that actually move cost are the
+-- standard OSM tags (highway / cycleway / bicycle / lcn) plus the request-time
+-- use_roads / use_hills options. So each bicycle_network_class is mapped below
+-- to the standard-tag combination that yields the desired cost ordering:
+--
+--   off_street ≈ greenway ≈ protected  >  buffered ≈ standard  >  residential
+--   >  collector/arterial (penalized natively by road class + use_roads)
+--
+-- Key subtlety: a quiet neighborhood greenway has no painted lane, so with
+-- native tags alone Valhalla scores it BELOW a painted bike lane (cycleway=lane)
+-- on a busier street — which is what pulls routes off greenways mid-route. To
+-- correct that we tag greenways as separated infra (cycleway=track) AND set
+-- lcn=yes for the bike-network bonus, lifting them above buffered/standard.
+-- This is a deliberate routing-bias overstatement (greenways aren't physically
+-- separated); it may surface "bike path" wording in turn-by-turn directions.
 
 -- ── SIDECAR LOADING ───────────────────────────────────────────────────────────
 local SIDECAR_PATH = "/data/way-tags.json"
@@ -126,11 +118,14 @@ load_sidecar()
 --   nodes   (table)   — node IDs in the way (usually read-only)
 --   values  (table)   — internal Valhalla values table (usually read-only)
 --
--- We read our custom tag bicycle_network_class, set standard Valhalla tags,
--- and set bicycle_safety so the costing engine weights this edge correctly.
+-- We look up the way's bicycle_network_class in the sidecar (keyed by way_id)
+-- and translate it into standard Valhalla tags so the costing engine weights
+-- the edge correctly. No bicycle_safety — Valhalla ignores it.
 
 function way_function(way_id, tags, nodes, values)
-  local bnc = tags["bicycle_network_class"]
+  -- Class is NOT an OSM tag on the way; it comes from the sidecar by way_id.
+  local entry = way_sidecar[tostring(way_id)]
+  local bnc   = entry and entry.bicycle_network_class
 
   -- ── Per-class tag rewriting ──────────────────────────────────────────────
   if bnc == "off_street" then
@@ -139,39 +134,34 @@ function way_function(way_id, tags, nodes, values)
     tags["highway"]  = tags["highway"] or "cycleway"
     tags["bicycle"]  = "designated"
     tags["foot"]     = tags["foot"] or "yes"  -- shared paths allow pedestrians
-    tags["bicycle_safety"] = tostring(SAFETY_MAP.off_street)
 
   elseif bnc == "greenway" then
-    -- PBOT-designated neighborhood greenway.
-    -- Keep the highway class (residential) but signal premium bike comfort.
-    tags["bicycle"] = "designated"
-    tags["lcn"]     = "yes"  -- local cycle network — Valhalla reads this
-    tags["bicycle_safety"] = tostring(SAFETY_MAP.greenway)
+    -- PBOT-designated neighborhood greenway. A quiet residential street with no
+    -- painted lane would natively score BELOW a striped bike lane, so we tag it
+    -- as separated infra (cycleway=track) + bike-network (lcn) to lift it above
+    -- buffered/standard. Deliberate bias — greenways are the product's core.
+    tags["cycleway"] = "track"
+    tags["bicycle"]  = "designated"
+    tags["lcn"]      = "yes"  -- local cycle network — Valhalla's bike-net bonus
 
   elseif bnc == "protected" then
     -- Physically separated bike lane (Naito Pkwy, NE Multnomah).
     tags["cycleway"] = "track"   -- OSM tag for fully protected/separated lane
-    tags["bicycle"] = "designated"
-    tags["bicycle_safety"] = tostring(SAFETY_MAP.protected)
+    tags["bicycle"]  = "designated"
 
   elseif bnc == "buffered" then
     -- Painted buffer between travel lane and bike lane (NE Williams).
     tags["cycleway"] = "lane"    -- Valhalla reads this; "buffered" isn't standard
-    tags["bicycle_safety"] = tostring(SAFETY_MAP.buffered)
 
   elseif bnc == "standard" then
     -- Striped bike lane with no buffer.
     tags["cycleway"] = "lane"
-    tags["bicycle_safety"] = tostring(SAFETY_MAP.standard)
 
   elseif bnc == "arterial_no_bike" then
-    -- High-speed arterial with no cycling infrastructure.
-    -- We don't block the way (that would prevent routing entirely if the user
-    -- has no alternative), but we price it very high and strip any stray
-    -- bicycle=yes tags that OSM might have.
-    tags["bicycle_safety"] = tostring(SAFETY_MAP.arterial_no_bike)
-    -- Remove any affirmative bicycle tags that would make Valhalla think
-    -- this is a comfortable cycling route.
+    -- High-speed arterial with no cycling infrastructure. We don't block the
+    -- way (that would prevent routing if the user has no alternative), but we
+    -- strip any stray affirmative bicycle tags so Valhalla doesn't treat it as
+    -- a comfortable cycling route; road class + use_roads price it out.
     if tags["bicycle"] == "yes" or tags["bicycle"] == "designated" then
       tags["bicycle"] = "no"
     end
@@ -181,27 +171,13 @@ function way_function(way_id, tags, nodes, values)
   -- OSM-based costing applies. This is the correct fallback for residential
   -- streets without PBOT data.
 
-  -- ── Difficult-crossing penalty (via sidecar) ─────────────────────────────
-  -- Sidecar entry may carry a difficult_crossings count from PBOT point data.
-  -- Valhalla doesn't have a per-way "crossing penalty" tag, so we fold the
-  -- penalty into the bicycle_safety score by raising it slightly.
-  -- Each difficult crossing adds an equivalent "safety penalty" proportional
-  -- to DIFFICULT_CROSSING_PENALTY_S / 3600 (seconds → fraction of an hour).
-  --
-  -- This is an approximation: ideally we would penalise intersecting nodes
-  -- rather than the whole way. That requires Valhalla's node_function callback
-  -- (see node_function below). The way-level bump is a conservative fallback.
-
-  local wid_str = tostring(way_id)
-  local entry   = way_sidecar[wid_str]
-  if entry and entry.difficult_crossings and entry.difficult_crossings > 0 then
-    local current_safety = tonumber(tags["bicycle_safety"]) or 1.0
-    -- Each crossing adds ~0.017 safety penalty (60s / 3600s).
-    -- Cap at 0.95 so we never fully block a way just from crossing penalties.
-    local penalty = entry.difficult_crossings * (DIFFICULT_CROSSING_PENALTY_S / 3600)
-    local adjusted = math.min(0.95, current_safety + penalty)
-    tags["bicycle_safety"] = tostring(adjusted)
-  end
+  -- ── Difficult-crossing penalty — DEFERRED ────────────────────────────────
+  -- The old implementation folded a per-crossing penalty into bicycle_safety,
+  -- which Valhalla ignores, so it never did anything. A correct implementation
+  -- belongs in node_function (apply a crossing/gate-style penalty at the
+  -- intersection node), using the PBOT difficult-crossing points. The sidecar
+  -- still carries entry.difficult_crossing_penalty_s for when that lands.
+  -- TODO(follow-up): per-crossing penalty via node_function.
 end
 
 

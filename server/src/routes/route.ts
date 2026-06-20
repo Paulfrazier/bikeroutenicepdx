@@ -29,6 +29,8 @@ const RouteBody = z.object({
   // Ordered pass-through waypoints for drag-to-reshape. Capped so a runaway
   // edit can't overwhelm Valhalla.
   via: z.array(LngLat).max(50, "too many via points").optional(),
+  // Greenway-vs-speed preference (comfort↔fast slider). Defaults to "comfort".
+  preference: z.enum(["comfort", "balanced", "fast"]).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -49,7 +51,7 @@ app.post(
     }
   }),
   async (c) => {
-    const { from, to, via } = c.req.valid("json");
+    const { from, to, via, preference } = c.req.valid("json");
 
     // Reject if from === to with no via points (Valhalla would error anyway, but
     // friendlier message). With vias the route is well-defined even if endpoints match.
@@ -61,7 +63,7 @@ app.post(
     }
 
     try {
-      const result = await getRoute(from, to, via ?? []);
+      const result = await getRoute(from, to, via ?? [], preference ?? "comfort");
       return c.json(result);
     } catch (err) {
       if (err instanceof ValhallaError) {

@@ -75,6 +75,11 @@ const OUT_IOS = path.join(
   "Resources",
   "bike-network.geojson"
 );
+// The server also needs the classified network at runtime to compute per-step
+// greenway class + coverage (server/src/services/greenway-coverage.ts). It must
+// live inside the server workspace so it ships in the Railway build (which only
+// bundles `server`), not just in web/public.
+const OUT_SERVER = path.join(REPO_ROOT, "server", "data", "bike-network.geojson");
 
 const COORD_PRECISION = 6;
 
@@ -163,7 +168,7 @@ async function fetchPage(offset: number): Promise<FeatureCollection> {
 
 function writeBoth(features: GeoJSONFeature[]): void {
   const json = JSON.stringify({ type: "FeatureCollection", features });
-  for (const target of [OUT_WEB, OUT_IOS]) {
+  for (const target of [OUT_WEB, OUT_IOS, OUT_SERVER]) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, json, "utf8");
     console.log(

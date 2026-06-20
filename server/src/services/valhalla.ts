@@ -13,6 +13,7 @@
  */
 
 import { config } from "../config.js";
+import { dominantClass, isGreenwayEquivalent } from "./greenway-coverage.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -194,10 +195,25 @@ export class ValhallaError extends Error {
   }
 }
 
+/**
+ * Greenway-vs-speed preference. Maps to Valhalla's `use_roads` (0 = avoid roads
+ * / prefer bike infra, 1 = tolerate roads). The graph.lua tag mapping is the
+ * static foundation that makes greenways cheap; this sets how hard the optimizer
+ * leans on it at request time. Default is "comfort" (strongest greenway bias).
+ */
+export type RoutePreference = "comfort" | "balanced" | "fast";
+
+const USE_ROADS_BY_PREFERENCE: Record<RoutePreference, number> = {
+  comfort: 0.05, // strong: take greenways even with a meaningful detour
+  balanced: 0.35,
+  fast: 0.7, // tolerate arterials for a more direct line
+};
+
 export async function getRoute(
   from: [number, number], // [lng, lat]
   to: [number, number],   // [lng, lat]
-  vias: [number, number][] = [] // [lng, lat][] — ordered pass-through waypoints
+  vias: [number, number][] = [], // [lng, lat][] — ordered pass-through waypoints
+  preference: RoutePreference = "comfort"
 ): Promise<RouteResult> {
   const body = {
     // start/end are "break" stops; vias are "through" so the route passes
@@ -212,7 +228,7 @@ export async function getRoute(
     costing_options: {
       bicycle: {
         bicycle_type: "Hybrid",
-        use_roads: 0.1,
+        use_roads: USE_ROADS_BY_PREFERENCE[preference],
         use_hills: 0.5,
       },
     },
@@ -278,6 +294,11 @@ export async function getRoute(
   const allCoords: [number, number][] = [];
   const steps: RouteStep[] = [];
 
+  // Accumulate greenway-equivalent distance to compute coverage. Valhalla can't
+  // return our custom class, so each maneuver's class is recovered by spatially
+  // matching its shape slice against the classified PBOT network.
+  let greenwayMeters = 0;
+
   for (const leg of trip.legs) {
     const legCoords = decodePolyline6(leg.shape);
 
@@ -291,20 +312,29 @@ export async function getRoute(
     for (const maneuver of leg.maneuvers) {
       const stepCoord = legCoords[maneuver.begin_shape_index] ?? legCoords[0];
 
+      // The maneuver spans shape indices [begin, end]; classify by the dominant
+      // PBOT class along that slice.
+      const slice = legCoords.slice(
+        maneuver.begin_shape_index,
+        maneuver.end_shape_index + 1
+      );
+      const cls = dominantClass(slice);
+      const distance_m = Math.round(maneuver.length * 1000);
+      if (isGreenwayEquivalent(cls)) greenwayMeters += distance_m;
+
       steps.push({
         instruction: maneuver.instruction,
-        distance_m: Math.round(maneuver.length * 1000),
+        distance_m,
         duration_s: Math.round(maneuver.time),
         street_name: maneuver.street_names?.[0] ?? null,
         maneuver_type: maneuverTypeName(maneuver.type),
         location: stepCoord,
-        // TODO(v1): populate from per-edge Valhalla attributes once
-        //   bicycle_network_class is injected via scripts/build-graph.ts
-        //   and Valhalla is configured to return edge-level shape_attributes.
-        bicycle_network_class: null,
+        bicycle_network_class: cls,
       });
     }
   }
+
+  const distance_m = Math.round((trip.summary?.length ?? trip.length ?? 0) * 1000);
 
   return {
     geometry: {
@@ -312,12 +342,9 @@ export async function getRoute(
       coordinates: allCoords,
     },
     steps,
-    distance_m: Math.round((trip.summary?.length ?? trip.length ?? 0) * 1000),
+    distance_m,
     duration_s: Math.round(trip.summary?.time ?? trip.time ?? 0),
-    // TODO(v1): compute from per-edge bicycle_network_class once available.
-    //   greenway_coverage = sum(edge.length for edge where class in
-    //   {off_street, greenway, protected}) / total_length
-    greenway_coverage: 0,
+    greenway_coverage: distance_m > 0 ? greenwayMeters / distance_m : 0,
   };
 }
 

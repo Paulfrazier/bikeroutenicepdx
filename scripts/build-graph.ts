@@ -178,12 +178,29 @@ function osmiumExportWays(pbfPath: string, geojsonPath: string): void {
   console.log(`         ${pbfPath}`);
   console.log(`         → ${geojsonPath}`);
 
+  // CRITICAL: by default `osmium export` does NOT emit the OSM object id into
+  // feature properties — only tags. Without this, props["@id"] is undefined and
+  // the wayId below silently falls back to a synthetic sequential index, so the
+  // way-tags sidecar ends up keyed by meaningless indices that never match
+  // Valhalla's real way_id in graph.lua (the whole greenway cost model goes
+  // dead). We pass a config enabling the `id` attribute so each feature gets a
+  // bare-numeric "@id" (e.g. {"@type":"way","@id":987654,…}) that matches
+  // graph.lua's tostring(way_id) lookup.
+  const cfgPath = path.join(path.dirname(geojsonPath), ".osmium-export-config.json");
+  fs.writeFileSync(
+    cfgPath,
+    JSON.stringify({ attributes: { type: true, id: true } }),
+    "utf8"
+  );
+
   // Only export ways (no nodes/relations) and include all tags
   const result = spawnSync(
     "osmium",
     [
       "export",
       pbfPath,
+      "--config",
+      cfgPath,
       "--output",
       geojsonPath,
       "--overwrite",
@@ -378,6 +395,7 @@ function spatialJoin(
 
   let totalWays = 0;
   let matchedWays = 0;
+  let missingIdWays = 0;
 
   for (const feature of osmWays.features) {
     if (!feature.geometry || feature.geometry.type !== "LineString") continue;
@@ -398,8 +416,18 @@ function spatialJoin(
     const [lng, lat] = centroid.geometry.coordinates;
     const length_m = turf.length(wayLine, { units: "meters" });
 
-    const wayId: string =
-      String(props["@id"] ?? props["id"] ?? "") || `way/${totalWays}`;
+    // The sidecar MUST be keyed by the real OSM way id so graph.lua's
+    // tostring(way_id) lookup matches. osmiumExportWays enables the `id`
+    // attribute, so props["@id"] is a bare numeric id. If it's somehow absent
+    // we skip the way (a synthetic index would never match and silently break
+    // the greenway weighting), and count it so the run is visibly suspect.
+    const rawId = props["@id"] ?? props["id"];
+    if (rawId === undefined || rawId === null || String(rawId) === "") {
+      missingIdWays++;
+      continue;
+    }
+    // Normalize a possible "type_id" form (e.g. "w987654") to the bare number.
+    const wayId: string = String(rawId).replace(/^[a-z]/i, "");
 
     // Find best-priority PBOT match
     let bestClass: NormalizedClass | null = null;
@@ -442,6 +470,14 @@ function spatialJoin(
   console.log(
     `\n[join]   ${matchedWays} / ${totalWays} OSM ways matched to PBOT`
   );
+  if (missingIdWays > 0) {
+    console.log(
+      `[WARN]   ${missingIdWays} ways had no @id and were skipped. ` +
+        `If this is most of the ways, osmium export is not emitting the id ` +
+        `attribute — check osmiumExportWays' --config. The sidecar must be ` +
+        `keyed by real OSM way ids or graph.lua's class lookup silently fails.`
+    );
+  }
   return { wayTags, lcnWays, classCounters };
 }
 
