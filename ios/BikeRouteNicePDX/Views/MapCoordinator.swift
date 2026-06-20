@@ -650,6 +650,8 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             as? MKMarkerAnnotationView)
             ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: identifier)
         view.annotation = annotation
+        // Draggable so the user can nudge an endpoint onto the real driveway.
+        view.isDraggable = true
 
         let title = (annotation.title ?? nil) ?? ""
         if title == "Start" {
@@ -660,6 +662,28 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             view.glyphImage = UIImage(systemName: "flag.checkered")
         }
         return view
+    }
+
+    /// Dragged the start/end marker → update that endpoint (re-routes through any
+    /// existing waypoints, which persist).
+    func mapView(
+        _ mapView: MKMapView,
+        annotationView view: MKAnnotationView,
+        didChange newState: MKAnnotationView.DragState,
+        fromOldState oldState: MKAnnotationView.DragState
+    ) {
+        guard newState == .ending || newState == .canceling else { return }
+        view.dragState = .none
+        guard let annotation = view.annotation as? MKPointAnnotation else { return }
+        let kind: WaypointKind
+        if annotation === startAnnotation {
+            kind = .start
+        } else if annotation === endAnnotation {
+            kind = .end
+        } else {
+            return
+        }
+        store.setPin(annotation.coordinate, kind: kind, label: "Adjusted pin")
     }
 
     // MARK: - UIGestureRecognizerDelegate

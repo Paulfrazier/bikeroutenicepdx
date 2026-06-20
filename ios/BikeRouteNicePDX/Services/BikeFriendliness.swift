@@ -142,7 +142,10 @@ actor BikeFriendliness {
     /// so the re-route doesn't take weird detours from a mid-block via.
     func nearestNetworkPoint(
         _ target: CLLocationCoordinate2D,
-        maxMeters: Double = 20
+        // Generous by default: a NORMAL drag should always land on a real
+        // bikeable street near the finger (route bulges locally, never flies off
+        // to a far node). Precise anchors never call this — they stay exact.
+        maxMeters: Double = 100
     ) -> CLLocationCoordinate2D? {
         loadIfNeeded()
         let cosLat = cos(target.latitude * .pi / 180)

@@ -134,6 +134,22 @@ export default function App() {
   const handleDeleteVia = useCallback((index: number) => {
     setVias((prev) => prev.filter((_, i) => i !== index));
   }, []);
+
+  // Dragged the start/end marker to fine-tune an endpoint (e.g. onto the real
+  // driveway). Waypoints persist, so the route re-routes through them.
+  const handleMoveEndpoint = useCallback(
+    (kind: "from" | "to", lngLat: LngLat) => {
+      const label = `${lngLat[1].toFixed(5)}, ${lngLat[0].toFixed(5)}`;
+      if (kind === "from") {
+        setFrom(lngLat);
+        setFromLabel(label);
+      } else {
+        setTo(lngLat);
+        setToLabel(label);
+      }
+    },
+    []
+  );
   const friendliness = useFriendliness(activeCoords);
   const tierFeatures = useMemo(
     () =>
@@ -274,6 +290,7 @@ export default function App() {
           onDeleteVia={handleDeleteVia}
           onInsertPrecise={handleInsertPrecise}
           onToggleVia={handleToggleVia}
+          onMoveEndpoint={handleMoveEndpoint}
         />
 
         {/* ── Mobile bottom drawer ── */}

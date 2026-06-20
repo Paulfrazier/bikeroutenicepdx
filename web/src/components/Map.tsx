@@ -262,6 +262,8 @@ interface MapProps {
   onInsertPrecise: (at: LngLat) => void;
   /** Long-press on a pin: flip it between snap and precise. */
   onToggleVia: (index: number) => void;
+  /** Dragged the start/end marker to a new spot (e.g. the real driveway). */
+  onMoveEndpoint: (kind: "from" | "to", lngLat: LngLat) => void;
 }
 
 export function Map({
@@ -277,6 +279,7 @@ export function Map({
   onDeleteVia,
   onInsertPrecise,
   onToggleVia,
+  onMoveEndpoint,
 }: MapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
@@ -306,6 +309,7 @@ export function Map({
   const onDeleteViaRef = useRef(onDeleteVia);
   const onInsertPreciseRef = useRef(onInsertPrecise);
   const onToggleViaRef = useRef(onToggleVia);
+  const onMoveEndpointRef = useRef(onMoveEndpoint);
   const editingRef = useRef(editing);
   const viasRef = useRef(vias);
   const tierFeaturesRef = useRef(tierFeatures);
@@ -314,6 +318,7 @@ export function Map({
     onDeleteViaRef.current = onDeleteVia;
     onInsertPreciseRef.current = onInsertPrecise;
     onToggleViaRef.current = onToggleVia;
+    onMoveEndpointRef.current = onMoveEndpoint;
     editingRef.current = editing;
     viasRef.current = vias;
     tierFeaturesRef.current = tierFeatures;
@@ -874,10 +879,15 @@ export function Map({
     if (from) {
       const el = document.createElement("div");
       el.className = "map-marker map-marker--from";
-      el.setAttribute("aria-label", "Start point");
-      fromMarkerRef.current = new Marker({ element: el })
+      el.setAttribute("aria-label", "Start point (drag to adjust)");
+      const marker = new Marker({ element: el, draggable: true })
         .setLngLat(from)
         .addTo(map);
+      marker.on("dragend", () => {
+        const { lng, lat } = marker.getLngLat();
+        onMoveEndpointRef.current("from", [lng, lat]);
+      });
+      fromMarkerRef.current = marker;
     } else {
       fromMarkerRef.current = null;
     }
@@ -892,10 +902,15 @@ export function Map({
     if (to) {
       const el = document.createElement("div");
       el.className = "map-marker map-marker--to";
-      el.setAttribute("aria-label", "End point");
-      toMarkerRef.current = new Marker({ element: el })
+      el.setAttribute("aria-label", "End point (drag to adjust)");
+      const marker = new Marker({ element: el, draggable: true })
         .setLngLat(to)
         .addTo(map);
+      marker.on("dragend", () => {
+        const { lng, lat } = marker.getLngLat();
+        onMoveEndpointRef.current("to", [lng, lat]);
+      });
+      toMarkerRef.current = marker;
     } else {
       toMarkerRef.current = null;
     }

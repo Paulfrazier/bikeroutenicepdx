@@ -204,7 +204,10 @@ export function loadNetworkIndex(
  */
 export function snapToNetwork(
   target: LngLat,
-  maxMeters = 20
+  // Generous by default: a NORMAL drag should always land on a real bikeable
+  // street near the finger (so the route bulges locally instead of flying off
+  // to a far graph node). Precise anchors never call this — they stay exact.
+  maxMeters = 100
 ): LngLat | null {
   const grid = resolvedGrid;
   if (!grid) {
