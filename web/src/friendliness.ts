@@ -1,22 +1,27 @@
 /**
- * friendliness.ts — client-side bike-friendliness classification.
+ * friendliness.ts — client-side route classification.
  *
- * Colors a fetched (or hand-edited) route by a 3-tier "traffic-light" scheme,
- * classified against the bundled bike-network GeoJSON entirely in the browser.
+ * Colors a fetched (or hand-edited) route to MATCH the bike-map legend: each
+ * route segment is tagged with the bike-network facility CLASS it runs on
+ * (protected/greenway/path/buffered/lane/shared), so the route is drawn in the
+ * same colors as the network overlay beneath it (the white casing keeps it
+ * legible). Off-network segments fall back to "quiet" (neutral) or "busy" (the
+ * red dashed danger signal). Classified against the bundled bike-network GeoJSON
+ * entirely in the browser.
  *
- * This MUST stay in lockstep with the iOS app's classifier — same tier mapping,
- * same constants, same algorithm.
+ * This MUST stay in lockstep with the iOS app's classifier — same class set,
+ * same colors, same constants, same algorithm.
  *
  * Pipeline:
  *   1. Fetch + parse /bike-network.geojson once (module-level singleton). Flatten
- *      every feature into individual straight segments (a, b, tier, bearing).
+ *      every feature into individual straight segments (a, b, cls, bearing).
  *   2. Index each segment into a spatial grid hash (cell = ~33 m).
  *   3. For each route segment, take its midpoint and find the nearest network
- *      segment within THRESHOLD meters AND bearing-aligned within tolerance.
- *      Its class → tier. No bike match → consult a second "arterial" index:
- *      on/along a busy road → red, otherwise a quiet street → calm.
+ *      segment within THRESHOLD meters AND bearing-aligned within tolerance —
+ *      adopt its facility class. No bike match → consult a second "arterial"
+ *      index: on/along a busy road → "busy", otherwise a quiet street → "quiet".
  *   4. Hysteresis smoothing: short contiguous runs fold into the preceding run.
- *   5. Coverage = fraction NOT on a busy road (green + amber + calm) / total.
+ *   5. Coverage = fraction NOT on a busy no-facility road (everything but "busy").
  */
 
 import { closestPointOnSegmentMeters, haversineLength } from "./geo";
@@ -44,28 +49,63 @@ const RAD2DEG = 180 / Math.PI;
 const M_PER_DEG_LNG = 111320; // scaled by cos(lat) at use-site
 const M_PER_DEG_LAT = 110540;
 
-export type Tier = "green" | "amber" | "calm" | "red";
+/**
+ * A route segment's category: one of the six bike-network facility classes (so
+ * the route matches the bike-map legend exactly) plus two off-network states —
+ * "quiet" (calm neighborhood street) and "busy" (the red dashed danger signal).
+ */
+export type RouteClass =
+  | "protected"
+  | "greenway"
+  | "path"
+  | "buffered"
+  | "lane"
+  | "shared"
+  | "quiet"
+  | "busy";
+
+/**
+ * Route-class → render color. The six facility colors are IDENTICAL to the
+ * bike-network overlay (LEGEND_ITEMS in Map.tsx) so one legend explains both the
+ * map and the route. KEEP IN SYNC WITH iOS (BikeFriendliness.swift) — the parity
+ * guard (scripts/check-parity.ts) compares these pairs.
+ */
+export const ROUTE_CLASS_COLORS: Record<RouteClass, string> = {
+  protected: "#6D28D9",
+  greenway: "#2E9E48",
+  path: "#B45309",
+  buffered: "#0891B2",
+  lane: "#F59E0B",
+  shared: "#9CA3AF",
+  quiet: "#64748B",
+  busy: "#DC2626",
+};
+
+/** Route classes drawn dashed (shared mirrors the overlay; busy = danger). */
+export const ROUTE_CLASS_DASHED: readonly RouteClass[] = ["shared", "busy"];
+
+/** The only class excluded from the comfort-coverage fraction. */
+export const DANGER_CLASS: RouteClass = "busy";
 
 export interface RouteFriendliness {
-  /** Per-route-segment tier; length === coords.length - 1. */
-  tiers: Tier[];
-  /** Fraction of total length on green+amber facilities (red excluded). */
+  /** Per-route-segment class; length === coords.length - 1. */
+  classes: RouteClass[];
+  /** Fraction of total length NOT on a busy no-facility road ("busy" excluded). */
   coverage: number;
 }
 
-/** Map a network facility class to a friendliness tier. */
-function classToTier(cls: string): Tier {
+/** Normalize a raw bike-network `class` value to a known facility class. */
+function normalizeClass(cls: string): RouteClass {
   switch (cls) {
     case "protected":
     case "greenway":
     case "path":
-      return "green";
     case "buffered":
     case "lane":
-      return "amber";
     case "shared":
+      return cls;
     default:
-      return "red";
+      return "shared";
   }
 }
 
@@ -119,7 +159,7 @@ function perpDistanceM(M: LngLat, a: LngLat, b: LngLat): number {
 interface NetSegment {
   a: LngLat;
   b: LngLat;
-  tier: Tier;
+  cls: RouteClass;
   bearing: number;
 }
 
@@ -145,12 +185,12 @@ function addToGrid(grid: Grid, seg: NetSegment): void {
 }
 
 /** Push every straight piece of a coordinate ring into the grid. */
-function indexLineString(grid: Grid, coords: LngLat[], tier: Tier): void {
+function indexLineString(grid: Grid, coords: LngLat[], cls: RouteClass): void {
   if (coords.length < 2) return;
   for (let i = 0; i < coords.length - 1; i++) {
     const a = coords[i];
     const b = coords[i + 1];
-    addToGrid(grid, { a, b, tier, bearing: bearing(a, b) });
+    addToGrid(grid, { a, b, cls, bearing: bearing(a, b) });
   }
 }
 
@@ -160,15 +200,14 @@ async function buildIndex(url: string): Promise<Grid> {
   if (!res.ok) throw new Error(`bike-network fetch failed: ${res.status}`);
   const fc = (await res.json()) as GeoJSON.FeatureCollection;
   for (const feat of fc.features ?? []) {
-    const cls = (feat.properties?.class as string | undefined) ?? "shared";
-    const tier = classToTier(cls);
+    const cls = normalizeClass((feat.properties?.class as string | undefined) ?? "shared");
     const geom = feat.geometry;
     if (!geom) continue;
     if (geom.type === "LineString") {
-      indexLineString(grid, geom.coordinates as LngLat[], tier);
+      indexLineString(grid, geom.coordinates as LngLat[], cls);
     } else if (geom.type === "MultiLineString") {
       for (const line of geom.coordinates) {
-        indexLineString(grid, line as LngLat[], tier);
+        indexLineString(grid, line as LngLat[], cls);
       }
     }
   }
@@ -320,13 +359,14 @@ function isOnArterial(M: LngLat, routeBearing: number, artGrid: ArtGrid): boolea
 // ── Classification ──────────────────────────────────────────────────────────
 
 /**
- * Tier each route segment. First try to match a nearby bike facility
- * (green/amber). If none matches, fall back to the arterial index: on/along a
- * busy road → red, otherwise a quiet neighborhood street → calm.
+ * Classify each route segment. First try to match a nearby bike facility and
+ * adopt its class (so the route matches the bike-map legend). If none matches,
+ * fall back to the arterial index: on/along a busy road → "busy" (danger),
+ * otherwise a quiet neighborhood street → "quiet".
  */
-function rawTiers(coords: LngLat[], grid: Grid, artGrid: ArtGrid): Tier[] {
+function rawClasses(coords: LngLat[], grid: Grid, artGrid: ArtGrid): RouteClass[] {
   const n = coords.length - 1;
-  const tiers: Tier[] = new Array(n);
+  const classes: RouteClass[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const a = coords[i];
     const b = coords[i + 1];
@@ -336,7 +376,7 @@ function rawTiers(coords: LngLat[], grid: Grid, artGrid: ArtGrid): Tier[] {
     const cellLng = Math.floor(M[0] / CELL);
 
     let bestDist = THRESHOLD_M;
-    let bestTier: Tier | null = null;
+    let bestClass: RouteClass | null = null;
 
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -347,25 +387,25 @@ function rawTiers(coords: LngLat[], grid: Grid, artGrid: ArtGrid): Tier[] {
           const d = perpDistanceM(M, seg.a, seg.b);
           if (d < bestDist) {
             bestDist = d;
-            bestTier = seg.tier;
+            bestClass = seg.cls;
           }
         }
       }
     }
-    if (bestTier) {
-      tiers[i] = bestTier;
+    if (bestClass) {
+      classes[i] = bestClass;
     } else {
-      // No bike facility — busy arterial nearby → red, else calm quiet street.
-      tiers[i] = isOnArterial(M, routeBearing, artGrid) ? "red" : "calm";
+      // No bike facility — busy arterial nearby → danger, else quiet street.
+      classes[i] = isOnArterial(M, routeBearing, artGrid) ? "busy" : "quiet";
     }
   }
-  return tiers;
+  return classes;
 }
 
-/** Fold short contiguous runs into the preceding run's tier (hysteresis). */
-function smoothTiers(coords: LngLat[], tiers: Tier[]): Tier[] {
-  const n = tiers.length;
-  if (n === 0) return tiers;
+/** Fold short contiguous runs into the preceding run's class (hysteresis). */
+function smoothClasses(coords: LngLat[], classes: RouteClass[]): RouteClass[] {
+  const n = classes.length;
+  if (n === 0) return classes;
 
   const segLen: number[] = new Array(n);
   for (let i = 0; i < n; i++) {
@@ -373,7 +413,7 @@ function smoothTiers(coords: LngLat[], tiers: Tier[]): Tier[] {
   }
 
   interface Run {
-    tier: Tier;
+    cls: RouteClass;
     start: number;
     end: number;
     len: number;
@@ -381,22 +421,22 @@ function smoothTiers(coords: LngLat[], tiers: Tier[]): Tier[] {
   const runs: Run[] = [];
   for (let i = 0; i < n; i++) {
     const last = runs[runs.length - 1];
-    if (last && last.tier === tiers[i]) {
+    if (last && last.cls === classes[i]) {
       last.end = i;
       last.len += segLen[i];
     } else {
-      runs.push({ tier: tiers[i], start: i, end: i, len: segLen[i] });
+      runs.push({ cls: classes[i], start: i, end: i, len: segLen[i] });
     }
   }
 
-  // First run keeps its tier; each later short run adopts the preceding tier.
+  // First run keeps its class; each later short run adopts the preceding class.
   for (let k = 1; k < runs.length; k++) {
-    if (runs[k].len < MIN_RUN_M) runs[k].tier = runs[k - 1].tier;
+    if (runs[k].len < MIN_RUN_M) runs[k].cls = runs[k - 1].cls;
   }
 
-  const out: Tier[] = new Array(n);
+  const out: RouteClass[] = new Array(n);
   for (const run of runs) {
-    for (let i = run.start; i <= run.end; i++) out[i] = run.tier;
+    for (let i = run.start; i <= run.end; i++) out[i] = run.cls;
   }
   return out;
 }
@@ -408,42 +448,43 @@ function smoothTiers(coords: LngLat[], tiers: Tier[]): Tier[] {
 export async function classifyRoute(
   coords: LngLat[]
 ): Promise<RouteFriendliness> {
-  if (coords.length < 2) return { tiers: [], coverage: 0 };
+  if (coords.length < 2) return { classes: [], coverage: 0 };
   const [grid, artGrid] = await Promise.all([
     loadNetworkIndex(),
     loadArterialIndex(),
   ]);
-  const tiers = smoothTiers(coords, rawTiers(coords, grid, artGrid));
+  const classes = smoothClasses(coords, rawClasses(coords, grid, artGrid));
 
-  // Coverage = fraction NOT on a busy road (green + amber + calm all count as
-  // comfortable; only red — a busy street with no bike lane — is excluded).
+  // Coverage = fraction NOT on a busy no-facility road. Every facility class and
+  // a quiet street all count as comfortable; only "busy" — a busy street with no
+  // bike lane (the danger signal) — is excluded.
   let total = 0;
   let comfortable = 0;
-  for (let i = 0; i < tiers.length; i++) {
+  for (let i = 0; i < classes.length; i++) {
     const len = haversineLength([coords[i], coords[i + 1]]);
     total += len;
-    if (tiers[i] !== "red") comfortable += len;
+    if (classes[i] !== DANGER_CLASS) comfortable += len;
   }
-  return { tiers, coverage: total > 0 ? comfortable / total : 0 };
+  return { classes, coverage: total > 0 ? comfortable / total : 0 };
 }
 
 // ── Rendering helper ────────────────────────────────────────────────────────
 
 /**
- * Split a route into one LineString feature per contiguous tier-run, each
- * tagged with `properties.tier`, for MapLibre rendering.
+ * Split a route into one LineString feature per contiguous class-run, each
+ * tagged with `properties.class`, for MapLibre rendering.
  */
-export function toTierFeatureCollection(
+export function toRouteClassFeatureCollection(
   coords: LngLat[],
-  tiers: Tier[]
+  classes: RouteClass[]
 ): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
-  if (coords.length < 2 || tiers.length === 0) {
+  if (coords.length < 2 || classes.length === 0) {
     return { type: "FeatureCollection", features };
   }
   let runStart = 0;
-  for (let i = 1; i <= tiers.length; i++) {
-    if (i === tiers.length || tiers[i] !== tiers[runStart]) {
+  for (let i = 1; i <= classes.length; i++) {
+    if (i === classes.length || classes[i] !== classes[runStart]) {
       // Segments [runStart, i-1] map to coords [runStart, i].
       features.push({
         type: "Feature",
@@ -451,7 +492,7 @@ export function toTierFeatureCollection(
           type: "LineString",
           coordinates: coords.slice(runStart, i + 1),
         },
-        properties: { tier: tiers[runStart] },
+        properties: { class: classes[runStart] },
       });
       runStart = i;
     }

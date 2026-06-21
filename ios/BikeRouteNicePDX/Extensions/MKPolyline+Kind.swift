@@ -28,10 +28,10 @@ final class CorridorPolyline: MKPolyline {}
 /// section reads clearly over the colored bike-network overlay.
 final class CorridorCasingPolyline: MKPolyline {}
 
-/// One contiguous same-tier run of the routed line. The route is rendered as a
-/// sequence of these so its color tracks bike-friendliness along its length.
+/// One contiguous same-class run of the routed line. The route is rendered as a
+/// sequence of these so its color matches the bike-map legend along its length.
 final class RouteTierPolyline: MKPolyline {
-    var tier: FriendlyTier = .green
+    var routeClass: RouteClass = .quiet
 }
 
 /// One overlay per bike-facility class — all same-class segments are bundled

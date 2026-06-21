@@ -34,13 +34,9 @@ struct LegendView: View {
                                 .foregroundStyle(.primary)
                         }
                     }
-
-                    Divider().padding(.vertical, 2)
-
-                    Text("Your route")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    ForEach(routeLegendRows, id: \.label) { row in
+                    // Off-network route states (facilities above double as the
+                    // route's colors, so only these two are route-specific).
+                    ForEach(offNetworkRows, id: \.label) { row in
                         HStack(spacing: 8) {
                             routeSwatch(color: row.color, dashed: row.dashed)
                             Text(row.label)
@@ -48,6 +44,13 @@ struct LegendView: View {
                                 .foregroundStyle(.primary)
                         }
                     }
+
+                    Divider().padding(.vertical, 2)
+
+                    Text("Your route is drawn in these colors with a white outline.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -65,13 +68,13 @@ struct LegendView: View {
         }
     }
 
-    /// 4-tier route color key, matching the colored route line.
-    private var routeLegendRows: [(label: String, color: UIColor, dashed: Bool)] {
+    /// Off-network route states appended to the shared key. The six facility
+    /// classes (BikeClass.legendOrder above) double as the route's colors, so
+    /// only these two are route-specific.
+    private var offNetworkRows: [(label: String, color: UIColor, dashed: Bool)] {
         [
-            ("Protected / Greenway / Path", FriendlyTier.green.color, false),
-            ("Bike lane / Buffered", FriendlyTier.amber.color, false),
-            ("Quiet street", FriendlyTier.calm.color, false),
-            ("Busy street — no bike lane", FriendlyTier.red.color, true),
+            ("Quiet street", RouteClass.quiet.color, false),
+            ("Busy street — no bike lane", RouteClass.busy.color, true),
         ]
     }
 

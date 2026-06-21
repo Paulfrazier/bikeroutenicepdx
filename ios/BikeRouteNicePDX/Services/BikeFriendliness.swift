@@ -1,40 +1,56 @@
 import CoreLocation
 import UIKit
 
-/// Three-tier bike-friendliness classification for a route line. Each route
+/// Classification of a route line to MATCH the bike-map legend. Each route
 /// segment is scored against the bundled City of Portland bike network and
-/// bucketed into a traffic-light tier; the line is then colored per tier and a
-/// coverage fraction (green+amber over total) is reported.
+/// tagged with the facility CLASS it runs on (so the route is drawn in the same
+/// colors as the network overlay); off-network segments fall back to `quiet` or
+/// the `busy` danger signal. A coverage fraction (everything but `busy` over
+/// total) is reported.
 ///
-/// Tier colors / labels are kept in sync with the web app's route legend.
-enum FriendlyTier: Equatable, Sendable {
-    case green   // protected, greenway, path
-    case amber   // buffered, lane
-    case calm    // no bike facility, but no busy arterial nearby — quiet street
-    case red     // no bike facility AND on/along a busy arterial
+/// Mirrors the web `RouteClass` (ROUTE_CLASS_COLORS) — colors / cases are kept
+/// in lockstep; the parity guard (scripts/check-parity.ts) compares them.
+enum RouteClass: String, Equatable, Sendable {
+    case protected
+    case greenway
+    case path
+    case buffered
+    case lane
+    case shared
+    case quiet   // off-network, no busy arterial nearby — a calm street
+    case busy    // off-network AND on/along a busy arterial — the danger signal
 
-    /// Stroke color for the route line (matches the web palette).
+    /// Stroke color for the route line (matches the web ROUTE_CLASS_COLORS, and
+    /// the six facility colors equal BikeClass so route + overlay share a key).
     var color: UIColor {
         switch self {
-        case .green: return UIColor(red: 0.086, green: 0.639, blue: 0.290, alpha: 1) // #16A34A
-        case .amber: return UIColor(red: 0.961, green: 0.620, blue: 0.043, alpha: 1) // #F59E0B
-        case .calm:  return UIColor(red: 0.392, green: 0.455, blue: 0.545, alpha: 1) // #64748B (slate)
-        case .red:   return UIColor(red: 0.863, green: 0.149, blue: 0.149, alpha: 1) // #DC2626
+        case .protected: return UIColor(red: 0.427, green: 0.157, blue: 0.851, alpha: 1) // #6D28D9
+        case .greenway:  return UIColor(red: 0.180, green: 0.620, blue: 0.282, alpha: 1) // #2E9E48
+        case .path:      return UIColor(red: 0.706, green: 0.325, blue: 0.035, alpha: 1) // #B45309
+        case .buffered:  return UIColor(red: 0.031, green: 0.569, blue: 0.698, alpha: 1) // #0891B2
+        case .lane:      return UIColor(red: 0.961, green: 0.620, blue: 0.043, alpha: 1) // #F59E0B
+        case .shared:    return UIColor(red: 0.612, green: 0.639, blue: 0.686, alpha: 1) // #9CA3AF
+        case .quiet:     return UIColor(red: 0.392, green: 0.455, blue: 0.545, alpha: 1) // #64748B
+        case .busy:      return UIColor(red: 0.863, green: 0.149, blue: 0.149, alpha: 1) // #DC2626
         }
     }
 
-    /// Only busy-street stretches render dashed; calm streets stay solid.
-    var dashed: Bool { self == .red }
+    /// Shared roadways mirror the overlay's dashed style; busy is the dashed
+    /// danger signal. Everything else renders solid.
+    var dashed: Bool { self == .shared || self == .busy }
 
-    /// Map a network facility class onto a friendliness tier. Calm vs red is
-    /// never decided here — it's resolved by the arterial fallback when no bike
-    /// facility matches, so unrecognized/shared classes fall through to .red and
-    /// the arterial check downgrades them to .calm when no busy road is nearby.
-    static func tier(forClass cls: String) -> FriendlyTier {
+    /// Normalize a raw bike-network `class` value to a known facility class.
+    /// Off-network "quiet" vs "busy" is never decided here — it's resolved by the
+    /// arterial fallback when no facility matches.
+    static func facility(forClass cls: String) -> RouteClass {
         switch cls {
-        case "protected", "greenway", "path": return .green
-        case "buffered", "lane": return .amber
-        default: return .red // shared (and anything unrecognized)
+        case "protected": return .protected
+        case "greenway": return .greenway
+        case "path": return .path
+        case "buffered": return .buffered
+        case "lane": return .lane
+        case "shared": return .shared
+        default: return .shared // anything unrecognized
         }
     }
 }
@@ -68,16 +84,16 @@ actor BikeFriendliness {
 
     // MARK: - Index storage
 
-    /// One straight network segment plus precomputed bearing + tier.
+    /// One straight network segment plus precomputed bearing + facility class.
     private struct Seg {
         let a: CLLocationCoordinate2D
         let b: CLLocationCoordinate2D
         let bearing: Double
-        let tier: FriendlyTier
+        let cls: RouteClass
     }
 
-    /// One straight busy-arterial segment (position + bearing only — no tier;
-    /// merely being near one downgrades an otherwise-calm route segment to red).
+    /// One straight busy-arterial segment (position + bearing only — no class;
+    /// merely being near one marks an otherwise-quiet route segment as busy).
     private struct ArtSeg {
         let a: CLLocationCoordinate2D
         let b: CLLocationCoordinate2D
@@ -97,14 +113,14 @@ actor BikeFriendliness {
 
     // MARK: - Public API
 
-    /// Classify a route line. Returns one tier per route segment
-    /// (length == coords.count - 1) and the green+amber coverage fraction.
-    func classify(_ coords: [CLLocationCoordinate2D]) -> (tiers: [FriendlyTier], coverage: Double) {
+    /// Classify a route line. Returns one class per route segment
+    /// (length == coords.count - 1) and the comfort-coverage fraction.
+    func classify(_ coords: [CLLocationCoordinate2D]) -> (classes: [RouteClass], coverage: Double) {
         loadIfNeeded()
         guard coords.count >= 2 else { return ([], 0) }
 
         let segCount = coords.count - 1
-        var rawTiers = [FriendlyTier](repeating: .red, count: segCount)
+        var rawClasses = [RouteClass](repeating: .busy, count: segCount)
         var segLens = [Double](repeating: 0, count: segCount)
 
         for i in 0..<segCount {
@@ -117,21 +133,21 @@ actor BikeFriendliness {
                 longitude: (a.longitude + b.longitude) / 2
             )
             let routeBearing = Self.bearing(a, b)
-            rawTiers[i] = tierForMidpoint(mid, routeBearing: routeBearing)
+            rawClasses[i] = classForMidpoint(mid, routeBearing: routeBearing)
         }
 
-        // Hysteresis smoothing → final per-segment tiers.
-        let smoothed = smooth(rawTiers, lengths: segLens)
+        // Hysteresis smoothing → final per-segment classes.
+        let smoothed = smooth(rawClasses, lengths: segLens)
 
-        // Coverage = fraction NOT on a busy road = (total − red length) / total.
-        // Green, amber, and calm all count as comfortable.
+        // Coverage = fraction NOT on a busy no-facility road = (total − busy) /
+        // total. Every facility class and a quiet street count as comfortable.
         var total = 0.0
-        var redLength = 0.0
+        var busyLength = 0.0
         for i in 0..<segCount {
             total += segLens[i]
-            if smoothed[i] == .red { redLength += segLens[i] }
+            if smoothed[i] == .busy { busyLength += segLens[i] }
         }
-        let coverage = total > 0 ? (total - redLength) / total : 0
+        let coverage = total > 0 ? (total - busyLength) / total : 0
         return (smoothed, coverage)
     }
 
@@ -174,10 +190,10 @@ actor BikeFriendliness {
 
     // MARK: - Classification core
 
-    /// Tier for a route-segment midpoint. First try to match a nearby bike
-    /// facility (green/amber). If none matches, fall back to the arterial index:
-    /// on/along a busy road → `.red`, otherwise a quiet street → `.calm`.
-    private func tierForMidpoint(_ mid: CLLocationCoordinate2D, routeBearing: Double) -> FriendlyTier {
+    /// Facility class for a route-segment midpoint. First try to match a nearby
+    /// bike facility and adopt its class. If none matches, fall back to the
+    /// arterial index: on/along a busy road → `.busy`, otherwise → `.quiet`.
+    private func classForMidpoint(_ mid: CLLocationCoordinate2D, routeBearing: Double) -> RouteClass {
         let latRad = mid.latitude * .pi / 180
         let cosLat = cos(latRad)
 
@@ -185,7 +201,7 @@ actor BikeFriendliness {
         let cy = Int(floor(mid.latitude / Self.cell))
 
         var bestDist = Self.thresholdMeters
-        var bestTier: FriendlyTier?
+        var bestClass: RouteClass?
         var seen = Set<Int>()
 
         for gx in (cx - 1)...(cx + 1) {
@@ -205,16 +221,16 @@ actor BikeFriendliness {
                     )
                     if d <= bestDist {
                         bestDist = d
-                        bestTier = seg.tier
+                        bestClass = seg.cls
                     }
                 }
             }
         }
-        if let bestTier { return bestTier }
+        if let bestClass { return bestClass }
 
-        // No bike facility — busy arterial nearby → red, else calm quiet street.
+        // No bike facility — busy arterial nearby → danger, else quiet street.
         return isOnArterial(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy)
-            ? .red : .calm
+            ? .busy : .quiet
     }
 
     /// Whether the midpoint is within `arterialThresholdMeters` of a busy
@@ -247,24 +263,24 @@ actor BikeFriendliness {
     }
 
     /// Merge contiguous runs whose total length < minRunMeters into the
-    /// preceding run's tier. The first run always keeps its own tier.
-    private func smooth(_ tiers: [FriendlyTier], lengths: [Double]) -> [FriendlyTier] {
-        guard !tiers.isEmpty else { return tiers }
+    /// preceding run's class. The first run always keeps its own class.
+    private func smooth(_ classes: [RouteClass], lengths: [Double]) -> [RouteClass] {
+        guard !classes.isEmpty else { return classes }
 
-        // Build contiguous runs of equal tier.
-        struct Run { var tier: FriendlyTier; var count: Int; var length: Double }
+        // Build contiguous runs of equal class.
+        struct Run { var cls: RouteClass; var count: Int; var length: Double }
         var runs: [Run] = []
-        for i in tiers.indices {
-            if var last = runs.last, last.tier == tiers[i] {
+        for i in classes.indices {
+            if var last = runs.last, last.cls == classes[i] {
                 last.count += 1
                 last.length += lengths[i]
                 runs[runs.count - 1] = last
             } else {
-                runs.append(Run(tier: tiers[i], count: 1, length: lengths[i]))
+                runs.append(Run(cls: classes[i], count: 1, length: lengths[i]))
             }
         }
 
-        // Absorb short runs (and re-merge when neighbors end up the same tier).
+        // Absorb short runs (and re-merge when neighbors end up the same class).
         var merged: [Run] = []
         for (i, run) in runs.enumerated() {
             if i == 0 {
@@ -272,7 +288,7 @@ actor BikeFriendliness {
             } else if run.length < Self.minRunMeters {
                 merged[merged.count - 1].count += run.count
                 merged[merged.count - 1].length += run.length
-            } else if var last = merged.last, last.tier == run.tier {
+            } else if var last = merged.last, last.cls == run.cls {
                 last.count += run.count
                 last.length += run.length
                 merged[merged.count - 1] = last
@@ -281,11 +297,11 @@ actor BikeFriendliness {
             }
         }
 
-        // Expand back to one tier per segment.
-        var out: [FriendlyTier] = []
-        out.reserveCapacity(tiers.count)
+        // Expand back to one class per segment.
+        var out: [RouteClass] = []
+        out.reserveCapacity(classes.count)
         for run in merged {
-            out.append(contentsOf: repeatElement(run.tier, count: run.count))
+            out.append(contentsOf: repeatElement(run.cls, count: run.count))
         }
         return out
     }
@@ -313,17 +329,17 @@ actor BikeFriendliness {
                 let type = geometry["type"] as? String
             else { continue }
 
-            let cls = (feature["properties"] as? [String: Any])?["class"] as? String ?? ""
-            let tier = FriendlyTier.tier(forClass: cls)
+            let rawCls = (feature["properties"] as? [String: Any])?["class"] as? String ?? ""
+            let cls = RouteClass.facility(forClass: rawCls)
 
             switch type {
             case "LineString":
                 if let line = geometry["coordinates"] as? [[Double]] {
-                    addLine(line, tier: tier)
+                    addLine(line, cls: cls)
                 }
             case "MultiLineString":
                 if let lines = geometry["coordinates"] as? [[[Double]]] {
-                    for line in lines { addLine(line, tier: tier) }
+                    for line in lines { addLine(line, cls: cls) }
                 }
             default:
                 continue
@@ -406,14 +422,14 @@ actor BikeFriendliness {
     }
 
     /// Split one [[lng, lat], ...] line into straight segments and index each.
-    private func addLine(_ line: [[Double]], tier: FriendlyTier) {
+    private func addLine(_ line: [[Double]], cls: RouteClass) {
         guard line.count >= 2 else { return }
         var prev: CLLocationCoordinate2D?
         for pair in line {
             guard pair.count >= 2 else { prev = nil; continue }
             let c = CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0])
             if let a = prev {
-                index(Seg(a: a, b: c, bearing: Self.bearing(a, c), tier: tier))
+                index(Seg(a: a, b: c, bearing: Self.bearing(a, c), cls: cls))
             }
             prev = c
         }

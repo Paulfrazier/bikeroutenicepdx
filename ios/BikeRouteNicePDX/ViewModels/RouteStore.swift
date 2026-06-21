@@ -273,12 +273,12 @@ final class RouteStore {
         }
     }
 
-    /// Attach bike-friendliness tiers + coverage to a freshly computed route.
-    /// Shared by the auto-route, drag-reshape, and finger-draw success paths.
+    /// Attach per-segment facility classes + coverage to a freshly computed
+    /// route. Shared by the auto-route, drag-reshape, and finger-draw paths.
     private func classified(_ route: SnappedRoute) async -> SnappedRoute {
         let result = await BikeFriendliness.shared.classify(route.coordinates)
         var enriched = route
-        enriched.tiers = result.tiers
+        enriched.routeClasses = result.classes
         enriched.coverage = result.coverage
         return enriched
     }

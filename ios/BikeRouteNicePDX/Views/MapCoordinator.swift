@@ -245,26 +245,26 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         }
     }
 
-    /// Build one `RouteTierPolyline` per contiguous tier run. Falls back to a
-    /// single green line when the route hasn't been classified yet (tiers nil).
+    /// Build one `RouteTierPolyline` per contiguous facility-class run. Falls back
+    /// to a single quiet-street line when the route hasn't been classified yet.
     private func buildTierOverlays(for snapped: SnappedRoute) -> [RouteTierPolyline] {
         let coords = snapped.coordinates
         guard coords.count >= 2 else { return [] }
-        guard let tiers = snapped.tiers, tiers.count == coords.count - 1 else {
+        guard let classes = snapped.routeClasses, classes.count == coords.count - 1 else {
             let line = RouteTierPolyline(coordinates: coords, count: coords.count)
-            line.tier = .green
+            line.routeClass = .quiet
             return [line]
         }
 
         var overlays: [RouteTierPolyline] = []
         var runStart = 0
-        for i in 0..<tiers.count {
-            let isLast = i == tiers.count - 1
-            if isLast || tiers[i + 1] != tiers[i] {
+        for i in 0..<classes.count {
+            let isLast = i == classes.count - 1
+            if isLast || classes[i + 1] != classes[i] {
                 // Run spans route segments runStart...i → vertices runStart...i+1.
                 let slice = Array(coords[runStart...(i + 1)])
                 let line = RouteTierPolyline(coordinates: slice, count: slice.count)
-                line.tier = tiers[i]
+                line.routeClass = classes[i]
                 overlays.append(line)
                 runStart = i + 1
             }
@@ -738,11 +738,11 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             return renderer
         case let polyline as RouteTierPolyline:
             let renderer = MKPolylineRenderer(polyline: polyline)
-            renderer.strokeColor = polyline.tier.color
+            renderer.strokeColor = polyline.routeClass.color
             renderer.lineWidth = 6
             renderer.lineCap = .round
             renderer.lineJoin = .round
-            if polyline.tier.dashed { renderer.lineDashPattern = [2, 10] }
+            if polyline.routeClass.dashed { renderer.lineDashPattern = [2, 10] }
             return renderer
         case let polyline as RoutePolyline:
             let renderer = MKPolylineRenderer(polyline: polyline)

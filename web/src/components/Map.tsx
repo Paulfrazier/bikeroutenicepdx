@@ -29,6 +29,7 @@ import maplibregl, {
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { LngLat, RouteResponse, RouteGeometry, Via, ManualSegment } from "../types";
 import { hitTestRoute, VERTEX_HIT_PX, MAX_VIAS, type Px } from "../geo";
+import { ROUTE_CLASS_COLORS, ROUTE_CLASS_DASHED } from "../friendliness";
 
 // Protocol handler for PMTiles (lazy-import to keep bundle splittable)
 let pmtilesProtocolAdded = false;
@@ -202,22 +203,36 @@ function pointFeature(at: LngLat): GeoJSON.Feature {
 
 // ── Bike Network Legend ───────────────────────────────────────────────────────
 
+// One unified key for BOTH the bike-network overlay and your route — the route
+// is drawn in these same colors (with a white outline). Colors come from the
+// shared ROUTE_CLASS_COLORS map so the route and overlay can never drift apart.
+// The last two rows are route-only states (off any bike facility).
 const LEGEND_ITEMS = [
-  { cls: "protected", color: "#6D28D9", label: "Protected Bike Lane",     dashed: false },
-  { cls: "greenway",  color: "#2E9E48", label: "Neighborhood Greenway",   dashed: false },
-  { cls: "path",      color: "#B45309", label: "Off-Street Path",         dashed: false },
-  { cls: "buffered",  color: "#0891B2", label: "Buffered Bike Lane",      dashed: false },
-  { cls: "lane",      color: "#F59E0B", label: "Bike Lane",               dashed: false },
-  { cls: "shared",    color: "#9CA3AF", label: "Enhanced Shared Roadway", dashed: true  },
+  { cls: "protected", color: ROUTE_CLASS_COLORS.protected, label: "Protected bike lane",      dashed: false },
+  { cls: "greenway",  color: ROUTE_CLASS_COLORS.greenway,  label: "Neighborhood greenway",    dashed: false },
+  { cls: "path",      color: ROUTE_CLASS_COLORS.path,      label: "Off-street path",          dashed: false },
+  { cls: "buffered",  color: ROUTE_CLASS_COLORS.buffered,  label: "Buffered bike lane",       dashed: false },
+  { cls: "lane",      color: ROUTE_CLASS_COLORS.lane,      label: "Bike lane",                dashed: false },
+  { cls: "shared",    color: ROUTE_CLASS_COLORS.shared,    label: "Shared roadway",           dashed: true  },
+  { cls: "quiet",     color: ROUTE_CLASS_COLORS.quiet,     label: "Quiet street",             dashed: false },
+  { cls: "busy",      color: ROUTE_CLASS_COLORS.busy,      label: "Busy street — no bike lane", dashed: true  },
 ] as const;
 
-// Route ribbon (friendliness tier) key — matches the route-line colors.
-const ROUTE_LEGEND_ITEMS = [
-  { tier: "green", color: "#16A34A", label: "Bike facility",    dashed: false },
-  { tier: "amber", color: "#F59E0B", label: "Bike lane",        dashed: false },
-  { tier: "calm",  color: "#64748B", label: "Quiet street",     dashed: false },
-  { tier: "red",   color: "#DC2626", label: "Busy street",      dashed: true  },
-] as const;
+// Route line paint, derived from the shared class→color map so the route can
+// never drift from the legend/overlay. `ROUTE_COLOR_EXPR` colors a feature by
+// its `class`; the dashed filter splits shared+busy (drawn dashed) from the
+// solid facility/quiet runs.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ROUTE_COLOR_EXPR: any = [
+  "match",
+  ["get", "class"],
+  ...Object.entries(ROUTE_CLASS_COLORS).flatMap(([cls, color]) => [cls, color]),
+  ROUTE_CLASS_COLORS.quiet, // fallback
+];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ROUTE_DASHED_FILTER: any = ["in", ["get", "class"], ["literal", [...ROUTE_CLASS_DASHED]]];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ROUTE_SOLID_FILTER: any = ["!", ["in", ["get", "class"], ["literal", [...ROUTE_CLASS_DASHED]]]];
 
 function BikeNetworkLegend({
   open,
@@ -258,23 +273,9 @@ function BikeNetworkLegend({
           </li>
         ))}
       </ul>
-      <div className="bike-legend__title bike-legend__title--route">Your route</div>
-      <ul className="bike-legend__list">
-        {ROUTE_LEGEND_ITEMS.map(({ tier, color, label, dashed }) => (
-          <li key={tier} className="bike-legend__item">
-            <span
-              className="bike-legend__swatch bike-legend__swatch--route"
-              style={{
-                background: dashed
-                  ? `repeating-linear-gradient(to right, ${color} 0px, ${color} 5px, transparent 5px, transparent 8px)`
-                  : color,
-              }}
-              aria-hidden="true"
-            />
-            <span className="bike-legend__label">{label}</span>
-          </li>
-        ))}
-      </ul>
+      <p className="bike-legend__caption">
+        Your route is drawn in these colors with a white outline.
+      </p>
       </>
       )}
     </div>
@@ -288,10 +289,11 @@ interface MapProps {
   /** True while a route is being computed — auto-collapses the bike legend. */
   routeLoading: boolean;
   /**
-   * Route split into one LineString feature per contiguous friendliness tier
-   * (properties.tier ∈ green|amber|red). Drives the colored route rendering.
+   * Route split into one LineString feature per contiguous facility class
+   * (properties.class ∈ the bike-network classes + quiet|busy). Drives the
+   * colored route rendering, matching the bike-map legend.
    */
-  tierFeatures: GeoJSON.FeatureCollection;
+  routeFeatures: GeoJSON.FeatureCollection;
   onMapClick: (lngLat: LngLat) => void;
   onStepFlyTo: LngLat | null;
   /** When true, the route line is draggable; otherwise it's locked and the map
@@ -337,7 +339,7 @@ export function Map({
   to,
   route,
   routeLoading,
-  tierFeatures,
+  routeFeatures,
   onMapClick,
   onStepFlyTo,
   editing,
@@ -399,7 +401,7 @@ export function Map({
   const drawModeRef = useRef(drawMode);
   const viasRef = useRef(vias);
   const manualSegmentsRef = useRef(manualSegments);
-  const tierFeaturesRef = useRef(tierFeatures);
+  const routeFeaturesRef = useRef(routeFeatures);
   // Active manual-segment drag (raw nudge): which segment + vertex is moving.
   const manualEditRef = useRef<{ segId: string; vertex: number } | null>(null);
   // Freehand-draw stroke in progress (lng/lat points).
@@ -416,7 +418,7 @@ export function Map({
     drawModeRef.current = drawMode;
     viasRef.current = vias;
     manualSegmentsRef.current = manualSegments;
-    tierFeaturesRef.current = tierFeatures;
+    routeFeaturesRef.current = routeFeatures;
   });
 
   /** Movement (px) before a press becomes a reshape rather than a tap. */
@@ -536,9 +538,10 @@ export function Map({
         },
       });
 
-      // ── Route, colored by bike-friendliness tier (above the bike network) ─
-      // The "route" source holds the run-split tier FeatureCollection. Two
-      // layers render it: solid for green/amber, dashed for red.
+      // ── Route, colored by bike-network facility class (above the network) ─
+      // The "route" source holds the run-split class FeatureCollection, drawn in
+      // the SAME colors as the overlay (one legend covers both). Two layers
+      // render it: solid for facility/quiet runs, dashed for shared + busy.
       map.addSource("route", {
         type: "geojson",
         data: emptyGeojson(),
@@ -560,7 +563,7 @@ export function Map({
       });
       // White casing UNDER the colored runs, so the route always reads as a
       // distinct ribbon over the colored bike-network. Added above the glow but
-      // below the tier lines, leaving a ~2.5px white halo each side.
+      // below the colored lines, leaving a ~2.5px white halo each side.
       map.addLayer({
         id: "route-casing",
         type: "line",
@@ -575,28 +578,21 @@ export function Map({
         id: "route-line",
         type: "line",
         source: "route",
-        filter: ["!=", ["get", "tier"], "red"],
+        filter: ROUTE_SOLID_FILTER,
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": [
-            "match",
-            ["get", "tier"],
-            "green", "#16A34A",
-            "amber", "#F59E0B",
-            "calm", "#64748B",
-            "#64748B",
-          ],
+          "line-color": ROUTE_COLOR_EXPR,
           "line-width": 6,
         },
       });
       map.addLayer({
-        id: "route-line-red",
+        id: "route-line-dashed",
         type: "line",
         source: "route",
-        filter: ["==", ["get", "tier"], "red"],
+        filter: ROUTE_DASHED_FILTER,
         layout: { "line-cap": "round", "line-join": "round" },
         paint: {
-          "line-color": "#DC2626",
+          "line-color": ROUTE_COLOR_EXPR,
           "line-width": 6,
           "line-dasharray": [2, 2],
         },
@@ -814,7 +810,7 @@ export function Map({
         // A tap on the bare line — restore the route line and drop nothing.
         (
           map.getSource("route") as maplibregl.GeoJSONSource | undefined
-        )?.setData(tierFeaturesRef.current);
+        )?.setData(routeFeaturesRef.current);
         (
           map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
         )?.setData(emptyGeojson());
@@ -831,7 +827,7 @@ export function Map({
         onManualNudgeRef.current(manualEdit.segId, manualEdit.vertex, coords[idx]);
       } else {
         // Hand the released point up to App, which updates vias + re-routes.
-        // Keep the drag preview on screen until the new tierFeatures arrive.
+        // Keep the drag preview on screen until the new routeFeatures arrive.
         onReshapeRef.current(coords[idx], movingVia);
       }
     };
@@ -856,7 +852,7 @@ export function Map({
       draggedFarRef.current = false;
       movingViaIndexRef.current = null;
       (map.getSource("route") as maplibregl.GeoJSONSource | undefined)?.setData(
-        tierFeaturesRef.current
+        routeFeaturesRef.current
       );
       (
         map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
@@ -1037,28 +1033,28 @@ export function Map({
 
   // ── Colored tier route: drive the "route" source from the run-split FC ────
   // App classifies the active coords (server route OR hand-edit) and passes the
-  // tier FeatureCollection here. Filling it also ends the transient drag draw.
+  // class FeatureCollection here. Filling it also ends the transient drag draw.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
     const src = map.getSource("route") as maplibregl.GeoJSONSource | undefined;
     if (!src) return;
-    src.setData(tierFeatures);
+    src.setData(routeFeatures);
     (
       map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
     )?.setData(emptyGeojson());
 
     // Fade the bike network back while a route is displayed so the route owns
-    // the foreground (its green tier is near-identical to the greenway color).
+    // the foreground (it's drawn in the same colors as the overlay beneath it).
     // Restore full opacity when the route is cleared.
-    const hasRoute = tierFeatures.features.length > 0;
+    const hasRoute = routeFeatures.features.length > 0;
     if (map.getLayer("bike-network-solid")) {
       map.setPaintProperty("bike-network-solid", "line-opacity", hasRoute ? 0.35 : 0.85);
     }
     if (map.getLayer("bike-network-shared")) {
       map.setPaintProperty("bike-network-shared", "line-opacity", hasRoute ? 0.3 : 0.8);
     }
-  }, [tierFeatures]);
+  }, [routeFeatures]);
 
   // ── Server route: track coords + fit bounds (only for a fresh route) ──
   // The route geometry drives hit-testing for drags; the waypoint pins are

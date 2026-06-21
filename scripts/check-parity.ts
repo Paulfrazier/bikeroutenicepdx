@@ -5,8 +5,10 @@
  *   web/src/friendliness.ts                       (TypeScript)
  *   ios/BikeRouteNicePDX/Services/BikeFriendliness.swift  (Swift)
  * Both files declare "must stay in lockstep" but nothing enforces it. This
- * script extracts (a) the numeric tuning constants and (b) the facility
- * class → tier mapping from each file and fails (exit 1) if they diverge.
+ * script extracts (a) the numeric tuning constants and (b) the route-class →
+ * render color mapping from each file and fails (exit 1) if they diverge. The
+ * route is colored to MATCH the bike-map legend, so the class→color map must be
+ * identical on both platforms (web ROUTE_CLASS_COLORS / iOS RouteClass.color).
  *
  * It's pure text parsing — no build, no Docker, no live server — so it runs in
  * CI and in `npm run check` in well under a second.
@@ -86,101 +88,55 @@ for (const [webName, iosName] of CONSTANT_PAIRS) {
   }
 }
 
-// ── Class → tier mapping ─────────────────────────────────────────────────────
+// ── Route-class → color mapping ───────────────────────────────────────────────
 
-const DEFAULT_KEY = "*default*";
-
-/**
- * Parse a `switch` body that maps class strings to a tier. Accumulates the
- * `case "x":` labels (and bare `default:`) that precede each `return <tier>`,
- * mapping every accumulated label to that tier. Returns class → tier.
- * `tierOf` normalizes the matched return token (e.g. `"green"` or `.green`).
- */
-function parseMapping(
-  body: string,
-  caseRe: RegExp,
-  returnRe: RegExp,
-): Map<string, string> {
+/** Web: parse the `ROUTE_CLASS_COLORS` object literal → class → #hex (lowered). */
+function extractWebColors(): Map<string, string> {
+  const block = webSrc.match(/ROUTE_CLASS_COLORS[^{]*\{([\s\S]*?)\}/);
   const map = new Map<string, string>();
-  let pending: string[] = [];
-  // Walk the body token-by-token in source order.
-  const tokenRe = new RegExp(
-    `${caseRe.source}|${returnRe.source}|\\bdefault\\b`,
-    "g",
-  );
+  if (!block) {
+    errors.push("could not locate ROUTE_CLASS_COLORS in web/src/friendliness.ts");
+    return map;
+  }
+  const re = /(\w+)\s*:\s*"(#[0-9A-Fa-f]{6})"/g;
   let m: RegExpExecArray | null;
-  while ((m = tokenRe.exec(body)) !== null) {
-    const text = m[0];
-    if (/\bdefault\b/.test(text) && !/return/.test(text)) {
-      pending.push(DEFAULT_KEY);
-      continue;
-    }
-    const caseMatch = text.match(caseRe);
-    const retMatch = text.match(returnRe);
-    if (retMatch) {
-      const tier = retMatch[1];
-      for (const label of pending) map.set(label, tier);
-      pending = [];
-    } else if (caseMatch) {
-      // One `case` token may list several quoted labels.
-      const labels = caseMatch[0].match(/"([^"]+)"/g) ?? [];
-      for (const l of labels) pending.push(l.replace(/"/g, ""));
-    }
+  while ((m = re.exec(block[1])) !== null) {
+    map.set(m[1], m[2].toLowerCase());
   }
   return map;
 }
 
-// Web: `function classToTier(...) { switch (cls) { ... } }`
-function extractWebMapping(): Map<string, string> {
-  const fn = webSrc.match(/function classToTier[\s\S]*?\n}/);
+/**
+ * iOS: parse the `RouteClass` `var color: UIColor` switch → class → #hex, read
+ * from the `// #RRGGBB` comment that documents each `case .x:`. (BikeClass.color
+ * lives in a different file, so matching `var color` here hits RouteClass only.)
+ */
+function extractIosColors(): Map<string, string> {
+  const fn = iosSrc.match(/var color: UIColor \{[\s\S]*?\n {4}\}/);
+  const map = new Map<string, string>();
   if (!fn) {
-    errors.push("could not locate classToTier() in web/src/friendliness.ts");
-    return new Map();
+    errors.push("could not locate RouteClass.color in BikeFriendliness.swift");
+    return map;
   }
-  return parseMapping(
-    fn[0],
-    /case\s+(?:"[^"]+"\s*,?\s*)+:/, // `case "a":` possibly stacked
-    /return\s+"(\w+)"/,
-  );
+  const re = /case\s+\.(\w+):[^\n]*?(#[0-9A-Fa-f]{6})/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(fn[0])) !== null) {
+    map.set(m[1], m[2].toLowerCase());
+  }
+  return map;
 }
 
-// iOS: `static func tier(forClass cls: String) -> FriendlyTier { switch ... }`
-function extractIosMapping(): Map<string, string> {
-  const fn = iosSrc.match(/static func tier\(forClass[\s\S]*?\n {4}}/);
-  if (!fn) {
-    errors.push("could not locate tier(forClass:) in BikeFriendliness.swift");
-    return new Map();
-  }
-  return parseMapping(
-    fn[0],
-    /case\s+(?:"[^"]+"\s*,?\s*)+:/,
-    /return\s+\.(\w+)/,
-  );
-}
-
-const webMap = extractWebMapping();
-const iosMap = extractIosMapping();
+const webMap = extractWebColors();
+const iosMap = extractIosColors();
 
 if (webMap.size && iosMap.size) {
-  // Compare EFFECTIVE tiers: a class absent from one switch falls to that
-  // switch's `default`. So web's explicit `case "shared" → red` and iOS's
-  // `default → red` (no explicit "shared" case) are equivalent, not a mismatch.
-  const webDefault = webMap.get(DEFAULT_KEY);
-  const iosDefault = iosMap.get(DEFAULT_KEY);
-  if (webDefault !== iosDefault) {
-    errors.push(
-      `class→tier mismatch for default: web=${webDefault ?? "(absent)"}  ≠  iOS=${iosDefault ?? "(absent)"}`,
-    );
-  }
-  const classes = new Set(
-    [...webMap.keys(), ...iosMap.keys()].filter((k) => k !== DEFAULT_KEY),
-  );
+  const classes = new Set([...webMap.keys(), ...iosMap.keys()]);
   for (const k of classes) {
-    const w = webMap.get(k) ?? webDefault;
-    const i = iosMap.get(k) ?? iosDefault;
+    const w = webMap.get(k);
+    const i = iosMap.get(k);
     if (w !== i) {
       errors.push(
-        `class→tier mismatch for "${k}": web=${w ?? "(absent)"}  ≠  iOS=${i ?? "(absent)"}`,
+        `route-class color mismatch for "${k}": web=${w ?? "(absent)"}  ≠  iOS=${i ?? "(absent)"}`,
       );
     }
   }
@@ -198,5 +154,5 @@ if (errors.length) {
 }
 
 console.log(
-  `✓ web ↔ iOS friendliness in sync (${CONSTANT_PAIRS.length} constants, ${webMap.size} class mappings)`,
+  `✓ web ↔ iOS friendliness in sync (${CONSTANT_PAIRS.length} constants, ${webMap.size} route-class colors)`,
 );

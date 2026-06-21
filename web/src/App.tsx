@@ -18,7 +18,7 @@ import { useRoute } from "./hooks/useRoute";
 import { useFriendliness } from "./hooks/useFriendliness";
 import { useNavigation } from "./hooks/useNavigation";
 import { NavHud } from "./components/NavHud";
-import { toTierFeatureCollection, snapToNetwork } from "./friendliness";
+import { toRouteClassFeatureCollection, snapToNetwork } from "./friendliness";
 import { arcLengthAt, haversineLength, applyManualSegments, MAX_VIAS } from "./geo";
 import { fetchCorridor } from "./api";
 import type { LngLat, Via, ManualSegment, CorridorResponse } from "./types";
@@ -322,10 +322,10 @@ export default function App() {
   }, [corridorPreview, route, clearCorridorPick]);
 
   const friendliness = useFriendliness(activeCoords);
-  const tierFeatures = useMemo(
+  const routeFeatures = useMemo(
     () =>
       activeCoords && friendliness
-        ? toTierFeatureCollection(activeCoords, friendliness.tiers)
+        ? toRouteClassFeatureCollection(activeCoords, friendliness.classes)
         : ({ type: "FeatureCollection", features: [] } as GeoJSON.FeatureCollection),
     [activeCoords, friendliness]
   );
@@ -508,7 +508,7 @@ export default function App() {
           to={to}
           route={displayRoute}
           routeLoading={routeLoading}
-          tierFeatures={tierFeatures}
+          routeFeatures={routeFeatures}
           onMapClick={handleMapClick}
           onStepFlyTo={flyTo}
           navCamera={nav.camera}

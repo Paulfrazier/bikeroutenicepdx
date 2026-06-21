@@ -9,11 +9,11 @@ struct SnappedRoute: Equatable {
     /// drag-preview routes built client-side before a server round-trip.
     var durationSeconds: Double = 0
 
-    /// Per-route-segment bike-friendliness tier (length == coordinates.count - 1).
+    /// Per-route-segment facility class (length == coordinates.count - 1).
     /// Nil until the route has been classified (e.g. during a drag preview).
-    var tiers: [FriendlyTier]? = nil
+    var routeClasses: [RouteClass]? = nil
 
-    /// Fraction of the route length on bike infrastructure (green + amber).
+    /// Fraction of the route length NOT on a busy no-facility street.
     var coverage: Double? = nil
 
     /// Turn-by-turn directions from /route (empty for /match-snapped routes).

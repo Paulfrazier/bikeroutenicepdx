@@ -813,25 +813,15 @@ button {
   font-size: 12px;
 }
 
-.bike-legend__title {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--color-text-muted);
-  margin-bottom: 6px;
-}
-
-/* Second heading ("Your route") sits below the network list. */
-.bike-legend__title--route {
-  margin-top: 10px;
+/* Caption under the unified key: the route reuses these colors. */
+.bike-legend__caption {
+  margin: 8px 0 0;
   padding-top: 8px;
   border-top: 1px solid var(--color-border, rgba(0, 0, 0, 0.1));
-}
-
-/* Route ribbon swatches are a touch thicker so they read as the route. */
-.bike-legend__swatch--route {
-  height: 5px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+  max-width: 178px;
 }
 
 .bike-legend__list {
