@@ -7,6 +7,11 @@ struct ControlsBar: View {
     @Binding var showSearch: Bool
     @Binding var showDirections: Bool
 
+    /// Whether the grouped reshape-mode selector (Drag/Draw/Through) is shown.
+    /// The three modes used to be always-visible buttons; they're now collapsed
+    /// behind one "Edit route" toggle so "Start ride" stays the clear primary.
+    @State private var editPanelOpen = false
+
     var body: some View {
         VStack(spacing: 12) {
             pinChips
@@ -17,6 +22,14 @@ struct ControlsBar: View {
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
         .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        // Auto-close the edit panel when the route goes away (clear / new pins).
+        // Draw mode (.drawing) keeps it open so it's still open on return.
+        .onChange(of: store.phase) { _, newPhase in
+            switch newPhase {
+            case .routed, .drawing, .snapping, .readyToDraw: break
+            default: editPanelOpen = false
+            }
+        }
     }
 
     // MARK: - Pin chips
@@ -133,17 +146,16 @@ struct ControlsBar: View {
                     .buttonStyle(.bordered)
                     .tint(.green)
                 }
-                if store.isEditMode {
-                    hint("Drag the route to reshape it — it re-snaps to roads.")
-                }
                 HStack(spacing: 12) {
                     clearAllButton
-                    editButton
-                    primaryButton("Draw", icon: "hand.draw.fill") {
-                        store.enterDrawMode()
+                    editToggleButton
+                }
+                if editPanelOpen {
+                    editToolsRow
+                    if let hintText = activeReshapeHint {
+                        hint(hintText)
                     }
                 }
-                corridorButton
             }
         case .failed(let message):
             VStack(spacing: 10) {
@@ -250,38 +262,87 @@ struct ControlsBar: View {
         .buttonStyle(.bordered)
     }
 
-    /// Toggle the route into/out of edit mode. Only in edit mode can the line be
-    /// dragged to reshape — keeps it from moving by accident the rest of the time.
-    private var editButton: some View {
+    /// The single "Edit route" / "Done editing" toggle that the three reshape
+    /// tools now live behind. Opening defaults to Drag (preserves the old
+    /// one-tap-to-drag behavior); closing clears every reshape mode.
+    private var editToggleButton: some View {
         Button {
-            store.isEditMode.toggle()
-        } label: {
-            Label(store.isEditMode ? "Done" : "Edit", systemImage: store.isEditMode ? "checkmark" : "hand.point.up.left.fill")
-                .font(.subheadline.weight(.medium))
-                .padding(.vertical, 12)
-                .padding(.horizontal, 16)
-        }
-        .buttonStyle(.bordered)
-        .tint(store.isEditMode ? .green : .blue)
-    }
-
-    /// Toggle "route through a section" (corridor) mode: tap A then B on a street
-    /// and the master route is forced through that section. Mutually exclusive
-    /// with edit/draw; reads teal while active (mirrors the web).
-    private var corridorButton: some View {
-        Button {
-            store.toggleCorridorMode()
+            if editPanelOpen {
+                editPanelOpen = false
+                store.exitReshapeModes()
+            } else {
+                editPanelOpen = true
+                store.enterEditMode()
+            }
         } label: {
             Label(
-                store.isCorridorMode ? "Pick a section on the map" : "Route through a section",
-                systemImage: "point.topleft.down.to.point.bottomright.curvepath"
+                editPanelOpen ? "Done editing" : "Edit route",
+                systemImage: editPanelOpen ? "checkmark" : "pencil"
             )
             .font(.subheadline.weight(.medium))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
         }
         .buttonStyle(.bordered)
-        .tint(store.isCorridorMode ? .teal : .blue)
+        .tint(editPanelOpen ? .green : .blue)
+    }
+
+    /// Segmented selector among the three reshape modes — exactly one active at a
+    /// time (mutual exclusivity lives in RouteStore). Drag re-snaps a dragged
+    /// line; Draw enters freehand-draw (.drawing phase); Through forces the route
+    /// through a tapped section.
+    private var editToolsRow: some View {
+        HStack(spacing: 6) {
+            editToolButton("Drag", icon: "hand.point.up.left.fill", active: store.isEditMode) {
+                store.enterEditMode()
+            }
+            editToolButton("Draw", icon: "hand.draw.fill", active: store.isDrawMode) {
+                store.enterDrawMode()
+            }
+            editToolButton(
+                "Through",
+                icon: "point.topleft.down.to.point.bottomright.curvepath",
+                active: store.isCorridorMode
+            ) {
+                if !store.isCorridorMode { store.toggleCorridorMode() }
+            }
+        }
+    }
+
+    private func editToolButton(
+        _ title: String,
+        icon: String,
+        active: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.subheadline)
+                Text(title)
+                    .font(.caption2.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .foregroundStyle(active ? Color.white : Color.primary)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(active ? Color.green : Color.primary.opacity(0.06))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Contextual hint for the active reshape mode. Draw has its own (.drawing
+    /// phase) hint, so it isn't covered here.
+    private var activeReshapeHint: String? {
+        if store.isEditMode {
+            return "Drag the route on the map to reshape it — it re-snaps to roads."
+        }
+        if store.isCorridorMode {
+            return "Tap the start then the end of a section on the map."
+        }
+        return nil
     }
 
     private var clearAllButton: some View {

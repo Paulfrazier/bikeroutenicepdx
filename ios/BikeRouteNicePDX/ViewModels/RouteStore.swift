@@ -553,6 +553,24 @@ final class RouteStore {
         isCorridorMode = next
     }
 
+    /// Enter drag-to-reshape mode, turning off draw/corridor (the three reshape
+    /// modes are mutually exclusive — exactly one active at a time).
+    func enterEditMode() {
+        isDrawMode = false
+        isCorridorMode = false
+        clearCorridorPick()
+        isEditMode = true
+    }
+
+    /// Leave all three reshape modes (drag/draw/corridor) — backs the grouped
+    /// "Done editing" toggle.
+    func exitReshapeModes() {
+        isEditMode = false
+        isDrawMode = false
+        isCorridorMode = false
+        clearCorridorPick()
+    }
+
     /// Clear an in-progress corridor pick (both endpoints, the preview, and any
     /// loading/error state) and cancel any in-flight resolve. Stays in corridor
     /// mode — used by both Cancel and an endpoint change.

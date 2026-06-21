@@ -10,8 +10,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Map, useMapClickHandler } from "./components/Map";
 import { EndpointInputs } from "./components/EndpointInputs";
-import { RouteSummary } from "./components/RouteSummary";
-import { DirectionsPanel } from "./components/DirectionsPanel";
+import { RouteDrawer, type EditTool } from "./components/RouteDrawer";
 import { Tour, GestureGuide, HelpButton, useFirstRunTour } from "./components/Help";
 import { MapBoundary } from "./components/MapBoundary";
 import { useRoute } from "./hooks/useRoute";
@@ -74,11 +73,55 @@ export default function App() {
     setCorridorError(null);
   }, []);
 
+  // ── Edit panel ─────────────────────────────────────────────────────────────
+  // The three reshape tools (drag / draw / through-a-section) are grouped behind
+  // one "Edit route" toggle. `editOpen` controls the mode selector's visibility;
+  // the active mode is derived from the existing booleans so exactly one is on.
+  const [editOpen, setEditOpen] = useState(false);
+  const activeTool: EditTool = editing
+    ? "drag"
+    : drawMode
+      ? "draw"
+      : corridorMode
+        ? "through"
+        : null;
+  // Select a reshape mode — turns exactly one on, the others off, and abandons
+  // any half-finished corridor pick (mirrors handleToggleCorridorMode).
+  const selectEditTool = useCallback(
+    (tool: Exclude<EditTool, null>) => {
+      setEditing(tool === "drag");
+      setDrawMode(tool === "draw");
+      setCorridorMode(tool === "through");
+      clearCorridorPick();
+    },
+    [clearCorridorPick]
+  );
+  // "Edit route" opens the panel and defaults to drag (preserves the old
+  // one-tap-to-drag behavior); "Done editing" closes it and clears every mode.
+  const toggleEditPanel = useCallback(() => {
+    setEditOpen((open) => {
+      if (open) {
+        setEditing(false);
+        setDrawMode(false);
+        setCorridorMode(false);
+        clearCorridorPick();
+        return false;
+      }
+      setEditing(true);
+      setDrawMode(false);
+      setCorridorMode(false);
+      clearCorridorPick();
+      return true;
+    });
+  }, [clearCorridorPick]);
+
   // Leaving edit mode on an endpoint change is fine (pins persist in state and
   // reappear on re-enter); we deliberately do NOT clear `vias` here. An in-
   // progress corridor pick IS abandoned (its preview is anchored to the old route).
   useEffect(() => {
+    setEditOpen(false);
     setEditing(false);
+    setDrawMode(false);
     setCorridorMode(false);
     clearCorridorPick();
   }, [from, to, clearCorridorPick]);
@@ -239,19 +282,6 @@ export default function App() {
     },
     []
   );
-  // Toggle corridor ("through a section") mode. Mutually exclusive with edit/
-  // draw; entering clears any half-finished pick.
-  const handleToggleCorridorMode = useCallback(() => {
-    setCorridorMode((on) => {
-      const next = !on;
-      if (next) {
-        setEditing(false);
-        setDrawMode(false);
-      }
-      clearCorridorPick();
-      return next;
-    });
-  }, [clearCorridorPick]);
 
   // Second corridor tap: resolve the street between A and B into ordered points.
   const resolveCorridorPick = useCallback((a: LngLat, b: LngLat) => {
@@ -446,44 +476,20 @@ export default function App() {
 
         {hasRoute && (
           <div className="side-panel__results">
-            <RouteSummary
+            <RouteDrawer
               distance_m={displayDistanceM}
               duration_s={route.duration_s}
               coverage={friendliness?.coverage}
               reshaped={reshaped || manualSegments.length > 0}
+              onStartNav={handleStartNav}
+              editOpen={editOpen}
+              onToggleEdit={toggleEditPanel}
+              activeTool={activeTool}
+              onSelectTool={selectEditTool}
+              steps={route.steps}
+              onStepClick={handleStepClick}
+              showDirections
             />
-            <button
-              type="button"
-              className="start-nav-btn"
-              onClick={handleStartNav}
-            >
-              ▲ Start ride
-            </button>
-            <button
-              type="button"
-              className={`edit-route-btn ${editing ? "edit-route-btn--active" : ""}`}
-              aria-pressed={editing}
-              onClick={() => setEditing((e) => !e)}
-            >
-              {editing ? "✓ Done editing" : "✎ Edit route"}
-            </button>
-            <button
-              type="button"
-              className={`edit-route-btn ${drawMode ? "edit-route-btn--active" : ""}`}
-              aria-pressed={drawMode}
-              onClick={() => setDrawMode((d) => !d)}
-            >
-              {drawMode ? "✓ Drawing — draw on map" : "✏️ Draw segment"}
-            </button>
-            <button
-              type="button"
-              className={`edit-route-btn ${corridorMode ? "edit-route-btn--active" : ""}`}
-              aria-pressed={corridorMode}
-              onClick={handleToggleCorridorMode}
-            >
-              {corridorMode ? "✓ Pick a section on the map" : "↦ Route through a section"}
-            </button>
-            <DirectionsPanel steps={route.steps} onStepClick={handleStepClick} />
           </div>
         )}
 
@@ -595,49 +601,20 @@ export default function App() {
             </button>
 
             <div id="drawer-content" className="bottom-drawer__content">
-              <RouteSummary
+              <RouteDrawer
                 distance_m={displayDistanceM}
                 duration_s={route.duration_s}
                 coverage={friendliness?.coverage}
                 reshaped={reshaped || manualSegments.length > 0}
+                onStartNav={handleStartNav}
+                editOpen={editOpen}
+                onToggleEdit={toggleEditPanel}
+                activeTool={activeTool}
+                onSelectTool={selectEditTool}
+                steps={route.steps}
+                onStepClick={handleStepClick}
+                showDirections={drawerExpanded}
               />
-              <button
-                type="button"
-                className="start-nav-btn"
-                onClick={handleStartNav}
-              >
-                ▲ Start ride
-              </button>
-              <button
-                type="button"
-                className={`edit-route-btn ${editing ? "edit-route-btn--active" : ""}`}
-                aria-pressed={editing}
-                onClick={() => setEditing((e) => !e)}
-              >
-                {editing ? "✓ Done editing" : "✎ Edit route"}
-              </button>
-              <button
-                type="button"
-                className={`edit-route-btn ${drawMode ? "edit-route-btn--active" : ""}`}
-                aria-pressed={drawMode}
-                onClick={() => setDrawMode((d) => !d)}
-              >
-                {drawMode ? "✓ Drawing — draw on map" : "✏️ Draw segment"}
-              </button>
-              <button
-                type="button"
-                className={`edit-route-btn ${corridorMode ? "edit-route-btn--active" : ""}`}
-                aria-pressed={corridorMode}
-                onClick={handleToggleCorridorMode}
-              >
-                {corridorMode ? "✓ Pick a section on the map" : "↦ Route through a section"}
-              </button>
-              {drawerExpanded && (
-                <DirectionsPanel
-                  steps={route.steps}
-                  onStepClick={handleStepClick}
-                />
-              )}
             </div>
           </div>
         )}

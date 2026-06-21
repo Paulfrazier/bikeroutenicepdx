@@ -647,6 +647,61 @@ button {
   border-color: var(--color-accent, #16a34a);
 }
 
+/* ── Edit tools (reshape mode selector, shown when Edit route is open) ──────── */
+.edit-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 6px;
+}
+
+.edit-tools__seg {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--color-surface, #f8fafc);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.15));
+  border-radius: 10px;
+}
+
+.edit-tools__btn {
+  flex: 1 1 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text, #1f2937);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.edit-tools__btn:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.edit-tools__btn--active {
+  color: #fff;
+  background: var(--color-accent, #16a34a);
+}
+
+.edit-tools__btn--active:hover {
+  background: var(--color-accent, #16a34a);
+}
+
+.edit-tools__hint {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text-muted, #64748b);
+}
+
 /* ── Directions panel ──────────────────────────────────────────────────────── */
 .directions-panel {
   list-style: none;
