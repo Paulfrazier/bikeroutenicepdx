@@ -21,7 +21,9 @@
   --color-border: #e2e8f0;
   --color-text: #1e293b;
   --color-text-muted: #64748b;
-  --color-text-light: #94a3b8;
+  /* Darkened from #94a3b8 (~2.6:1, failed AA) to ~4.8:1 on white for the small
+     secondary text that uses it (step distance, tour count, hints). */
+  --color-text-light: #64748b;
 
   /* Severity pill colours */
   --color-pill-greenway-bg: #dcfce7;
@@ -421,12 +423,20 @@ button {
 .search-bar__input {
   width: 100%;
   padding: 8px 32px 8px 10px;
-  border: 1px solid var(--color-border);
+  /* Darker than --color-border so the field reads as editable on white. */
+  border: 1px solid #cbd5e1;
   border-radius: var(--radius-sm);
   background: var(--color-surface);
   color: var(--color-text);
   font-size: 14px;
   transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+/* Explicit placeholder — passes WCAG AA (~5.9:1) on the surface; opacity:1
+   undoes Firefox's default fade. */
+.search-bar__input::placeholder {
+  color: #475569;
+  opacity: 1;
 }
 
 .search-bar__input:focus {
@@ -490,15 +500,23 @@ button {
   align-items: center;
   gap: 8px;
   border-bottom: 1px solid var(--color-border);
+  /* Reserve space for the active-state accent so text doesn't shift. */
+  border-left: 2px solid transparent;
 }
 
 .search-bar__dropdown-item:last-child {
   border-bottom: none;
 }
 
-.search-bar__dropdown-item:hover,
-.search-bar__dropdown-item--active {
+.search-bar__dropdown-item:hover {
   background: var(--color-green-dim);
+}
+
+/* Keyboard-active item: stronger tint + left accent so arrow position is
+   unambiguous vs a plain hover. */
+.search-bar__dropdown-item--active {
+  background: rgba(22, 163, 74, 0.22);
+  border-left-color: var(--color-green);
 }
 
 .search-bar__dropdown-item--loading {
@@ -507,12 +525,47 @@ button {
   cursor: default;
 }
 
+/* Two-line result text: bold primary over muted context. */
+.search-bar__dropdown-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.search-bar__dropdown-name {
+  color: var(--color-text);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-bar__dropdown-context {
+  color: #475569;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "Recent" section label. */
+.search-bar__dropdown-header {
+  padding: 6px 12px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #475569;
+  background: var(--color-surface);
+}
+
 .search-bar__dropdown-type {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--color-text-muted);
+  /* Darkened from --color-text-muted to pass AA for 11px text on the surface. */
+  color: #475569;
   background: var(--color-surface);
   padding: 1px 5px;
   border-radius: var(--radius-sm);
@@ -1127,3 +1180,119 @@ button {
   line-height: 1.5;
   margin: 0;
 }
+
+/* ── Live navigation (turn-by-turn) ─────────────────────────────────────────
+   Foreground web nav. Start button is the primary CTA; NavHud overlays the map
+   with a top maneuver banner + bottom stats/controls (map shows through). */
+
+.start-nav-btn {
+  display: block;
+  width: 100%;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  border: none;
+  border-radius: 12px;
+  background: #16a34a;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.start-nav-btn:hover { background: #15803d; }
+.start-nav-btn:active { transform: translateY(1px); }
+
+.nav-hud {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+  z-index: 50;
+  padding: 0;
+}
+.nav-hud > * { pointer-events: auto; }
+
+.nav-hud__banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 12px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: #157a3a;
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+.nav-hud__banner--arrived { background: #16a34a; }
+
+.nav-hud__glyph {
+  font-size: 2.1rem;
+  line-height: 1;
+  min-width: 44px;
+  text-align: center;
+  font-weight: 700;
+}
+.nav-hud__banner-body { display: flex; flex-direction: column; gap: 2px; }
+.nav-hud__distance { font-size: 1.5rem; font-weight: 800; }
+.nav-hud__instruction { font-size: 0.95rem; font-weight: 500; opacity: 0.95; }
+
+.nav-hud__pill {
+  align-self: flex-start;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+.nav-hud__panel {
+  margin: 12px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  .nav-hud__panel { background: rgba(28, 28, 30, 0.96); color: #f2f2f7; }
+}
+
+.nav-hud__stats { display: flex; align-items: center; gap: 16px; }
+.nav-hud__stat { display: flex; flex-direction: column; }
+.nav-hud__stat-value { font-size: 1.25rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.nav-hud__stat-label { font-size: 0.75rem; opacity: 0.6; }
+.nav-hud__toggles { margin-left: auto; display: flex; gap: 8px; }
+
+.nav-hud__toggle {
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(120, 120, 128, 0.16);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.nav-hud__toggle--on { background: rgba(22, 163, 74, 0.18); }
+
+.nav-hud__end {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 14px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.nav-hud__end:active { transform: translateY(1px); }
+
+/* Let the map fill the screen while navigating (side panel/drawer are hidden). */
+.app-layout--navigating .map-area { width: 100%; }

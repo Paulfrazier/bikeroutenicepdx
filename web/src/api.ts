@@ -53,10 +53,11 @@ export async function fetchCorridor(
 /** GET /search?q=...&limit=... — geocode / place search */
 export async function searchPlaces(
   q: string,
-  limit = 5
+  limit = 5,
+  signal?: AbortSignal
 ): Promise<SearchResult[]> {
   const params = new URLSearchParams({ q, limit: String(limit) });
-  return request<SearchResult[]>(`/search?${params}`);
+  return request<SearchResult[]>(`/search?${params}`, { signal });
 }
 
 /** GET /health */

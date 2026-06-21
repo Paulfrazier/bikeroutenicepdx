@@ -6,6 +6,9 @@ import UIKit
 @MainActor
 final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
     var store: RouteStore
+    /// Live navigation state. Set from MapView.updateUIView; drives the chase
+    /// camera in syncNav() and suppresses the planner gestures while riding.
+    var nav: NavigationSession?
     weak var mapView: MKMapView?
     var tapGesture: UITapGestureRecognizer?
     var panGesture: UIPanGestureRecognizer?
@@ -89,6 +92,24 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             useCurrentLocationAsStart(map)
         }
 
+        // While navigating, the chase camera owns the map: suppress every planner
+        // gesture (a tap must not drop a pin, the line must not be draggable) but
+        // still rebuild overlays below so a live reroute updates the route line.
+        if nav?.isNavigating == true {
+            map.isScrollEnabled = true
+            map.isZoomEnabled = true
+            map.isRotateEnabled = false
+            map.isPitchEnabled = false
+            panGesture?.isEnabled = false
+            tapGesture?.isEnabled = false
+            editPanGesture?.isEnabled = false
+            editLongPressGesture?.isEnabled = false
+            syncAnnotation(&startAnnotation, waypoint: store.start, title: "Start", map: map)
+            syncAnnotation(&endAnnotation, waypoint: store.end, title: "End", map: map)
+            syncRouteOverlays(map)
+            return
+        }
+
         // Lock map interaction while drawing so our pan gesture owns the touch.
         let drawing = store.isDrawMode
         map.isScrollEnabled = !drawing
@@ -111,6 +132,13 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         syncManualOverlays(map)
         syncCorridorPreview(map)
 
+        syncRouteOverlays(map)
+    }
+
+    /// Rebuild the route line overlays when the route identity changes. Zoom-to-fit
+    /// only on a fresh route and never while navigating (the chase camera owns the
+    /// viewport then). Shared by the planner path and the nav branch of sync().
+    private func syncRouteOverlays(_ map: MKMapView) {
         if let snapped = store.snapped {
             // Rebuild when the route identity changes (routeVersion), not just its
             // point count — a re-snap can return the same count as the raw line it
@@ -119,10 +147,11 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             let needsUpdate = nothingShown || store.routeVersion != lastRouteVersion
             lastRouteVersion = store.routeVersion
             if needsUpdate {
-                // Only zoom-to-fit when the route first appears (fresh route). On a
-                // hand-edit / re-route the overlay already exists — rebuild it in
-                // place without yanking the camera around after each drag.
-                let isFreshRoute = nothingShown
+                // Only zoom-to-fit when the route first appears (fresh route) AND
+                // we're not navigating. On a hand-edit / re-route / live reroute the
+                // overlay already exists — rebuild it in place without yanking the
+                // camera around.
+                let isFreshRoute = nothingShown && nav?.isNavigating != true
                 removeRouteOverlays(map)
                 let tiers = buildTierOverlays(for: snapped)
                 // Glow underlay + white casing under the colored runs so the
@@ -153,6 +182,40 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         } else if !routeOverlays.isEmpty || editPreviewOverlay != nil {
             removeRouteOverlays(map)
         }
+    }
+
+    // MARK: - Navigation chase camera
+
+    private var lastNavFixVersion = -1
+    private var navCameraActive = false
+
+    /// Drive the chase camera while navigating: re-center on each new GPS fix,
+    /// oriented to the rider's course, pitched into a 3D forward view. On exit,
+    /// restore a flat north-up camera.
+    func syncNav() {
+        guard let map = mapView else { return }
+        guard let nav, nav.isNavigating else {
+            if navCameraActive {
+                navCameraActive = false
+                lastNavFixVersion = -1
+                let camera = MKMapCamera()
+                camera.centerCoordinate = map.centerCoordinate
+                camera.heading = 0
+                camera.pitch = 0
+                camera.centerCoordinateDistance = 2200
+                map.setCamera(camera, animated: true)
+            }
+            return
+        }
+        navCameraActive = true
+        guard nav.fixVersion != lastNavFixVersion, let center = nav.currentLocation else { return }
+        lastNavFixVersion = nav.fixVersion
+        let camera = MKMapCamera()
+        camera.centerCoordinate = center
+        camera.heading = nav.course
+        camera.pitch = 55
+        camera.centerCoordinateDistance = 340
+        map.setCamera(camera, animated: true)
     }
 
     /// Remove all route line overlays (tier runs + any live edit preview).

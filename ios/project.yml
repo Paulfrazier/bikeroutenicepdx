@@ -20,6 +20,12 @@ targets:
       - path: BikeRouteNicePDX
         excludes:
           - "**/.DS_Store"
+    dependencies:
+      - target: BikeNavWidget
+        embed: true
+      # BikeNiceWatch is built on its own watchOS scheme (not embedded here) so the
+      # iOS app build never drags WatchKit onto the iOS SDK. Embed it for pairing as
+      # a follow-up once a watchOS run destination is wired into CI/local signing.
     settings:
       base:
         INFOPLIST_FILE: BikeRouteNicePDX/Info.plist
@@ -34,11 +40,17 @@ targets:
         CFBundleName: BikeRouteNicePDX
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        ITSAppUsesNonExemptEncryption: false
         # Base URL for the snapping/search server. Production = Railway (HTTPS,
         # works anywhere). For local dev against `npm run dev:server`, point this
         # at your Mac's LAN IP and add an http exception under NSExceptionDomains.
         APIBaseURL: "https://bikeroutenicepdx-production.up.railway.app"
-        NSLocationWhenInUseUsageDescription: "Shows your location on the map so you can draw routes from where you are."
+        NSLocationWhenInUseUsageDescription: "Shows your location on the map and powers turn-by-turn navigation along your route."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Keeps turn-by-turn guidance running while the app is in the background or your screen is locked during a ride."
+        UIBackgroundModes:
+          - location
+          - audio
+        NSSupportsLiveActivities: true
         NSAppTransportSecurity:
           NSExceptionDomains:
             localhost:
@@ -57,3 +69,41 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
           UISceneConfigurations: {}
+
+  BikeNavWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: BikeNavWidget
+      # Shared with the app target so both compile the same models.
+      - path: BikeRouteNicePDX/Services/NavActivityAttributes.swift
+      - path: BikeRouteNicePDX/Views/ManeuverStyle.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: website.fairpoint.bikeroutenicepdx.BikeNavWidget
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: DFG7YZ82LP
+    info:
+      path: BikeNavWidget/Info.plist
+      properties:
+        CFBundleDisplayName: BikeNav
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+  BikeNiceWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - path: BikeNiceWatch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: website.fairpoint.bikeroutenicepdx.watchkitapp
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: DFG7YZ82LP
+    info:
+      path: BikeNiceWatch/Info.plist
+      properties:
+        CFBundleDisplayName: BikeRoute
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: website.fairpoint.bikeroutenicepdx

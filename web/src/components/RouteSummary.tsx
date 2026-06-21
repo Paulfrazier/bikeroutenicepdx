@@ -6,14 +6,6 @@
  * being classified → shows "—".
  */
 
-/** Engine bake-off winner → short display label. */
-const ENGINE_LABEL: Record<string, string> = {
-  valhalla: "Valhalla",
-  brouter: "BRouter",
-  ors: "ORS",
-  graphhopper: "GraphHopper",
-};
-
 interface RouteSummaryProps {
   distance_m: number;
   duration_s: number;
@@ -21,8 +13,6 @@ interface RouteSummaryProps {
   coverage?: number;
   /** When true, the route has been reshaped by dragging (re-snapped to roads). */
   reshaped?: boolean;
-  /** Winning engine of the per-request bake-off (omitted → no engine chip). */
-  engine?: string;
 }
 
 function formatDistance(m: number): string {
@@ -43,7 +33,6 @@ export function RouteSummary({
   duration_s,
   coverage,
   reshaped = false,
-  engine,
 }: RouteSummaryProps) {
   const coverageReady = coverage !== undefined;
   const coveragePct = coverageReady ? Math.round(coverage * 100) : 0;
@@ -82,16 +71,6 @@ export function RouteSummary({
       </span>
 
       {coveragePill}
-
-      {engine && (
-        <span
-          className="route-summary__pill route-summary__pill--engine"
-          title={`Best of the bake-off: ${ENGINE_LABEL[engine] ?? engine}`}
-          aria-label={`Routed by ${ENGINE_LABEL[engine] ?? engine}`}
-        >
-          via {ENGINE_LABEL[engine] ?? engine}
-        </span>
-      )}
 
       {reshaped && <span className="route-summary__note">Reshaped</span>}
     </div>

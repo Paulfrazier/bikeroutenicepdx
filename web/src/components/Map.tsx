@@ -325,6 +325,11 @@ interface MapProps {
   corridorB: LngLat | null;
   /** Corridor mode: the resolved street between A and B (highlight preview). */
   corridorPreview: { geometry: RouteGeometry } | null;
+  /**
+   * Live navigation chase-camera target (center + heading), bumped each GPS fix.
+   * Null when not navigating. Drives easeTo with a forward pitch.
+   */
+  navCamera: { center: LngLat; bearing: number; version: number } | null;
 }
 
 export function Map({
@@ -349,6 +354,7 @@ export function Map({
   corridorA,
   corridorB,
   corridorPreview,
+  navCamera,
 }: MapProps) {
   // Bike-network legend: open by default; auto-collapses the moment a route
   // starts computing so it's out of the way as the line draws. Transition-only
@@ -1182,6 +1188,29 @@ export function Map({
     if (!onStepFlyTo || !mapRef.current) return;
     mapRef.current.flyTo({ center: onStepFlyTo, zoom: 17, duration: 800 });
   }, [onStepFlyTo]);
+
+  // ── Navigation chase camera ──────────────────────────────────────────────
+  // On each GPS fix, ease the camera to the rider's position oriented to their
+  // heading, pitched into a forward 3D view. Restore a flat north-up frame on exit.
+  const wasNavigating = useRef(false);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (navCamera) {
+      wasNavigating.current = true;
+      map.easeTo({
+        center: navCamera.center,
+        bearing: navCamera.bearing,
+        pitch: 55,
+        zoom: 17,
+        duration: 700,
+      });
+    } else if (wasNavigating.current) {
+      wasNavigating.current = false;
+      map.easeTo({ bearing: 0, pitch: 0, duration: 600 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navCamera?.version, navCamera === null]);
 
   return (
     <div className="map-wrapper">

@@ -74,15 +74,6 @@ export interface RouteGeometry {
   coordinates: LngLat[];
 }
 
-/** Which engine produced a route (per-request bake-off). */
-export type RouteEngine = "valhalla" | "brouter" | "ors" | "graphhopper";
-
-/** A runner-up route from the bake-off — full geometry so the UI can switch instantly. */
-export interface AlternativeRoute extends RouteResponse {
-  engine: RouteEngine;
-  score: number;
-}
-
 export interface RouteResponse {
   geometry: RouteGeometry;
   steps: RouteStep[];
@@ -90,19 +81,14 @@ export interface RouteResponse {
   duration_s: number;
   /** 0–1 fraction of route on off_street | greenway | protected edges */
   greenway_coverage: number;
-  /**
-   * Winning engine of the per-request bake-off. Optional: older servers (and the
-   * /match flow) omit it; clients fall back to not showing an engine chip.
-   */
-  engine?: RouteEngine;
-  /** Runners-up from the bake-off, best-first. Optional for the same reason. */
-  alternatives?: AlternativeRoute[];
 }
 
 // ─── /search ────────────────────────────────────────────────────────────────
 
 export interface SearchResult {
   name: string;
+  /** Secondary line (neighborhood, city) for two-line display. */
+  context?: string;
   lng: number;
   lat: number;
   type: string;

@@ -16,6 +16,8 @@ import { Tour, GestureGuide, HelpButton, useFirstRunTour } from "./components/He
 import { MapBoundary } from "./components/MapBoundary";
 import { useRoute } from "./hooks/useRoute";
 import { useFriendliness } from "./hooks/useFriendliness";
+import { useNavigation } from "./hooks/useNavigation";
+import { NavHud } from "./components/NavHud";
 import { toTierFeatureCollection, snapToNetwork } from "./friendliness";
 import { arcLengthAt, haversineLength, applyManualSegments, MAX_VIAS } from "./geo";
 import { fetchCorridor } from "./api";
@@ -90,17 +92,24 @@ export default function App() {
   );
   const reshaped = vias.length > 0;
 
+  // ── Live turn-by-turn navigation (foreground; iOS has the native version) ──
+  const nav = useNavigation();
+  // While navigating, the displayed route follows nav reroutes; otherwise it's
+  // the planner's route.
+  const displayRoute = nav.navigating ? nav.activeRoute : route;
+
   // ── Bike-friendliness classification (client-side) ────────────────────────
   // Classify the active (snapped) route geometry so tiers + coverage update
   // after every reshape re-route.
   // Display geometry = the auto route with hand-drawn segments spliced in.
   const activeCoords = useMemo<LngLat[] | null>(() => {
-    const auto = route?.geometry.coordinates ?? null;
+    const auto = displayRoute?.geometry.coordinates ?? null;
     if (!auto) return null;
-    return manualSegments.length
+    // No manual splices while navigating — the nav route is authoritative.
+    return manualSegments.length && !nav.navigating
       ? applyManualSegments(auto, manualSegments)
       : auto;
-  }, [route, manualSegments]);
+  }, [displayRoute, manualSegments, nav.navigating]);
 
   // Once a manual stretch is spliced, the server distance no longer matches —
   // measure the displayed geometry instead.
@@ -325,6 +334,8 @@ export default function App() {
   const clickCount = useRef(0);
   const handleMapClick = useCallback(
     (lngLat: LngLat) => {
+      // Map taps are inert while navigating (the HUD owns the screen).
+      if (nav.navigating) return;
       // Corridor mode: tap A, then tap B → resolve the street between them.
       if (corridorMode) {
         if (!corridorA) {
@@ -358,7 +369,7 @@ export default function App() {
       }
       clickCount.current += 1;
     },
-    [corridorMode, corridorA, resolveCorridorPick]
+    [corridorMode, corridorA, resolveCorridorPick, nav.navigating]
   );
 
   // Also wire the reusable handler from Map (for external use, e.g. tests)
@@ -389,9 +400,15 @@ export default function App() {
 
   const hasRoute = !!route;
 
+  // Launch live turn-by-turn for the planned route.
+  const handleStartNav = useCallback(() => {
+    if (route && to) nav.start(route, to);
+  }, [route, to, nav]);
+
   return (
-    <div className="app-layout">
+    <div className={`app-layout ${nav.navigating ? "app-layout--navigating" : ""}`}>
       {/* ── Side panel (desktop) / top bar (mobile) ── */}
+      {!nav.navigating && (
       <aside className="side-panel" aria-label="Route planner">
         <header className="side-panel__header">
           <h1 className="side-panel__title">
@@ -434,8 +451,14 @@ export default function App() {
               duration_s={route.duration_s}
               coverage={friendliness?.coverage}
               reshaped={reshaped || manualSegments.length > 0}
-              engine={route.engine}
             />
+            <button
+              type="button"
+              className="start-nav-btn"
+              onClick={handleStartNav}
+            >
+              ▲ Start ride
+            </button>
             <button
               type="button"
               className={`edit-route-btn ${editing ? "edit-route-btn--active" : ""}`}
@@ -475,6 +498,7 @@ export default function App() {
           </small>
         </footer>
       </aside>
+      )}
 
       {/* ── Map ── */}
       <main className="map-area">
@@ -482,11 +506,12 @@ export default function App() {
         <Map
           from={from}
           to={to}
-          route={route}
+          route={displayRoute}
           routeLoading={routeLoading}
           tierFeatures={tierFeatures}
           onMapClick={handleMapClick}
           onStepFlyTo={flyTo}
+          navCamera={nav.camera}
           editing={editing}
           vias={vias}
           onReshape={handleReshape}
@@ -504,10 +529,12 @@ export default function App() {
         />
         </MapBoundary>
 
-        <HelpButton onClick={() => setGuideOpen(true)} />
+        {nav.navigating && <NavHud nav={nav} onEnd={nav.stop} />}
+
+        {!nav.navigating && <HelpButton onClick={() => setGuideOpen(true)} />}
 
         {/* ── Corridor ("route through a section") pick banner ── */}
-        {corridorMode && (
+        {!nav.navigating && corridorMode && (
           <div className="corridor-bar" role="status" aria-live="polite">
             {corridorPreview ? (
               <>
@@ -548,7 +575,7 @@ export default function App() {
         )}
 
         {/* ── Mobile bottom drawer ── */}
-        {hasRoute && (
+        {!nav.navigating && hasRoute && (
           <div
             className={`bottom-drawer ${drawerExpanded ? "bottom-drawer--expanded" : ""}`}
             role="complementary"
@@ -573,8 +600,14 @@ export default function App() {
                 duration_s={route.duration_s}
                 coverage={friendliness?.coverage}
                 reshaped={reshaped || manualSegments.length > 0}
-                engine={route.engine}
               />
+              <button
+                type="button"
+                className="start-nav-btn"
+                onClick={handleStartNav}
+              >
+                ▲ Start ride
+              </button>
               <button
                 type="button"
                 className={`edit-route-btn ${editing ? "edit-route-btn--active" : ""}`}

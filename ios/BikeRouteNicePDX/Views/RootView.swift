@@ -2,44 +2,39 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(RouteStore.self) private var store
+    @Environment(NavigationSession.self) private var nav
     @State private var showSearch = false
     @State private var showDirections = false
+    @State private var savedRide: Ride?
+    @State private var showRideSaved = false
 
     // Help: first-run tour (auto-shown once) + reopenable gesture guide.
     @AppStorage("tourSeen_v1") private var tourSeen = false
     @State private var showTour = false
     @State private var showGuide = false
+    @State private var showHistory = false
 
     var body: some View {
         ZStack(alignment: .top) {
             MapView()
                 .ignoresSafeArea()
 
-            HStack(alignment: .top) {
-                helpButton
-                    .padding(.leading, 12)
-                    .padding(.top, 8)
-                Spacer()
-                LegendView()
-                    .padding(.trailing, 12)
-                    .padding(.top, 8)
+            // Planner chrome — hidden while navigating so the HUD owns the screen.
+            if !nav.isNavigating {
+                plannerChrome
             }
 
-            topBanner
-
-            VStack(spacing: 12) {
-                Spacer()
-                if !store.isDrawMode {
-                    HStack {
-                        Spacer()
-                        locateButton
-                    }
+            if nav.isNavigating {
+                NavigationHUD { ride in
+                    savedRide = ride
+                    showRideSaved = ride != nil
                 }
-                // Corridor pick/confirm sits just above the controls — in the
-                // thumb zone — since "Route through here" is a commit action, not
-                // passive status (top is a reach + far from where the eye is).
-                corridorBanner
-                ControlsBar(showSearch: $showSearch, showDirections: $showDirections)
+            }
+        }
+        .sheet(isPresented: $showRideSaved) {
+            if let ride = savedRide {
+                RideSavedSheet(ride: ride)
+                    .presentationDetents([.medium])
             }
         }
         .sheet(isPresented: $showSearch) {
@@ -52,6 +47,9 @@ struct RootView: View {
                 distanceLabel: store.snapped?.distanceLabel ?? ""
             )
             .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showHistory) {
+            RideHistoryView()
         }
         .sheet(isPresented: $showGuide) {
             GestureGuideView(
@@ -89,9 +87,47 @@ struct RootView: View {
             switch ProcessInfo.processInfo.environment["BRN_DEMO"] {
             case "1": await store.runDemoSnap()
             case "edit": await store.runDemoEdit()
+            case "nav":
+                // Seed a route then launch straight into navigation (no touch
+                // injection in the sim). Pair with a --gpx ride playback.
+                await store.runDemoSnap()
+                nav.start()
             default: break
             }
             #endif
+        }
+    }
+
+    /// Everything shown in planning mode (hidden while navigating).
+    @ViewBuilder
+    private var plannerChrome: some View {
+        HStack(alignment: .top, spacing: 8) {
+            helpButton
+                .padding(.leading, 12)
+                .padding(.top, 8)
+            historyButton
+                .padding(.top, 8)
+            Spacer()
+            LegendView()
+                .padding(.trailing, 12)
+                .padding(.top, 8)
+        }
+
+        topBanner
+
+        VStack(spacing: 12) {
+            Spacer()
+            if !store.isDrawMode {
+                HStack {
+                    Spacer()
+                    locateButton
+                }
+            }
+            // Corridor pick/confirm sits just above the controls — in the thumb
+            // zone — since "Route through here" is a commit action, not passive
+            // status (top is a reach + far from where the eye is).
+            corridorBanner
+            ControlsBar(showSearch: $showSearch, showDirections: $showDirections)
         }
     }
 
@@ -182,6 +218,22 @@ struct RootView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("How to use the map")
+    }
+
+    /// Opens the saved-rides history (distance / time / greenway %).
+    private var historyButton: some View {
+        Button {
+            showHistory = true
+        } label: {
+            Image(systemName: "bicycle")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.tint)
+                .frame(width: 40, height: 40)
+                .background(.regularMaterial, in: Circle())
+                .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Your rides")
     }
 
     private var locateButton: some View {

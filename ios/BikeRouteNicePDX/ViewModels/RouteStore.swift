@@ -253,6 +253,26 @@ final class RouteStore {
         }
     }
 
+    // MARK: - Navigation reroute
+
+    /// Live-navigation reroute: recompute current location → destination via the
+    /// same BRouter path (keeps greenway quality), classify it, and publish to
+    /// `snapped` so the map line updates under the rider. Deliberately does NOT
+    /// touch vias / manual segments / `autoRoute` — `NavigationSession` restores
+    /// the original planned route when navigation ends. Returns the fresh route,
+    /// or nil on failure (the caller keeps guiding on the old line).
+    func navReroute(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) async -> SnappedRoute? {
+        do {
+            let routed = try await router.route(from: from, to: to, vias: [], preference: routePreference.rawValue)
+            guard routed.coordinates.count >= 2 else { return nil }
+            let enriched = await classified(routed)
+            snapped = enriched
+            return enriched
+        } catch {
+            return nil
+        }
+    }
+
     /// Attach bike-friendliness tiers + coverage to a freshly computed route.
     /// Shared by the auto-route, drag-reshape, and finger-draw success paths.
     private func classified(_ route: SnappedRoute) async -> SnappedRoute {

@@ -5,6 +5,7 @@ import MapKit
 /// the start/end pins, the live finger-draft, and the snapped route.
 struct MapView: UIViewRepresentable {
     @Environment(RouteStore.self) private var store
+    @Environment(NavigationSession.self) private var nav
 
     func makeCoordinator() -> MapCoordinator {
         MapCoordinator(store: store)
@@ -89,6 +90,8 @@ struct MapView: UIViewRepresentable {
 
     func updateUIView(_ uiView: MKMapView, context: Context) {
         context.coordinator.store = store
+        context.coordinator.nav = nav
         context.coordinator.sync()
+        context.coordinator.syncNav()
     }
 }

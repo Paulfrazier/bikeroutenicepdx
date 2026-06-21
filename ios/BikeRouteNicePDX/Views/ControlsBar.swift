@@ -3,6 +3,7 @@ import SwiftUI
 /// Bottom control card. Phase-driven: pin chips on top, a context action below.
 struct ControlsBar: View {
     @Environment(RouteStore.self) private var store
+    @Environment(NavigationSession.self) private var nav
     @Binding var showSearch: Bool
     @Binding var showDirections: Bool
 
@@ -109,6 +110,17 @@ struct ControlsBar: View {
                     }
                 }
                 preferencePicker
+                // Primary CTA: launch live turn-by-turn for the planned route.
+                Button {
+                    nav.start()
+                } label: {
+                    Label("Start ride", systemImage: "location.north.line.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
                 if let steps = store.snapped?.steps, !steps.isEmpty {
                     Button {
                         showDirections = true
