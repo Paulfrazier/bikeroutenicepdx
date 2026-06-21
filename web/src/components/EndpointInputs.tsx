@@ -8,7 +8,6 @@
 
 import { useCallback } from "react";
 import { SearchBar } from "./SearchBar";
-import { useGeolocation } from "../hooks/useGeolocation";
 import type { LngLat, SearchResult } from "../types";
 
 interface EndpointInputsProps {
@@ -30,8 +29,6 @@ export function EndpointInputs({
   fromValue,
   toValue,
 }: EndpointInputsProps) {
-  const geo = useGeolocation();
-
   const handleFromSelect = useCallback(
     (r: SearchResult) => onFromChange([r.lng, r.lat], r.name),
     [onFromChange]
@@ -41,15 +38,6 @@ export function EndpointInputs({
     [onToChange]
   );
 
-  function handleLocateFrom() {
-    geo.locate();
-    // Once we have position, pass it up
-    // We watch via useEffect below (or just re-call after geo updates)
-  }
-
-  // When geo.position updates, fill whichever field is currently empty (from first)
-  // Simpler: expose a dedicated "locate for from" / "locate for to" pattern
-  // by capturing a target via closure
   function locateFor(target: "from" | "to") {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
@@ -64,7 +52,6 @@ export function EndpointInputs({
       },
       { enableHighAccuracy: true, timeout: 10_000 }
     );
-    void handleLocateFrom; // suppress unused warning
   }
 
   return (

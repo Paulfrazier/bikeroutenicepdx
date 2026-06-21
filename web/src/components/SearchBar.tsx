@@ -11,6 +11,7 @@
 
 import { useState, useRef, useEffect, useId } from "react";
 import { useDebouncedSearch } from "../hooks/useDebouncedSearch";
+import { useRecentSearches } from "../hooks/useRecentSearches";
 import type { SearchResult } from "../types";
 
 interface SearchBarProps {
@@ -50,8 +51,17 @@ export function SearchBar({
     // Only search when the draft differs from the committed value
     value && draft === value ? "" : draft
   );
+  const { recents, addRecent } = useRecentSearches();
 
-  const showDropdown = open && (results.length > 0 || loading);
+  // Show recents on focus when the user hasn't started a meaningful query.
+  const trimmed = draft.trim();
+  const belowSearchThreshold = trimmed.length < 3 || (value !== "" && draft === value);
+  const showRecents =
+    open && belowSearchThreshold && results.length === 0 && !loading && recents.length > 0;
+
+  // Whatever list the dropdown is currently driving keyboard nav over.
+  const listItems = results.length > 0 ? results : showRecents ? recents : [];
+  const showDropdown = open && (listItems.length > 0 || loading);
 
   function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     setDraft(e.target.value);
@@ -64,6 +74,7 @@ export function SearchBar({
     setDraft(result.name);
     setOpen(false);
     setActiveIndex(-1);
+    addRecent(result);
     onSelect(result);
   }
 
@@ -71,13 +82,13 @@ export function SearchBar({
     if (!showDropdown) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActiveIndex((i) => Math.min(i + 1, results.length - 1));
+      setActiveIndex((i) => Math.min(i + 1, listItems.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActiveIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === "Enter" && activeIndex >= 0) {
       e.preventDefault();
-      const r = results[activeIndex];
+      const r = listItems[activeIndex];
       if (r) handleSelect(r);
     } else if (e.key === "Escape") {
       setOpen(false);
@@ -147,7 +158,16 @@ export function SearchBar({
               Searching…
             </li>
           )}
-          {results.map((r, i) => (
+          {showRecents && (
+            <li
+              className="search-bar__dropdown-header"
+              role="presentation"
+              aria-hidden="true"
+            >
+              Recent
+            </li>
+          )}
+          {listItems.map((r, i) => (
             <li
               key={`${r.lng},${r.lat}`}
               id={`${listId}-item-${i}`}
@@ -165,7 +185,12 @@ export function SearchBar({
               }}
             >
               <span className="search-bar__dropdown-type">{r.type}</span>
-              {r.name}
+              <span className="search-bar__dropdown-text">
+                <span className="search-bar__dropdown-name">{r.name}</span>
+                {r.context && (
+                  <span className="search-bar__dropdown-context">{r.context}</span>
+                )}
+              </span>
             </li>
           ))}
         </ul>
