@@ -20,24 +20,22 @@ struct SearchSheet: View {
                 .pickerStyle(.segmented)
                 .padding(16)
 
-                List(store.searchResults) { result in
-                    Button {
-                        assign(result)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(result.name)
-                                .font(.body)
-                                .foregroundStyle(.primary)
-                                .lineLimit(2)
-                            Text(result.type)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                List {
+                    if showingRecents {
+                        Section("Recent") {
+                            ForEach(store.recentSearches) { result in
+                                resultRow(result)
+                            }
+                        }
+                    } else {
+                        ForEach(store.searchResults) { result in
+                            resultRow(result)
                         }
                     }
                 }
                 .listStyle(.plain)
                 .overlay {
-                    if store.searchResults.isEmpty {
+                    if store.searchResults.isEmpty && !showingRecents {
                         ContentUnavailableView(
                             "Search for a place",
                             systemImage: "magnifyingglass",
@@ -64,21 +62,58 @@ struct SearchSheet: View {
         }
     }
 
+    /// Recents are shown when the user hasn't typed a meaningful query yet.
+    private var showingRecents: Bool {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count < RouteStore.minSearchLength
+            && store.searchResults.isEmpty
+            && !store.recentSearches.isEmpty
+    }
+
+    @ViewBuilder
+    private func resultRow(_ result: SearchResult) -> some View {
+        Button {
+            assign(result)
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(result.type.uppercased())
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 4))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(result.name)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    if let context = result.context, !context.isEmpty {
+                        Text(context)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+        }
+    }
+
     private func assign(_ result: SearchResult) {
         let coordinate = CLLocationCoordinate2D(latitude: result.lat, longitude: result.lng)
         store.setPin(coordinate, kind: target, label: result.name)
+        store.addRecent(result)
         dismiss()
     }
 
     private func debounceSearch(_ text: String) {
         searchTask?.cancel()
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
+        guard trimmed.count >= RouteStore.minSearchLength else {
             store.searchResults = []
             return
         }
         searchTask = Task {
-            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms debounce
+            try? await Task.sleep(nanoseconds: 250_000_000) // 250ms debounce
             if Task.isCancelled { return }
             await store.runSearch(trimmed)
         }

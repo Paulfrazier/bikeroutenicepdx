@@ -137,6 +137,23 @@ final class RouteStore {
     // Search
     var searchResults: [SearchResult] = []
 
+    /// Minimum characters before we hit the geocoder (saves the scarce 1-rps budget).
+    static let minSearchLength = 3
+
+    /// Recent picks, persisted to UserDefaults. Most-recent-first, deduped by
+    /// coordinate, capped — shown when the search field is empty.
+    private(set) var recentSearches: [SearchResult] = {
+        guard let data = UserDefaults.standard.data(forKey: "recentSearches"),
+              let list = try? JSONDecoder().decode([SearchResult].self, from: data)
+        else { return [] }
+        return list
+    }()
+    private static let maxRecents = 5
+
+    /// In-memory geocoder cache (normalized query → results). Pairs with the
+    /// server cache so repeated / backspace-and-retype queries are instant.
+    private var searchCache: [String: [SearchResult]] = [:]
+
     // Map controls — incremented to ask the map to recenter on the user's
     // current location (observed by the coordinator in updateUIView).
     private(set) var recenterTick = 0
@@ -725,10 +742,31 @@ final class RouteStore {
 
     func runSearch(_ query: String) async {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
+        guard trimmed.count >= Self.minSearchLength else {
             searchResults = []
             return
         }
-        searchResults = (try? await search.geocode(trimmed)) ?? []
+        let key = trimmed.lowercased()
+        if let cached = searchCache[key] {
+            searchResults = cached
+            return
+        }
+        let results = (try? await search.geocode(trimmed)) ?? []
+        // A cancelled Task throws → results stays []; don't cache/replace on cancel.
+        if Task.isCancelled { return }
+        searchCache[key] = results
+        searchResults = results
+    }
+
+    /// Record a pick in recents (most-recent-first, deduped by coordinate, capped).
+    func addRecent(_ result: SearchResult) {
+        recentSearches.removeAll { $0.lng == result.lng && $0.lat == result.lat }
+        recentSearches.insert(result, at: 0)
+        if recentSearches.count > Self.maxRecents {
+            recentSearches = Array(recentSearches.prefix(Self.maxRecents))
+        }
+        if let data = try? JSONEncoder().encode(recentSearches) {
+            UserDefaults.standard.set(data, forKey: "recentSearches")
+        }
     }
 }
