@@ -138,9 +138,16 @@ function mapResultType(result: NominatimResult): string {
     }
   }
 
-  // Fall back to category/type
-  if (category === "amenity" || category === "tourism" || category === "shop") {
-    return "poi";
+  // POIs: surface the specific kind (pharmacy, cafe, supermarket…) rather than a
+  // generic "poi" — more informative as a badge. Humanize snake_case; "yes" is a
+  // useless OSM placeholder, fall back to "poi".
+  if (
+    category === "amenity" ||
+    category === "tourism" ||
+    category === "shop" ||
+    category === "leisure"
+  ) {
+    return type && type !== "yes" ? type.replace(/_/g, " ") : "poi";
   }
   if (category === "place") {
     return type === "neighbourhood" || type === "suburb" ? "neighborhood" : "city";
@@ -214,29 +221,41 @@ function buildLabel(result: NominatimResult): { name: string; context?: string }
     return segments.find((s) => s && !/^\d+$/.test(s)) ?? segments[0] ?? result.display_name;
   }
 
+  // Shortened street address, e.g. "6615 NE Glisan St" — used as the primary line
+  // for plain addresses and as extra context for named POIs.
+  const streetAddress = houseNumber && road ? shorten(`${houseNumber} ${road}`) : road ? shorten(road) : undefined;
+
+  // A named feature is a POI / park / building / named place whose own name we
+  // want as the primary line (NOT a plain street address).
+  const isNamedFeature = !isStreet && !!place && result.addresstype !== "house";
+
   let name: string;
   if (isStreet) {
     // Always abbreviate street names (Southeast Hawthorne Boulevard → SE Hawthorne Blvd).
     name = shorten(road ?? place ?? firstSegment());
-  } else if (houseNumber && road) {
-    name = shorten(`${houseNumber} ${road}`);
-  } else if (place) {
+  } else if (isNamedFeature) {
     // POI / park / named place — keep verbatim (no cardinal abbreviation).
     name = place;
-  } else if (road) {
-    name = shorten(road);
+  } else if (streetAddress) {
+    name = streetAddress;
+  } else if (place) {
+    name = place;
   } else {
     name = shorten(firstSegment());
   }
 
-  // City-ish line: prefer neighborhood, then the municipality. Drop any part
-  // that just repeats the name (e.g. the "Alberta" neighborhood in Alberta).
+  // Context line, most-specific first: the street (only when it isn't already the
+  // name — i.e. for named POIs), then neighborhood, then municipality. Drop
+  // county/state/ZIP/country and any part that just repeats the name.
   const neighborhood = addr.neighbourhood ?? addr.suburb ?? addr.quarter;
   const city = addr.city ?? addr.town ?? addr.village ?? addr.hamlet ?? addr.municipality;
-  const contextParts = [...new Set([neighborhood, city])].filter(
-    (p): p is string => Boolean(p) && p !== name
-  );
-  const context = contextParts.length > 0 ? contextParts.join(", ") : undefined;
+  const contextParts = [
+    isNamedFeature ? streetAddress : undefined,
+    neighborhood,
+    city,
+  ].filter((p): p is string => Boolean(p));
+  const context =
+    [...new Set(contextParts)].filter((p) => p !== name).join(", ") || undefined;
 
   return { name, context };
 }
