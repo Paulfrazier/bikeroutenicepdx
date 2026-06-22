@@ -21,6 +21,12 @@ interface SearchBarProps {
   onClear: () => void;
   id?: string;
   "aria-label"?: string;
+  /**
+   * When set, pressing the ✕ button asks for confirmation with this message
+   * before clearing (e.g. so clearing an endpoint doesn't silently wipe an
+   * existing route). Undefined = clear immediately.
+   */
+  confirmClearMessage?: string;
 }
 
 export function SearchBar({
@@ -30,6 +36,7 @@ export function SearchBar({
   onClear,
   id,
   "aria-label": ariaLabel,
+  confirmClearMessage,
 }: SearchBarProps) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
@@ -135,6 +142,7 @@ export function SearchBar({
           className="search-bar__clear"
           aria-label="Clear"
           onClick={() => {
+            if (confirmClearMessage && !window.confirm(confirmClearMessage)) return;
             setDraft("");
             setOpen(false);
             onClear();

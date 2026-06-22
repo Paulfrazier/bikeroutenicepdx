@@ -18,6 +18,9 @@ interface EndpointInputsProps {
   onSwap: () => void;
   fromValue: string;
   toValue: string;
+  /** True when a route is currently shown — clearing an endpoint will wipe it,
+   *  so the ✕ button asks for confirmation first. */
+  hasRoute?: boolean;
 }
 
 export function EndpointInputs({
@@ -28,7 +31,9 @@ export function EndpointInputs({
   onSwap,
   fromValue,
   toValue,
+  hasRoute = false,
 }: EndpointInputsProps) {
+  const confirmClearMessage = hasRoute ? "Clear the current route?" : undefined;
   const handleFromSelect = useCallback(
     (r: SearchResult) => onFromChange([r.lng, r.lat], r.name),
     [onFromChange]
@@ -66,6 +71,7 @@ export function EndpointInputs({
           placeholder={fromLabel}
           onSelect={handleFromSelect}
           onClear={() => onFromChange(null, "")}
+          confirmClearMessage={confirmClearMessage}
           aria-label="Start address"
         />
         <button
@@ -99,6 +105,7 @@ export function EndpointInputs({
           placeholder={toLabel}
           onSelect={handleToSelect}
           onClear={() => onToChange(null, "")}
+          confirmClearMessage={confirmClearMessage}
           aria-label="End address"
         />
         <button

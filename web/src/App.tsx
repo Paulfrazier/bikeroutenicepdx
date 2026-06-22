@@ -461,6 +461,7 @@ export default function App() {
             setToLabel(name);
           }}
           onSwap={handleSwap}
+          hasRoute={hasRoute}
         />
 
         {routeLoading && (
