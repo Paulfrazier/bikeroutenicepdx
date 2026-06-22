@@ -74,7 +74,7 @@ iOS points at the Railway server, so a server change is picked up live; a **data
 
 ## 6. Update memory + commit hygiene
 - Update the BikeRouteNicePDX memory notes (`project_bikeroutenicepdx.md` / `project_bikeroutenicepdx_ios.md`) with what shipped.
-- Commit only the files for this change (a parallel session may have unrelated work in the tree — stage by explicit path, don't `git add -A`).
+- `git add -A` is safe — `.gitignore` covers the heavy regenerable data/build artifacts, and the engine bake-off is committed-but-inert under `server/src/experiments/engine-bakeoff/` (no special handling needed; just never wire `routes/route.ts` to `bakeoffRoute`). The only caveat is the generic one: if a **parallel session** has unrelated work in the tree, stage your own change by explicit path. Optional housekeeping: `npm run clean` drops regenerable artifacts.
 
 ## Quick reference — paired surfaces that must move together
 | Change | Also update |

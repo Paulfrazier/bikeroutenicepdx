@@ -1,31 +1,27 @@
 # BikeRouteNicePDX — repo conventions
 
-## ⛔ DO NOT COMMIT the engine bake-off
+## Engine bake-off — committed but inert
 
 The per-request engine bake-off (race Valhalla + BRouter + ORS + GraphHopper,
-pick the best-coverage route) is a **deliberately OFFLINE side project**. Prod
-`/route` stays **BRouter-only**. These working-tree changes must **never** be
-committed or deployed — leave them dirty in the tree:
+pick the best-coverage route) is a **deliberately OFFLINE experiment**. It now
+lives committed-but-inert under `server/src/experiments/engine-bakeoff/` (with a
+README), so it's preserved and typechecked but imported by nothing in the live
+request path. The runner stays at `scripts/compare-engines.ts`
+(`npm run compare:engines`).
 
-- `server/src/services/bakeoff.ts` — the bake-off itself
-- `server/src/services/ors.ts` — ORS engine (bake-off only)
-- `server/src/config.ts` — ORS/HeiGIT URL (only used by the bake-off)
-- `scripts/compare-engines.ts` — `npm run compare:engines` offline harness
-- `docs/ENGINE_BAKEOFF.md` — bake-off write-up (untracked)
-- **Do NOT** re-wire `server/src/routes/route.ts` back to `bakeoffRoute` — prod
-  must call `getRouteBrouter`.
+The **one rule that remains**: do NOT re-wire `server/src/routes/route.ts` to
+`bakeoffRoute` — prod `/route` must call `getRouteBrouter` (BRouter-only). The
+prod guarantee is now enforced by structure (nothing in the request path imports
+the experiment), not by remembering never to commit.
 
-When committing, stage **explicit paths** — never `git add -A` / `git add .`,
-which would sweep the bake-off in. (See also the "big untracked data" gotcha:
-`du -sh` before any broad add.)
-
-Entangled but NOT bake-off (these are legit prod improvements — commit on their
-own when ready, separately from the bake-off): `server/src/services/brouter.ts`
-(named turn-by-turn steps + inline greenway coverage on the BRouter path).
+`git add -A` is fine again — the tree is clean and `.gitignore` covers the heavy
+regenerable data/build artifacts recursively. The only staging caveat is the
+generic one: if a parallel session has unrelated work in the tree, stage your own
+change by explicit path. Run `npm run clean` (or `clean -- --all`) to drop
+regenerable artifacts (iOS builds, dist, fetched data, tiles).
 
 ## Shipping
 
 `/route` and `/match` already return `duration_s` (BRouter `total-time` /
 Valhalla trip time); web + iOS both display it as a time estimate. Use the
-`ship-bikenice` skill for multi-surface releases, but review `git status` first
-and stage paths explicitly per the rule above.
+`ship-bikenice` skill for multi-surface releases.

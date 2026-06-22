@@ -17,6 +17,7 @@
     "export:arterials": "tsx scripts/export-arterials.ts",
     "build:tiles": "tsx scripts/build-tiles.ts",
     "reconcile": "tsx scripts/reconcile.ts",
+    "clean": "tsx scripts/clean.ts",
     "test:routes": "tsx tests/routes/run.ts",
     "compare:engines": "tsx scripts/compare-engines.ts",
     "typecheck:server": "npm --workspace server run typecheck",

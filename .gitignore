@@ -6,15 +6,24 @@ build/
 .env
 .env.local
 
-# Fetched data — large, regenerable
-data/pbot/*.geojson
-data/pbot/*.zip
+# TypeScript incremental build caches (never commit — pure noise)
+*.tsbuildinfo
+
+# Xcode build products
+ios/build/
+ios/build-*/
+
+# Fetched data — large, regenerable. Heavy files are ignored RECURSIVELY so
+# dated subdirs (data/osm/2026-06-20/portland.osm.pbf) can never slip past a
+# `git add -A`; small manifests (*.json) and data/reconciled/current stay
+# trackable.
 data/osm/
-data/reconciled/*.pbf
-data/reconciled/*.osm
-data/reconciled/*.geojson
-# Dated reconcile runs (large, regenerable OSM extracts)
+data/tmp/
 data/reconciled/*/
+data/**/*.pbf
+data/**/*.osm
+data/**/*.geojson
+data/**/*.zip
 
 # Basemap tile build — large, regenerable
 data/sources/
@@ -25,9 +34,12 @@ tools/
 routing/valhalla_tiles/
 routing/valhalla_tiles.tar
 routing/*.gph
+routing/**/*.gph
+routing/**/*.pbf
 
 # PMTiles
 web/public/*.pmtiles
+**/*.pmtiles
 
 # Test harness output
 tests/results/
