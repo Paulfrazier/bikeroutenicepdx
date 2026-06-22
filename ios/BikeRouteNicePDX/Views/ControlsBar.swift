@@ -123,16 +123,17 @@ struct ControlsBar: View {
                     }
                 }
                 preferencePicker
-                // One compact action row: Start + Edit split the width;
-                // step-count + Clear trail as icons.
-                HStack(spacing: 10) {
+                // One compact action row. Uniform height comes from a single
+                // controlSize + shared font (no per-button padding): Start + Edit
+                // split the width as text buttons; step-count + Clear trail as
+                // intrinsic-width icon buttons. lineLimit keeps Start on one line.
+                HStack(spacing: 8) {
                     Button {
                         nav.start()
                     } label: {
                         Label("Start", systemImage: "location.north.line.fill")
-                            .font(.headline)
+                            .lineLimit(1)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
@@ -142,6 +143,8 @@ struct ControlsBar: View {
                     }
                     clearAllButton
                 }
+                .controlSize(.large)
+                .font(.subheadline.weight(.semibold))
                 if editPanelOpen {
                     editToolsRow
                     if let hintText = activeReshapeHint {
@@ -271,29 +274,23 @@ struct ControlsBar: View {
                 editPanelOpen ? "Done" : "Edit",
                 systemImage: editPanelOpen ? "checkmark" : "pencil"
             )
-            .font(.subheadline.weight(.medium))
+            .lineLimit(1)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
         }
         .buttonStyle(.bordered)
         .tint(editPanelOpen ? .green : .blue)
     }
 
     /// Compact turn-by-turn opener — a list glyph + the step count, no label.
+    /// Sizing is inherited from the action row (controlSize + font).
     private func directionsButton(stepCount: Int) -> some View {
         Button {
             showDirections = true
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "list.bullet")
-                Text("\(stepCount)")
-            }
-            .font(.subheadline.weight(.medium))
-            .padding(.vertical, 12)
-            .padding(.horizontal, 12)
+            Label("\(stepCount)", systemImage: "list.bullet")
+                .lineLimit(1)
         }
         .buttonStyle(.bordered)
-        .tint(.green)
     }
 
     /// Segmented selector among the three reshape modes — exactly one active at a
@@ -359,9 +356,6 @@ struct ControlsBar: View {
             store.clearAll()
         } label: {
             Image(systemName: "trash")
-                .font(.headline)
-                .padding(.vertical, 12)
-                .padding(.horizontal, 16)
         }
         .buttonStyle(.bordered)
     }
