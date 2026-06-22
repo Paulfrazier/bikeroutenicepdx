@@ -102,7 +102,10 @@ struct ControlsBar: View {
         case .routed:
             VStack(spacing: 10) {
                 if let snapped = store.snapped {
-                    HStack {
+                    // Summary line carries the route stats plus the two utilities
+                    // (turn-list count + clear) so the action row below is free to
+                    // hold only the two primary buttons at full width.
+                    HStack(spacing: 8) {
                         Label(snapped.distanceLabel, systemImage: "bicycle")
                             .font(.headline)
                         if !snapped.durationLabel.isEmpty {
@@ -110,9 +113,8 @@ struct ControlsBar: View {
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.secondary)
                         }
-                        Spacer()
                         if let coverage = snapped.coverage {
-                            Text("🚲 \(Int((coverage * 100).rounded()))% comfortable")
+                            Text("🚲 \(Int((coverage * 100).rounded()))%")
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(.secondary)
                         } else {
@@ -120,14 +122,33 @@ struct ControlsBar: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        Spacer()
+                        if !snapped.steps.isEmpty {
+                            Button {
+                                showDirections = true
+                            } label: {
+                                Label("\(snapped.steps.count)", systemImage: "list.bullet")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .buttonStyle(.borderless)
+                            .tint(.green)
+                        }
+                        Button(role: .destructive) {
+                            store.clearAll()
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title3)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Clear route")
                     }
                 }
                 preferencePicker
-                // One compact action row. Uniform height comes from a single
-                // controlSize + shared font (no per-button padding): Start + Edit
-                // split the width as text buttons; step-count + Clear trail as
-                // intrinsic-width icon buttons. lineLimit keeps Start on one line.
-                HStack(spacing: 8) {
+                // Action row: just the two primary CTAs, equal width via
+                // frame(maxWidth:.infinity), uniform height via controlSize +
+                // shared font. lineLimit keeps both labels on one line.
+                HStack(spacing: 10) {
                     Button {
                         nav.start()
                     } label: {
@@ -138,10 +159,6 @@ struct ControlsBar: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
                     editToggleButton
-                    if let steps = store.snapped?.steps, !steps.isEmpty {
-                        directionsButton(stepCount: steps.count)
-                    }
-                    clearAllButton
                 }
                 .controlSize(.large)
                 .font(.subheadline.weight(.semibold))
@@ -279,18 +296,6 @@ struct ControlsBar: View {
         }
         .buttonStyle(.bordered)
         .tint(editPanelOpen ? .green : .blue)
-    }
-
-    /// Compact turn-by-turn opener — a list glyph + the step count, no label.
-    /// Sizing is inherited from the action row (controlSize + font).
-    private func directionsButton(stepCount: Int) -> some View {
-        Button {
-            showDirections = true
-        } label: {
-            Label("\(stepCount)", systemImage: "list.bullet")
-                .lineLimit(1)
-        }
-        .buttonStyle(.bordered)
     }
 
     /// Segmented selector among the three reshape modes — exactly one active at a
