@@ -1,10 +1,10 @@
 /**
  * OpenRouteService routing client — a bake-off contender.
  *
- * ORS is OSM-based and ships a `cycling-safe` profile that biases toward
- * low-stress, bike-friendly infrastructure — directly comparable to our
- * greenway-preference goal. Free public API, key required (no billing,
- * ~2,000 requests/day).
+ * ORS is OSM-based; we use its `cycling-regular` bike profile (the public API's
+ * general bike router — there is no `cycling-safe` profile) with the default
+ * "recommended" preference, which already biases toward bike-friendly ways.
+ * Free public API on HeiGIT, key required (no billing, ~2,000 requests/day).
  *
  * Like BRouter it returns only geometry, so steps + coverage are synthesized
  * via the shared route-synth helper (street names come from Valhalla map-match).
@@ -13,15 +13,15 @@
  * the bake-off drops ORS for that request instead of failing the whole route.
  */
 
-import { config } from "../config.js";
-import { ValhallaError } from "./valhalla.js";
-import type { RouteResult } from "./valhalla.js";
+import { config } from "../../config.js";
+import { ValhallaError } from "../../services/valhalla.js";
+import type { RouteResult } from "../../services/valhalla.js";
 import { assembleRouteFromGeometry } from "./route-synth.js";
 import { EngineSkip } from "./engine-skip.js";
 
-// ORS has one safety-oriented bike profile; preference is recorded for scoring
-// but doesn't change the profile (no per-preference ORS profile today).
-const ORS_PROFILE = "cycling-safe";
+// ORS bike profile. `preference` is recorded for the bake-off scoring but
+// doesn't change the profile (we keep one comparable ORS route per request).
+const ORS_PROFILE = "cycling-regular";
 
 interface OrsGeoJSON {
   features?: Array<{

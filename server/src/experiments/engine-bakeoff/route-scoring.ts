@@ -19,7 +19,7 @@
  * live request path has no file-system dependency. Keep them in sync.
  */
 
-import type { RouteResult, RouteStep } from "./valhalla.js";
+import type { RouteResult, RouteStep } from "../../services/valhalla.js";
 import type { EngineName } from "./engine-skip.js";
 
 const FORBIDDEN_STREETS: readonly string[] = [

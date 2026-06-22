@@ -17,12 +17,15 @@ export const config = {
    */
   photonUrl: (process.env.PHOTON_URL ?? "https://photon.komoot.io").replace(/\/$/, ""),
   /**
-   * Optional bake-off engines. Both are free public APIs that require a key
-   * (no billing). An engine with no key is automatically excluded from the
-   * per-request bake-off, so the app still works on Valhalla + BRouter alone.
+   * Optional bake-off engines — used ONLY by the offline engine experiment
+   * (server/src/experiments/engine-bakeoff/), never by the live /route path.
+   * Both are free public APIs that require a key (no billing); inert when unset.
    */
   orsApiKey: process.env.ORS_API_KEY ?? "",
-  orsUrl: (process.env.ORS_URL ?? "https://api.openrouteservice.org").replace(/\/$/, ""),
+  // HeiGIT consolidated URL. The legacy api.openrouteservice.org host is
+  // deprecated (announced 2026-04-28) and shuts down 2026-08-24; same key,
+  // same request/response. Trailing slash is stripped (a trailing "/" → 405).
+  orsUrl: (process.env.ORS_URL ?? "https://api.heigit.org/openrouteservice").replace(/\/$/, ""),
   graphhopperApiKey: process.env.GRAPHHOPPER_API_KEY ?? "",
   graphhopperUrl: (process.env.GRAPHHOPPER_URL ?? "https://graphhopper.com").replace(/\/$/, ""),
   /** Allowed CORS origin for the web frontend. */

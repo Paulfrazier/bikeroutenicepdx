@@ -17,13 +17,13 @@
  * the coverage number stays comparable engine-to-engine.
  */
 
-import { traceRouteSteps } from "./valhalla.js";
-import type { RouteResult, RouteStep } from "./valhalla.js";
+import { traceRouteSteps } from "../../services/valhalla.js";
+import type { RouteResult, RouteStep } from "../../services/valhalla.js";
 import {
   classifyPoint,
   isGreenwayEquivalent,
   type NetworkClass,
-} from "./greenway-coverage.js";
+} from "../../services/greenway-coverage.js";
 
 // Equirectangular metres between two [lng,lat] points (city-scale accurate).
 export function distMeters(a: [number, number], b: [number, number]): number {

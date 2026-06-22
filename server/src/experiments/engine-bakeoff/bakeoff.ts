@@ -1,6 +1,11 @@
 /**
  * bakeoff.ts — per-request engine bake-off.
  *
+ * STATUS: SIDE PROJECT — NOT wired into the live server. POST /route stays on
+ * BRouter-only (see routes/route.ts). This is the ready-to-wire orchestrator
+ * kept for the engine experiment; see ./README.md. To activate, swap
+ * getRouteBrouter → bakeoffRoute in routes/route.ts and set the engine keys.
+ *
  * The best bike route isn't from a fixed engine: different origin/destination
  * pairs favor different routers. So on every /route request we fan out to all
  * available engines in parallel, score each with the project's greenway-coverage
@@ -19,10 +24,10 @@
  * quota-limited keyed engines.
  */
 
-import { config } from "../config.js";
-import { getRoute, ValhallaError, type RoutePreference } from "./valhalla.js";
-import type { RouteResult } from "./valhalla.js";
-import { getRouteBrouter } from "./brouter.js";
+import { config } from "../../config.js";
+import { getRoute, ValhallaError, type RoutePreference } from "../../services/valhalla.js";
+import type { RouteResult } from "../../services/valhalla.js";
+import { getRouteBrouter } from "../../services/brouter.js";
 import { getRouteOrs } from "./ors.js";
 import { getRouteGraphHopper } from "./graphhopper.js";
 import { scoreRoutes } from "./route-scoring.js";

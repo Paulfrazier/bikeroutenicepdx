@@ -26,10 +26,10 @@ import { fileURLToPath } from "node:url";
 
 import { getRoute } from "../server/src/services/valhalla.js";
 import { getRouteBrouter } from "../server/src/services/brouter.js";
-import { getRouteOrs } from "../server/src/services/ors.js";
-import { getRouteGraphHopper } from "../server/src/services/graphhopper.js";
-import { scoreRoutes } from "../server/src/services/route-scoring.js";
-import { EngineSkip, type EngineName } from "../server/src/services/engine-skip.js";
+import { getRouteOrs } from "../server/src/experiments/engine-bakeoff/ors.js";
+import { getRouteGraphHopper } from "../server/src/experiments/engine-bakeoff/graphhopper.js";
+import { scoreRoutes } from "../server/src/experiments/engine-bakeoff/route-scoring.js";
+import { EngineSkip, type EngineName } from "../server/src/experiments/engine-bakeoff/engine-skip.js";
 import type { RouteResult } from "../server/src/services/valhalla.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -147,25 +147,47 @@ async function runOD(od: OD): Promise<void> {
   );
 }
 
+/** Parse "lng,lat" → [lng, lat], or null. */
+function parseLngLat(s: string | undefined): [number, number] | null {
+  if (!s) return null;
+  const [lng, lat] = s.split(",").map(Number);
+  return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+}
+
 async function main(): Promise<void> {
   const canonical: CanonicalRoute[] = JSON.parse(
     await readFile(CANONICAL_PATH, "utf8")
   );
 
-  const ods: OD[] = [
-    {
-      id: "00-home-trackers",
-      name: "Home (3703 NE 22nd) → Trackers Earth SE",
-      from: [-122.6434, 45.5497],
-      to: [-122.6505, 45.4942],
-    },
-    ...canonical.map((c) => ({
-      id: c.id,
-      name: c.name,
-      from: [c.from.lng, c.from.lat] as [number, number],
-      to: [c.to.lng, c.to.lat] as [number, number],
-    })),
-  ];
+  // Single-OD override: set OD_FROM + OD_TO ("lng,lat") to run just that route
+  // (avoids burning keyed-engine quota on the whole canonical set).
+  const odFrom = parseLngLat(process.env.OD_FROM);
+  const odTo = parseLngLat(process.env.OD_TO);
+
+  const ods: OD[] =
+    odFrom && odTo
+      ? [
+          {
+            id: process.env.OD_ID ?? "custom",
+            name: process.env.OD_NAME ?? "Custom OD",
+            from: odFrom,
+            to: odTo,
+          },
+        ]
+      : [
+          {
+            id: "00-home-trackers",
+            name: "Home (3703 NE 22nd) → Trackers Earth SE",
+            from: [-122.6434, 45.5497],
+            to: [-122.6505, 45.4942],
+          },
+          ...canonical.map((c) => ({
+            id: c.id,
+            name: c.name,
+            from: [c.from.lng, c.from.lat] as [number, number],
+            to: [c.to.lng, c.to.lat] as [number, number],
+          })),
+        ];
 
   console.log(`BikeRouteNicePDX — engine bake-off`);
   console.log(`preference: ${PREFERENCE}`);

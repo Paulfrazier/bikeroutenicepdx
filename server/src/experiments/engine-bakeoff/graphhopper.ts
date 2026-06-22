@@ -13,9 +13,9 @@
  * drops GraphHopper for that request rather than failing the route.
  */
 
-import { config } from "../config.js";
-import { ValhallaError } from "./valhalla.js";
-import type { RouteResult } from "./valhalla.js";
+import { config } from "../../config.js";
+import { ValhallaError } from "../../services/valhalla.js";
+import type { RouteResult } from "../../services/valhalla.js";
 import { assembleRouteFromGeometry } from "./route-synth.js";
 import { EngineSkip } from "./engine-skip.js";
 
