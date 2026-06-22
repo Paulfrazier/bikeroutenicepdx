@@ -111,22 +111,31 @@ export class PhotonError extends Error {
 // Photon result → our type mapping
 // ---------------------------------------------------------------------------
 
-function mapResultType(p: PhotonFeature["properties"]): string {
-  const { osm_key, osm_value, type } = p;
-
-  if (type === "house") return "address";
-  if (type === "street" || osm_key === "highway") return "street";
-
-  // POIs: surface the specific kind (park, cafe, pharmacy…) as the badge.
-  // "yes" is a useless OSM placeholder; humanize snake_case.
-  if (
+function isPoiKey(osm_key?: string): boolean {
+  return (
     osm_key === "leisure" ||
     osm_key === "amenity" ||
     osm_key === "tourism" ||
-    osm_key === "shop"
-  ) {
+    osm_key === "shop" ||
+    osm_key === "office" ||
+    osm_key === "craft" ||
+    osm_key === "healthcare"
+  );
+}
+
+function mapResultType(p: PhotonFeature["properties"]): string {
+  const { osm_key, osm_value, type } = p;
+
+  // POIs first: surface the specific kind (supermarket, park, cafe…) as the badge.
+  // MUST come before the type==="house" check — Photon labels a POI that has a
+  // street number as type:"house" too (e.g. Fred Meyer = shop/supermarket, "house").
+  // "yes" is a useless OSM placeholder; humanize snake_case.
+  if (isPoiKey(osm_key)) {
     return osm_value && osm_value !== "yes" ? osm_value.replace(/_/g, " ") : "poi";
   }
+
+  if (type === "house") return "address";
+  if (type === "street" || osm_key === "highway") return "street";
 
   if (type === "district" || type === "locality" || osm_key === "place") {
     if (osm_value === "neighbourhood" || osm_value === "suburb" || osm_value === "quarter") {
@@ -150,10 +159,13 @@ function buildLabel(p: PhotonFeature["properties"]): { name: string; context?: s
   const street = p.street;
   const houseNumber = p.housenumber;
   const isStreet = mapResultType(p) === "street";
-  const isHouse = p.type === "house";
 
-  // A named feature is a POI / park / named place whose own name is the primary line.
-  const isNamedFeature = !isStreet && !isHouse && !!p.name;
+  // A named feature is a POI / park / named place whose own name is the primary
+  // line. Do NOT exclude type:"house" here — Photon labels a named POI that has a
+  // street number as "house" (e.g. Fred Meyer), and we still want its name shown.
+  // Plain residential addresses carry no `name`, so they fall through to the
+  // street-address branch below.
+  const isNamedFeature = !isStreet && !!p.name;
 
   const streetAddress =
     houseNumber && street ? shorten(`${houseNumber} ${street}`) : street ? shorten(street) : undefined;
@@ -191,18 +203,22 @@ function reorderByHouseNumber(features: PhotonFeature[], query: string): PhotonF
   return [...matches, ...rest];
 }
 
-// ---------------------------------------------------------------------------
-// Public search function
-// ---------------------------------------------------------------------------
+// Photon does fairly strict multi-term matching, so a natural "name + street/area"
+// query ("salt and straw hawthorne") returns NOTHING when the qualifier isn't part
+// of the POI's OSM record — even though "salt and straw" alone resolves. Relax by
+// dropping the trailing qualifier token (and any dangling connector like "on"/"in").
+const CONNECTORS = new Set(["on", "in", "near", "at", "by", "the"]);
 
-export async function photonSearch(
-  query: string,
-  limit: number = 5
-): Promise<GeocodingResult[]> {
-  const key = cacheKey(query, limit);
-  const cached = cacheGet(key);
-  if (cached) return cached;
+function relaxQuery(query: string): string | null {
+  const toks = query.trim().split(/\s+/);
+  if (toks.length <= 1) return null;
+  toks.pop(); // the trailing token is usually the street/area qualifier
+  while (toks.length > 1 && CONNECTORS.has(toks[toks.length - 1].toLowerCase())) toks.pop();
+  const relaxed = toks.join(" ");
+  return relaxed && relaxed !== query ? relaxed : null;
+}
 
+async function fetchPhoton(query: string, limit: number): Promise<GeocodingResult[]> {
   const params = new URLSearchParams({
     q: query,
     lang: "en",
@@ -240,11 +256,34 @@ export async function photonSearch(
   // to the top — stable, so Photon's relevance order is otherwise preserved.
   const features = reorderByHouseNumber(raw.features ?? [], query);
 
-  const results: GeocodingResult[] = features.map((f) => {
+  return features.map((f) => {
     const { name, context } = buildLabel(f.properties);
     const [lng, lat] = f.geometry.coordinates;
     return { name, context, lng, lat, type: mapResultType(f.properties) };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Public search function
+// ---------------------------------------------------------------------------
+
+export async function photonSearch(
+  query: string,
+  limit: number = 5
+): Promise<GeocodingResult[]> {
+  const key = cacheKey(query, limit);
+  const cached = cacheGet(key);
+  if (cached) return cached;
+
+  let results = await fetchPhoton(query, limit);
+
+  // Recall fallback: a "name + street" query that matched nothing often resolves
+  // once the trailing qualifier is dropped. Only fires on an empty result set, so
+  // the common (non-empty) path costs exactly one request.
+  if (results.length === 0) {
+    const relaxed = relaxQuery(query);
+    if (relaxed) results = await fetchPhoton(relaxed, limit);
+  }
 
   cacheSet(key, results);
   return results;
