@@ -12,6 +12,10 @@ struct ControlsBar: View {
     /// behind one "Edit route" toggle so "Start ride" stays the clear primary.
     @State private var editPanelOpen = false
 
+    /// Drives the "Clear the current route?" confirmation before the ✕ wipes a
+    /// routed trip (mirrors the web endpoint-clear confirm).
+    @State private var showClearConfirm = false
+
     var body: some View {
         VStack(spacing: 12) {
             pinChips
@@ -22,6 +26,14 @@ struct ControlsBar: View {
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
         .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        .confirmationDialog(
+            "Clear the current route?",
+            isPresented: $showClearConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Clear route", role: .destructive) { store.clearAll() }
+            Button("Cancel", role: .cancel) {}
+        }
         // Auto-close the edit panel when the route goes away (clear / new pins).
         // Draw mode (.drawing) keeps it open so it's still open on return.
         .onChange(of: store.phase) { _, newPhase in
@@ -134,7 +146,7 @@ struct ControlsBar: View {
                             .tint(.green)
                         }
                         Button(role: .destructive) {
-                            store.clearAll()
+                            showClearConfirm = true
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.title3)
