@@ -1,12 +1,15 @@
 /**
  * GET /search?q=<query>&limit=<n>
  *
- * Geocoding endpoint backed by Nominatim, biased to Portland metro bbox.
+ * As-you-type geocoding, biased to Portland metro. Primary backend is Photon
+ * (komoot) — fuzzy prefix matching + lat/lon proximity bias, no 1-rps serializer.
+ * Nominatim is the fallback when Photon errors (network / HTTP / bad JSON).
  * Default limit=5, max 10.
  */
 
 import { Hono } from "hono";
 import { geocodeSearch, NominatimError } from "../services/nominatim.js";
+import { photonSearch, PhotonError } from "../services/photon.js";
 
 const app = new Hono();
 
@@ -35,15 +38,25 @@ app.get("/", async (c) => {
     limit = Math.min(parsed, 10);
   }
 
+  const query = q.trim();
   try {
-    const results = await geocodeSearch(q.trim(), limit);
-    return c.json(results);
-  } catch (err) {
-    if (err instanceof NominatimError) {
-      return c.json({ error: err.message, code: err.code }, err.httpStatus);
+    // Primary: Photon (fast typeahead, proximity-biased to Portland).
+    return c.json(await photonSearch(query, limit));
+  } catch (photonErr) {
+    if (!(photonErr instanceof PhotonError)) {
+      const message = photonErr instanceof Error ? photonErr.message : "Internal server error";
+      return c.json({ error: message, code: "internal_error" }, 500);
     }
-    const message = err instanceof Error ? err.message : "Internal server error";
-    return c.json({ error: message, code: "internal_error" }, 500);
+    // Photon is down — fall back to Nominatim (slower, but keeps search working).
+    try {
+      return c.json(await geocodeSearch(query, limit));
+    } catch (err) {
+      if (err instanceof NominatimError) {
+        return c.json({ error: err.message, code: err.code }, err.httpStatus);
+      }
+      const message = err instanceof Error ? err.message : "Internal server error";
+      return c.json({ error: message, code: "internal_error" }, 500);
+    }
   }
 });
 

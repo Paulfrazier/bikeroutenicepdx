@@ -193,7 +193,7 @@ const STREET_SUFFIX_ABBR: Array<[RegExp, string]> = [
   [/\bHighway\b/gi, "Hwy"],
 ];
 
-function shorten(value: string): string {
+export function shorten(value: string): string {
   let out = value;
   for (const [re, abbr] of CARDINAL_ABBR) out = out.replace(re, abbr);
   for (const [re, abbr] of STREET_SUFFIX_ABBR) out = out.replace(re, abbr);
