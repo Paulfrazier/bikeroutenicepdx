@@ -67,19 +67,21 @@ export function RouteDrawer({
         reshaped={reshaped}
       />
 
-      <button type="button" className="start-nav-btn" onClick={onStartNav}>
-        ▲ Start ride
-      </button>
+      <div className="route-actions">
+        <button type="button" className="start-nav-btn" onClick={onStartNav}>
+          ▲ Start ride
+        </button>
 
-      <button
-        type="button"
-        className={`edit-route-btn ${editOpen ? "edit-route-btn--active" : ""}`}
-        aria-pressed={editOpen}
-        aria-expanded={editOpen}
-        onClick={onToggleEdit}
-      >
-        {editOpen ? "✓ Done editing" : "✎ Edit route"}
-      </button>
+        <button
+          type="button"
+          className={`edit-route-btn ${editOpen ? "edit-route-btn--active" : ""}`}
+          aria-pressed={editOpen}
+          aria-expanded={editOpen}
+          onClick={onToggleEdit}
+        >
+          {editOpen ? "✓ Done editing" : "✎ Edit route"}
+        </button>
+      </div>
 
       {editOpen && (
         <div className="edit-tools" role="group" aria-label="Reshape mode">
