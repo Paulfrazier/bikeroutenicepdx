@@ -123,13 +123,13 @@ struct ControlsBar: View {
                     }
                 }
                 preferencePicker
-                // Primary CTA + edit toggle share one row to keep the panel
-                // compact; Clear sits as a trailing icon.
+                // One compact action row: Start + Edit split the width;
+                // step-count + Clear trail as icons.
                 HStack(spacing: 10) {
                     Button {
                         nav.start()
                     } label: {
-                        Label("Start ride", systemImage: "location.north.line.fill")
+                        Label("Start", systemImage: "location.north.line.fill")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
@@ -137,19 +137,10 @@ struct ControlsBar: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
                     editToggleButton
-                    clearAllButton
-                }
-                if let steps = store.snapped?.steps, !steps.isEmpty {
-                    Button {
-                        showDirections = true
-                    } label: {
-                        Label("Directions (\(steps.count) steps)", systemImage: "list.bullet.rectangle")
-                            .font(.subheadline.weight(.medium))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
+                    if let steps = store.snapped?.steps, !steps.isEmpty {
+                        directionsButton(stepCount: steps.count)
                     }
-                    .buttonStyle(.bordered)
-                    .tint(.green)
+                    clearAllButton
                 }
                 if editPanelOpen {
                     editToolsRow
@@ -277,7 +268,7 @@ struct ControlsBar: View {
             }
         } label: {
             Label(
-                editPanelOpen ? "Done editing" : "Edit route",
+                editPanelOpen ? "Done" : "Edit",
                 systemImage: editPanelOpen ? "checkmark" : "pencil"
             )
             .font(.subheadline.weight(.medium))
@@ -286,6 +277,23 @@ struct ControlsBar: View {
         }
         .buttonStyle(.bordered)
         .tint(editPanelOpen ? .green : .blue)
+    }
+
+    /// Compact turn-by-turn opener — a list glyph + the step count, no label.
+    private func directionsButton(stepCount: Int) -> some View {
+        Button {
+            showDirections = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "list.bullet")
+                Text("\(stepCount)")
+            }
+            .font(.subheadline.weight(.medium))
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+        }
+        .buttonStyle(.bordered)
+        .tint(.green)
     }
 
     /// Segmented selector among the three reshape modes — exactly one active at a

@@ -69,7 +69,7 @@ export function RouteDrawer({
 
       <div className="route-actions">
         <button type="button" className="start-nav-btn" onClick={onStartNav}>
-          ▲ Start ride
+          ▲ Start
         </button>
 
         <button
@@ -79,7 +79,7 @@ export function RouteDrawer({
           aria-expanded={editOpen}
           onClick={onToggleEdit}
         >
-          {editOpen ? "✓ Done editing" : "✎ Edit route"}
+          {editOpen ? "✓ Done" : "✎ Edit"}
         </button>
       </div>
 
