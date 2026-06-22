@@ -123,17 +123,22 @@ struct ControlsBar: View {
                     }
                 }
                 preferencePicker
-                // Primary CTA: launch live turn-by-turn for the planned route.
-                Button {
-                    nav.start()
-                } label: {
-                    Label("Start ride", systemImage: "location.north.line.fill")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
+                // Primary CTA + edit toggle share one row to keep the panel
+                // compact; Clear sits as a trailing icon.
+                HStack(spacing: 10) {
+                    Button {
+                        nav.start()
+                    } label: {
+                        Label("Start ride", systemImage: "location.north.line.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    editToggleButton
+                    clearAllButton
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
                 if let steps = store.snapped?.steps, !steps.isEmpty {
                     Button {
                         showDirections = true
@@ -145,10 +150,6 @@ struct ControlsBar: View {
                     }
                     .buttonStyle(.bordered)
                     .tint(.green)
-                }
-                HStack(spacing: 12) {
-                    clearAllButton
-                    editToggleButton
                 }
                 if editPanelOpen {
                     editToolsRow
