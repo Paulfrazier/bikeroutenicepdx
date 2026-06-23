@@ -43,13 +43,15 @@ struct ManualSegment: Identifiable {
     }
 }
 
-/// Greenway-vs-speed preference for routing. Maps to the server's `use_roads`.
+/// Greenway-vs-speed preference for routing. Sent to the server as `preference`;
+/// "ultra" prefers greenways/bike-infra hardest (custom BRouter safety-ultra).
 enum RoutePreference: String, CaseIterable, Identifiable {
-    case comfort, balanced, fast
+    case ultra, comfort, balanced, fast
     var id: String { rawValue }
     /// Short label for the segmented control.
     var label: String {
         switch self {
+        case .ultra: return "Ultra"
         case .comfort: return "Comfort"
         case .balanced: return "Balanced"
         case .fast: return "Fast"
@@ -82,6 +84,10 @@ final class RouteStore {
 
     // Draw mode
     var isDrawMode = false
+    /// True while the active finger-draw is creating a CONNECTOR (a saved global
+    /// map-fix) rather than a per-route ManualSegment. The stroke is saved to
+    /// `Connectors` on finish instead of being spliced as a one-off segment.
+    var isConnectorDrawMode = false
     var drawnTrace: [CLLocationCoordinate2D] = []
 
     /// Ordered drag-to-reshape waypoints (stable id + precise flag). Each
@@ -198,6 +204,17 @@ final class RouteStore {
             forName: .streetRatingsChanged, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in await self?.reclassifyForRatingChange() }
+        }
+        // A personal-connector change (drawn/renamed/deleted) must rebuild the
+        // classifier's connector index, then re-splice + recolor the route on
+        // screen so a freshly drawn fix takes effect everywhere at once.
+        NotificationCenter.default.addObserver(
+            forName: .connectorsChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await BikeFriendliness.shared.reloadConnectors()
+                await self?.recomputeDisplay()
+            }
         }
     }
 
@@ -372,11 +389,37 @@ final class RouteStore {
         return result
     }
 
-    /// Rebuild the display route from the auto route + manual segments, classify
-    /// it, and publish to `snapped`. No server call.
+    /// Connectors (community + personal map-fixes) whose BOTH endpoints lie within
+    /// `maxMeters` of the route — the ones to splice into it. Returned as
+    /// `ManualSegment`s so they fold into `applyManualSegments()` exactly like a
+    /// hand-drawn stretch. Mirrors web `connectorSegmentsForRoute`.
+    static func connectorSegmentsForRoute(
+        _ routeCoords: [CLLocationCoordinate2D],
+        maxMeters: Double = 30
+    ) -> [ManualSegment] {
+        guard routeCoords.count >= 2 else { return [] }
+        var candidates: [[CLLocationCoordinate2D]] = CommunityConnectors.lines()
+        candidates.append(contentsOf: Connectors.list().map { $0.coords })
+        var out: [ManualSegment] = []
+        for coords in candidates {
+            guard coords.count >= 2, let head = coords.first, let tail = coords.last else { continue }
+            if GeoMath.distanceToPolyline(head, routeCoords) <= maxMeters
+                && GeoMath.distanceToPolyline(tail, routeCoords) <= maxMeters {
+                out.append(ManualSegment(coords: coords))
+            }
+        }
+        return out
+    }
+
+    /// Rebuild the display route from the auto route + manual segments +
+    /// qualifying connectors, classify it, and publish to `snapped`. No server call.
     private func recomputeDisplay() async {
         guard let auto = autoRoute else { snapped = nil; return }
-        let coords = Self.applyManualSegments(auto.coordinates, manualSegments)
+        // Fold in connectors that pass near both ends of the auto route alongside
+        // the hand-drawn manual segments (web parity: applyManualSegments(auto,
+        // [...manualSegments, ...connectorSegmentsForRoute(auto)])).
+        let connectors = Self.connectorSegmentsForRoute(auto.coordinates)
+        let coords = Self.applyManualSegments(auto.coordinates, manualSegments + connectors)
         var base = SnappedRoute(coordinates: coords, distanceMeters: GeoMath.length(coords))
         // Carry the server's time estimate + turn-by-turn steps from the auto
         // route so the duration label and Directions button survive the rebuild.
@@ -400,10 +443,28 @@ final class RouteStore {
         phase = .drawing
     }
 
+    /// Enter CONNECTOR-draw mode: a stroke drawn now is saved as a global
+    /// connector (a comfortable `path` map-fix) instead of a per-route segment.
+    /// Unlike `enterDrawMode`, this needs no existing route — connectors are drawn
+    /// standalone and apply to every future route. Mutually exclusive with the
+    /// other reshape modes.
+    func enterConnectorDrawMode() {
+        autoRouteTask?.cancel()
+        isEditMode = false
+        isCorridorMode = false
+        clearCorridorPick()
+        isConnectorDrawMode = true
+        isDrawMode = true
+        drawnTrace = []
+        errorMessage = nil
+        phase = .drawing
+    }
+
     /// Clear manual segments (and the drawn trace), keep the auto route + pins.
     func clearDraw() {
         autoRouteTask?.cancel()
         isDrawMode = false
+        isConnectorDrawMode = false
         drawnTrace = []
         manualSegments = []
         errorMessage = nil
@@ -426,6 +487,7 @@ final class RouteStore {
         searchResults = []
         errorMessage = nil
         isDrawMode = false
+        isConnectorDrawMode = false
         isCorridorMode = false
         clearCorridorPick()
         phase = .idle
@@ -586,10 +648,20 @@ final class RouteStore {
     /// changes re-splice it. Too short a stroke is dropped.
     func finishDrawing() async {
         isDrawMode = false
+        let wasConnector = isConnectorDrawMode
+        isConnectorDrawMode = false
         let stroke = drawnTrace
         drawnTrace = []
         guard stroke.count >= 2 else {
-            phase = autoRoute != nil ? .routed : .drawing
+            if autoRoute != nil { phase = .routed } else { recomputeIdlePhase() }
+            return
+        }
+        if wasConnector {
+            // Save the stroke as a global connector. The `.connectorsChanged`
+            // observer rebuilds the classifier index and re-splices/recolors the
+            // route on screen, so qualifying routes pick it up immediately.
+            Connectors.add(coords: stroke)
+            if autoRoute != nil { phase = .routed } else { recomputeIdlePhase() }
             return
         }
         manualSegments.append(ManualSegment(coords: stroke))

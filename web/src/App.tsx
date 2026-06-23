@@ -19,6 +19,13 @@ import {
   useHasRatings,
 } from "./components/StreetRatings";
 import { setRating, removeRating, type StreetRating } from "./streetRatings";
+import {
+  ConnectorsButton,
+  ConnectorsPanel,
+  useConnectors,
+  useConnectorsVersion,
+} from "./components/Connectors";
+import { addConnector } from "./connectors";
 import { MapBoundary } from "./components/MapBoundary";
 import { useRoute } from "./hooks/useRoute";
 import { useFriendliness } from "./hooks/useFriendliness";
@@ -28,6 +35,7 @@ import {
   toRouteClassFeatureCollection,
   snapToNetwork,
   nearestStreetName,
+  connectorSegmentsForRoute,
 } from "./friendliness";
 import { arcLengthAt, haversineLength, applyManualSegments, MAX_VIAS } from "./geo";
 import { fetchCorridor } from "./api";
@@ -96,6 +104,16 @@ export default function App() {
   );
   const personalized = useHasRatings();
 
+  // ── Connectors (personal map-fixes) ─────────────────────────────────────────
+  // The 🔧 panel manages saved connectors; "connector draw mode" lets you draw a
+  // fix on the map (same freehand gesture as a manual segment). A saved connector
+  // is global, rendered as a teal overlay, and auto-spliced into routes that pass
+  // near both its ends (see activeCoords + connectorSegmentsForRoute).
+  const [connectorsPanelOpen, setConnectorsPanelOpen] = useState(false);
+  const [connectorDrawMode, setConnectorDrawMode] = useState(false);
+  const connectors = useConnectors();
+  const connectorsVersion = useConnectorsVersion();
+
   // ── Edit panel ─────────────────────────────────────────────────────────────
   // The three reshape tools (drag / draw / through-a-section) are grouped behind
   // one "Edit route" toggle. `editOpen` controls the mode selector's visibility;
@@ -115,6 +133,7 @@ export default function App() {
       setEditing(tool === "drag");
       setDrawMode(tool === "draw");
       setCorridorMode(tool === "through");
+      setConnectorDrawMode(false);
       clearCorridorPick();
     },
     [clearCorridorPick]
@@ -133,6 +152,7 @@ export default function App() {
       setEditing(true);
       setDrawMode(false);
       setCorridorMode(false);
+      setConnectorDrawMode(false);
       clearCorridorPick();
       return true;
     });
@@ -146,6 +166,7 @@ export default function App() {
     setEditing(false);
     setDrawMode(false);
     setCorridorMode(false);
+    setConnectorDrawMode(false);
     clearCorridorPick();
     setRatingTarget(null);
     setRatingMode(true);
@@ -154,6 +175,30 @@ export default function App() {
   const stopRatingOnMap = useCallback(() => {
     setRatingMode(false);
     setRatingTarget(null);
+  }, []);
+
+  // Enter connector draw mode (from the 🔧 panel's "draw a fix" CTA): close the
+  // panel, abandon every other mode, then arm the freehand draw. The next stroke
+  // on the map becomes a saved connector (mirrors startRatingOnMap).
+  const enterConnectorDraw = useCallback(() => {
+    setConnectorsPanelOpen(false);
+    setRatingsPanelOpen(false);
+    setEditOpen(false);
+    setEditing(false);
+    setDrawMode(false);
+    setCorridorMode(false);
+    clearCorridorPick();
+    setRatingMode(false);
+    setRatingTarget(null);
+    setConnectorDrawMode(true);
+  }, [clearCorridorPick]);
+
+  // Finished a connector stroke: save it globally (it's now classified as a
+  // comfortable path + spliced into qualifying routes), then exit draw mode.
+  const handleDrawConnector = useCallback((coords: LngLat[]) => {
+    if (coords.length < 2) return;
+    addConnector(coords);
+    setConnectorDrawMode(false);
   }, []);
 
   // Apply (or clear) a rating for the currently tapped street; keep the target so
@@ -176,6 +221,7 @@ export default function App() {
     setEditing(false);
     setDrawMode(false);
     setCorridorMode(false);
+    setConnectorDrawMode(false);
     clearCorridorPick();
   }, [from, to, clearCorridorPick]);
 
@@ -197,25 +243,30 @@ export default function App() {
   // ── Bike-friendliness classification (client-side) ────────────────────────
   // Classify the active (snapped) route geometry so tiers + coverage update
   // after every reshape re-route.
-  // Display geometry = the auto route with hand-drawn segments spliced in.
+  // Display geometry = the auto route with hand-drawn segments AND any qualifying
+  // connectors (those whose both ends lie near the route) spliced in. Connectors
+  // re-splice whenever the store version changes, so a freshly drawn/deleted fix
+  // updates the line at once.
   const activeCoords = useMemo<LngLat[] | null>(() => {
     const auto = displayRoute?.geometry.coordinates ?? null;
     if (!auto) return null;
-    // No manual splices while navigating — the nav route is authoritative.
-    return manualSegments.length && !nav.navigating
-      ? applyManualSegments(auto, manualSegments)
-      : auto;
-  }, [displayRoute, manualSegments, nav.navigating]);
+    // No splices while navigating — the nav route is authoritative.
+    if (nav.navigating) return auto;
+    const splices = [...manualSegments, ...connectorSegmentsForRoute(auto)];
+    return splices.length ? applyManualSegments(auto, splices) : auto;
+    // connectorsVersion gates re-splicing on store changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayRoute, manualSegments, nav.navigating, connectorsVersion]);
 
-  // Once a manual stretch is spliced, the server distance no longer matches —
-  // measure the displayed geometry instead.
-  const displayDistanceM = useMemo(
-    () =>
-      manualSegments.length && activeCoords
-        ? haversineLength(activeCoords)
-        : route?.distance_m ?? 0,
-    [manualSegments, activeCoords, route]
-  );
+  // Once anything is spliced (a hand-drawn stretch or a connector) the server
+  // distance no longer matches — measure the displayed geometry instead. When no
+  // splice applied, activeCoords is the server geometry verbatim (same ref).
+  const displayDistanceM = useMemo(() => {
+    const auto = displayRoute?.geometry.coordinates ?? null;
+    return activeCoords && activeCoords !== auto
+      ? haversineLength(activeCoords)
+      : route?.distance_m ?? 0;
+  }, [activeCoords, displayRoute, route]);
 
   // Insert a fresh waypoint along the route at arc-length position. `precise`
   // anchors are pinned exactly where dropped; normal ones snap to the nearest
@@ -419,6 +470,9 @@ export default function App() {
     (lngLat: LngLat) => {
       // Map taps are inert while navigating (the HUD owns the screen).
       if (nav.navigating) return;
+      // Connector draw mode owns the gesture (a freehand drag); a bare tap is a
+      // no-op so it can't drop an endpoint mid-draw.
+      if (connectorDrawMode) return;
       // Rating mode: tap a street → resolve its name → show the rating picker.
       // Endpoints are untouched while rating.
       if (ratingMode) {
@@ -454,11 +508,12 @@ export default function App() {
         setVias([]);
         setManualSegments([]);
         setDrawMode(false);
+        setConnectorDrawMode(false);
         clickCount.current = -1; // will be incremented to 0 below
       }
       clickCount.current += 1;
     },
-    [ratingMode, corridorMode, corridorA, resolveCorridorPick, nav.navigating]
+    [ratingMode, corridorMode, corridorA, resolveCorridorPick, nav.navigating, connectorDrawMode]
   );
 
   // Also wire the reusable handler from Map (for external use, e.g. tests)
@@ -590,6 +645,9 @@ export default function App() {
           manualSegments={manualSegments}
           onDrawSegment={handleDrawSegment}
           onManualNudge={handleManualNudge}
+          connectorDrawMode={connectorDrawMode}
+          onDrawConnector={handleDrawConnector}
+          connectors={connectors}
           corridorA={corridorA}
           corridorB={corridorB}
           corridorPreview={corridorPreview}
@@ -602,6 +660,10 @@ export default function App() {
 
         {!nav.navigating && (
           <StreetRatingsButton onClick={() => setRatingsPanelOpen(true)} />
+        )}
+
+        {!nav.navigating && (
+          <ConnectorsButton onClick={() => setConnectorsPanelOpen(true)} />
         )}
 
         {/* ── Rate-a-street pick banner ── */}
@@ -654,6 +716,24 @@ export default function App() {
           </div>
         )}
 
+        {/* ── Connector draw banner ── */}
+        {!nav.navigating && connectorDrawMode && (
+          <div className="corridor-bar" role="status" aria-live="polite">
+            <span className="corridor-bar__msg">
+              Drag over the gap to draw a <strong>fix</strong> — lift to save it.
+            </span>
+            <div className="corridor-bar__actions">
+              <button
+                type="button"
+                className="corridor-bar__btn"
+                onClick={() => setConnectorDrawMode(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── Mobile bottom drawer ── */}
         {!nav.navigating && hasRoute && (
           <div
@@ -700,6 +780,13 @@ export default function App() {
         open={ratingsPanelOpen}
         onClose={() => setRatingsPanelOpen(false)}
         onRateOnMap={startRatingOnMap}
+      />
+
+      {/* ── Connectors ("my fixes") panel ── */}
+      <ConnectorsPanel
+        open={connectorsPanelOpen}
+        onClose={() => setConnectorsPanelOpen(false)}
+        onDrawOnMap={enterConnectorDraw}
       />
 
       {/* ── Help overlays ── */}

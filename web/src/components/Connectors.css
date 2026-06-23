@@ -1,0 +1,124 @@
+/* Connectors.css — "My fixes" FAB + manage panel.
+ *
+ * Mirrors the ratings FAB/modal conventions (see .ratings-fab / .ratings-* in
+ * styles.css). Co-located so the connector UI is self-contained. Reuses the
+ * shared .guide-* card chrome and .corridor-bar banner from styles.css. */
+
+/* Floating 🔧 button — stacked UNDER the ratings ★ FAB (which sits at
+ * 16 + 48px). Same size/shape as .ratings-fab; teal to match the personal
+ * connector overlay color. */
+.connectors-fab {
+  position: absolute;
+  top: calc(16px + 48px + 48px + env(safe-area-inset-top, 0px));
+  left: 16px;
+  z-index: 15;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: #0d9488;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: background var(--transition), transform var(--transition);
+}
+.connectors-fab:hover { background: var(--color-surface); transform: scale(1.05); }
+.connectors-fab:active { transform: scale(0.96); }
+/* Dot badge: the user has at least one personal connector. */
+.connectors-fab__dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #0d9488;
+  border: 1.5px solid var(--color-bg);
+}
+
+/* Manage panel body (reuses .guide-* card chrome). */
+.connectors-intro {
+  margin: 0 0 12px;
+  font-size: 0.9rem;
+  color: var(--color-text-muted, #64748b);
+}
+.connectors-empty {
+  margin: 8px 0;
+  font-size: 0.9rem;
+  color: var(--color-text-muted, #64748b);
+}
+.connectors-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.connectors-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.connectors-row:last-child { border-bottom: none; padding-bottom: 0; }
+.connectors-row__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.connectors-row__swatch {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 4px;
+  border-radius: 2px;
+  background: #0d9488;
+}
+.connectors-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.connectors-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.connectors-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.connectors-btn:hover { background: var(--color-surface); }
+.connectors-btn:disabled { opacity: 0.55; cursor: default; }
+.connectors-btn--danger { color: #dc2626; }
+.connectors-btn--primary {
+  border-color: #0d9488;
+  color: #0d9488;
+}
+.connectors-status {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.connectors-status--pending { color: #64748b; }
+.connectors-status--done { color: #2e9e48; }
+.connectors-status--error { color: #dc2626; }
+.connectors-status a { color: inherit; }

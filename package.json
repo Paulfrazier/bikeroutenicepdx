@@ -17,6 +17,7 @@
     "export:arterials": "tsx scripts/export-arterials.ts",
     "export:speeds": "tsx scripts/export-speeds.ts",
     "export:high-crash": "tsx scripts/export-high-crash.ts",
+    "export:community-fixes": "tsx scripts/export-community-fixes.ts",
     "build:tiles": "tsx scripts/build-tiles.ts",
     "reconcile": "tsx scripts/reconcile.ts",
     "clean": "tsx scripts/clean.ts",

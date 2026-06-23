@@ -28,6 +28,14 @@ final class CorridorPolyline: MKPolyline {}
 /// section reads clearly over the colored bike-network overlay.
 final class CorridorCasingPolyline: MKPolyline {}
 
+/// A persistent "your fix" connector (personal or community map-fix), rendered in
+/// teal (#0d9488). Drawn as a soft glow underlay + a solid teal line so the fix
+/// reads as a distinct, always-on layer beneath the planned route.
+final class ConnectorPolyline: MKPolyline {}
+/// Wide, low-alpha teal underlay faking a soft glow under `ConnectorPolyline`
+/// (MKPolylineRenderer has no real blur), lifting the fix off the basemap.
+final class ConnectorGlowPolyline: MKPolyline {}
+
 /// One contiguous same-class run of the routed line. The route is rendered as a
 /// sequence of these so its color matches the bike-map legend along its length.
 final class RouteTierPolyline: MKPolyline {

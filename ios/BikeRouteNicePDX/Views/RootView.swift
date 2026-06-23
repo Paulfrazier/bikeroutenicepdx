@@ -14,6 +14,7 @@ struct RootView: View {
     @State private var showGuide = false
     @State private var showHistory = false
     @State private var showRatings = false
+    @State private var showConnectors = false
     // Brief "no street here" hint after a rate long-press misses.
     @State private var showNoStreet = false
 
@@ -67,6 +68,9 @@ struct RootView: View {
         }
         .sheet(isPresented: $showRatings) {
             StreetRatingsView()
+        }
+        .sheet(isPresented: $showConnectors) {
+            ConnectorsView()
         }
         // Tap-to-rate: a long-press resolved a street → offer the four ratings.
         .confirmationDialog(
@@ -159,6 +163,8 @@ struct RootView: View {
                 .padding(.top, 8)
             ratingsButton
                 .padding(.top, 8)
+            connectorsButton
+                .padding(.top, 8)
             Spacer()
             LegendView()
                 .padding(.trailing, 12)
@@ -188,7 +194,9 @@ struct RootView: View {
         if store.isDrawMode {
             banner(
                 icon: "hand.draw",
-                text: "Trace your route with one finger — follow the colored bikeways."
+                text: store.isConnectorDrawMode
+                    ? "Trace a short fix where the router misses a connection — it's saved and applied to your routes."
+                    : "Trace your route with one finger — follow the colored bikeways."
             )
         } else if store.phase == .snapping {
             banner(icon: "point.topleft.down.curvedto.point.bottomright.up", text: "Snapping to the bike network…")
@@ -296,6 +304,32 @@ struct RootView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("My street ratings")
+    }
+
+    /// Opens "My fixes" (drawn connectors). A small teal dot marks that the rider
+    /// has personal fixes saved. The 🔧 wrench mirrors the web connectors entry.
+    private var connectorsButton: some View {
+        Button {
+            showConnectors = true
+        } label: {
+            Image(systemName: "wrench.and.screwdriver")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.tint)
+                .frame(width: 40, height: 40)
+                .background(.regularMaterial, in: Circle())
+                .overlay(alignment: .topTrailing) {
+                    if Connectors.hasConnectors {
+                        Circle()
+                            .fill(Color.teal)
+                            .frame(width: 10, height: 10)
+                            .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5))
+                            .offset(x: 1, y: -1)
+                    }
+                }
+                .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("My fixes")
     }
 
     /// Opens the saved-rides history (distance / time / greenway %).

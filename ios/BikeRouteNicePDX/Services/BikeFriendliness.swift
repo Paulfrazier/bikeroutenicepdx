@@ -117,6 +117,13 @@ actor BikeFriendliness {
 
     private var segs: [Seg] = []
     private var grid: [CellKey: [Int]] = [:]
+    /// Connector index (personal map-fixes + bundled community fixes) — every
+    /// connector is treated as a comfortable `path` facility and WINS the
+    /// classification outright (a connector is the rider's explicit assertion that
+    /// a stretch the data missed is a real, comfortable path). Reuses Seg (cls is
+    /// always `.path`, name nil). KEEP IN SYNC WITH web (connector grid).
+    private var connectorSegs: [Seg] = []
+    private var connectorGrid: [CellKey: [Int]] = [:]
     private var artSegs: [ArtSeg] = []
     private var artGrid: [CellKey: [Int]] = [:]
     /// Union of fast streets (speeds.geojson) + bicycle high-crash corridors
@@ -264,6 +271,13 @@ actor BikeFriendliness {
         let cx = Int(floor(mid.longitude / Self.cell))
         let cy = Int(floor(mid.latitude / Self.cell))
 
+        // A connector (user/community map-fix) wins outright — it's the explicit
+        // assertion that this stretch is a comfortable path the data missed. Same
+        // threshold + bearing tolerance as a bike facility (no new constants).
+        if isOnConnector(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy) {
+            return .path
+        }
+
         var bestDist = Self.thresholdMeters
         var bestClass: RouteClass?
         var bestName: String?
@@ -330,6 +344,34 @@ actor BikeFriendliness {
     /// NOT down-rate these. KEEP IN SYNC WITH web STRONG_FACILITY.
     private static func isStrongFacility(_ cls: RouteClass) -> Bool {
         cls == .protected || cls == .greenway || cls == .path
+    }
+
+    /// Whether a route-segment midpoint runs on/along a connector (community or
+    /// personal map-fix) → classified `.path`. Same threshold + bearing tolerance
+    /// as a bike facility (no new parity constants). Mirrors web `isOnConnector`.
+    private func isOnConnector(
+        _ mid: CLLocationCoordinate2D,
+        routeBearing: Double,
+        cosLat: Double,
+        cx: Int,
+        cy: Int
+    ) -> Bool {
+        var seen = Set<Int>()
+        for gx in (cx - 1)...(cx + 1) {
+            for gy in (cy - 1)...(cy + 1) {
+                guard let bucket = connectorGrid[CellKey(x: gx, y: gy)] else { continue }
+                for idx in bucket {
+                    if !seen.insert(idx).inserted { continue }
+                    let seg = connectorSegs[idx]
+                    if Self.angularDelta(routeBearing, seg.bearing) > Self.bearingToleranceDeg {
+                        continue
+                    }
+                    if perpDistanceMeters(mid: mid, a: seg.a, b: seg.b, cosLat: cosLat)
+                        <= Self.thresholdMeters { return true }
+                }
+            }
+        }
+        return false
     }
 
     /// Whether the midpoint sits on/along a hazard (fast / bicycle high-crash)
@@ -483,6 +525,51 @@ actor BikeFriendliness {
 
         loadArterials()
         loadHazards()
+        buildConnectorIndex()
+    }
+
+    /// Rebuild the connector index (community fixes + personal connectors) as
+    /// `path`. Cheap — there are only a handful — so a freshly drawn fix recolors
+    /// + re-splices at once. Called on launch (loadIfNeeded) and whenever the
+    /// rider's personal connectors change (`.connectorsChanged`). Mirrors the web
+    /// connector grid rebuild keyed on the connectors version.
+    func reloadConnectors() {
+        loadIfNeeded()
+        connectorSegs = []
+        connectorGrid = [:]
+        buildConnectorIndex()
+    }
+
+    /// Index every connector polyline (community + personal) as a `.path` facility.
+    private func buildConnectorIndex() {
+        for line in CommunityConnectors.lines() {
+            addConnectorLine(line)
+        }
+        for connector in Connectors.list() {
+            addConnectorLine(connector.coords)
+        }
+    }
+
+    /// Split one connector polyline into straight `.path` segments and index each
+    /// into the connector grid (separate from the bike-network grid).
+    private func addConnectorLine(_ line: [CLLocationCoordinate2D]) {
+        guard line.count >= 2 else { return }
+        for i in 0..<(line.count - 1) {
+            let a = line[i]
+            let b = line[i + 1]
+            let seg = Seg(a: a, b: b, bearing: Self.bearing(a, b), cls: .path, name: nil)
+            let idx = connectorSegs.count
+            connectorSegs.append(seg)
+            let x0 = Int(floor(min(a.longitude, b.longitude) / Self.cell))
+            let x1 = Int(floor(max(a.longitude, b.longitude) / Self.cell))
+            let y0 = Int(floor(min(a.latitude, b.latitude) / Self.cell))
+            let y1 = Int(floor(max(a.latitude, b.latitude) / Self.cell))
+            for gx in x0...x1 {
+                for gy in y0...y1 {
+                    connectorGrid[CellKey(x: gx, y: gy), default: []].append(idx)
+                }
+            }
+        }
     }
 
     /// Build the hazard spatial index from the bundled fast-street + bicycle

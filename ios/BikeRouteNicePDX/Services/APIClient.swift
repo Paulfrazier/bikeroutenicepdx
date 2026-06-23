@@ -1,3 +1,4 @@
+import CoreLocation
 import Foundation
 
 enum APIError: LocalizedError {
@@ -58,6 +59,25 @@ enum APIClient {
             throw APIError.transport("Failed to encode request: \(error.localizedDescription)")
         }
         return try await send(req, as: type)
+    }
+
+    /// POST /fix-submit — file a drawn connector for community review. Coords are
+    /// sent as [lng, lat] pairs (server contract). Throws on any non-2xx (e.g. 503
+    /// when the server isn't configured for submissions); the caller surfaces a
+    /// friendly "couldn't submit" message. Mirrors web `submitFix`.
+    @discardableResult
+    static func submitFix(
+        coords: [CLLocationCoordinate2D],
+        note: String? = nil,
+        contact: String? = nil
+    ) async throws -> FixSubmitResponse {
+        let trimmedNote = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = FixSubmitRequest(
+            coords: coords.map { [$0.longitude, $0.latitude] },
+            note: (trimmedNote?.isEmpty == false) ? trimmedNote : nil,
+            contact: contact
+        )
+        return try await post(path: "fix-submit", body: body, as: FixSubmitResponse.self)
     }
 
     private static func send<T: Decodable>(_ req: URLRequest, as type: T.Type) async throws -> T {

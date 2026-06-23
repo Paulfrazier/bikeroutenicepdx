@@ -26,7 +26,8 @@
 
 import { closestPointOnSegmentMeters, haversineLength } from "./geo";
 import { normalizeStreetName, overrides } from "./streetRatings";
-import type { LngLat } from "./types";
+import { listConnectors, getVersion as connectorsVersion } from "./connectors";
+import type { LngLat, ManualSegment } from "./types";
 
 // ── Tuning constants (KEEP IN SYNC WITH iOS) ────────────────────────────────
 
@@ -286,6 +287,146 @@ export function snapToNetwork(
   return best;
 }
 
+// ── Connector index (personal + community map-fixes) ─────────────────────────
+// User-drawn "connectors" patch gaps the routing data misses (a mislabeled
+// cycletrack, an invisible crossing, a cut-through). Two sources feed one index:
+//   - PERSONAL connectors live in connectors.ts (localStorage, this device).
+//   - COMMUNITY connectors ship bundled as /community-fixes.geojson (validated).
+// Every connector is treated as a comfortable `path` facility: it classifies as
+// "path" (a STRONG facility, never hazard-down-rated) and — via
+// connectorSegmentsForRoute — is spliced into any route that passes near BOTH of
+// its ends. KEEP IN SYNC WITH iOS (BikeFriendliness / Connectors).
+
+/** The facility class every connector is treated as. */
+const CONNECTOR_CLASS: RouteClass = "path";
+
+// Community connector polylines, fetched + cached once for the page lifetime.
+let communityLines: LngLat[][] = [];
+let communityPromise: Promise<void> | null = null;
+
+/** Parse /community-fixes.geojson into a flat list of polylines (best-effort). */
+async function loadCommunityFixes(url: string): Promise<void> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return; // community fixes are optional — leave the list empty
+    const fc = (await res.json()) as GeoJSON.FeatureCollection;
+    const lines: LngLat[][] = [];
+    for (const feat of fc.features ?? []) {
+      const geom = feat.geometry;
+      if (!geom) continue;
+      if (geom.type === "LineString") {
+        lines.push(geom.coordinates as LngLat[]);
+      } else if (geom.type === "MultiLineString") {
+        for (const line of geom.coordinates) lines.push(line as LngLat[]);
+      }
+    }
+    communityLines = lines;
+  } catch {
+    /* network/parse error — leave the community list empty */
+  }
+}
+
+// The connector grid is rebuilt whenever personal connectors change (cheap —
+// there are only a handful) so a freshly drawn fix recolors + re-splices at once.
+let connectorGrid: Grid | null = null;
+let connectorGridVersion = -1;
+
+/** Build a spatial grid over every connector (community + personal) as `path`. */
+function buildConnectorGrid(): Grid {
+  const grid: Grid = new Map();
+  for (const line of communityLines) {
+    indexLineString(grid, line, CONNECTOR_CLASS, null);
+  }
+  for (const c of listConnectors()) {
+    indexLineString(grid, c.coords, CONNECTOR_CLASS, null);
+  }
+  return grid;
+}
+
+/** Connector grid, rebuilt lazily when the personal-connector version changes. */
+function getConnectorGrid(): Grid {
+  const v = connectorsVersion();
+  if (!connectorGrid || connectorGridVersion !== v) {
+    connectorGrid = buildConnectorGrid();
+    connectorGridVersion = v;
+  }
+  return connectorGrid;
+}
+
+/**
+ * Fetch the community fixes once, then return the current connector grid
+ * (community + personal). Awaited by classifyRoute alongside the other indexes.
+ */
+export function loadConnectorIndex(
+  url = "/community-fixes.geojson"
+): Promise<Grid> {
+  if (!communityPromise) communityPromise = loadCommunityFixes(url);
+  return communityPromise.then(() => getConnectorGrid());
+}
+
+/** Whether a route-segment midpoint runs on/along a connector (→ "path"). */
+function isOnConnector(
+  M: LngLat,
+  routeBearing: number,
+  grid: Grid
+): boolean {
+  const cellLat = Math.floor(M[1] / CELL);
+  const cellLng = Math.floor(M[0] / CELL);
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const bucket = grid.get(`${cellLat + dy},${cellLng + dx}`);
+      if (!bucket) continue;
+      for (const seg of bucket) {
+        if (bearingDiff(routeBearing, seg.bearing) > BEARING_TOL_DEG) continue;
+        if (perpDistanceM(M, seg.a, seg.b) <= THRESHOLD_M) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Minimum distance (m) from a point to any segment of a polyline. */
+function minDistanceToPolylineM(p: LngLat, coords: LngLat[]): number {
+  let best = Infinity;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const pt = closestPointOnSegmentMeters(p, coords[i], coords[i + 1]);
+    const d = haversineLength([p, pt]);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/**
+ * Connectors (community + personal) whose BOTH endpoints lie within `maxMeters`
+ * of the route — the ones to splice into it. Returned as ManualSegment-shaped
+ * objects so the caller can fold them into applyManualSegments() exactly like a
+ * hand-drawn stretch. Community connectors load asynchronously; until then only
+ * personal connectors (available synchronously from localStorage) are returned.
+ */
+export function connectorSegmentsForRoute(
+  routeCoords: LngLat[],
+  maxMeters = 30
+): ManualSegment[] {
+  if (routeCoords.length < 2) return [];
+  const candidates: ManualSegment[] = [
+    ...communityLines.map((coords, i) => ({ id: `community-${i}`, coords })),
+    ...listConnectors().map((c) => ({ id: c.id, coords: c.coords })),
+  ];
+  const out: ManualSegment[] = [];
+  for (const c of candidates) {
+    if (c.coords.length < 2) continue;
+    const head = c.coords[0];
+    const tail = c.coords[c.coords.length - 1];
+    if (
+      minDistanceToPolylineM(head, routeCoords) <= maxMeters &&
+      minDistanceToPolylineM(tail, routeCoords) <= maxMeters
+    ) {
+      out.push(c);
+    }
+  }
+  return out;
+}
+
 // ── Arterial spatial index ──────────────────────────────────────────────────
 // A second, lighter index over Portland's busy roads (motorway…tertiary). When
 // a route segment matches no bike facility, proximity to an arterial decides
@@ -522,6 +663,7 @@ const STRONG_FACILITY: ReadonlySet<RouteClass> = new Set<RouteClass>([
 function rawClasses(
   coords: LngLat[],
   grid: Grid,
+  connectorGrid: Grid,
   artGrid: ArtGrid,
   hazardGrid: ArtGrid,
   ov: Map<string, RouteClass>
@@ -535,6 +677,13 @@ function rawClasses(
     const routeBearing = bearing(a, b);
     const cellLat = Math.floor(M[1] / CELL);
     const cellLng = Math.floor(M[0] / CELL);
+
+    // A connector (user/community map-fix) wins outright — it's the explicit
+    // assertion that this stretch is a comfortable path the data missed.
+    if (isOnConnector(M, routeBearing, connectorGrid)) {
+      classes[i] = CONNECTOR_CLASS;
+      continue;
+    }
 
     let bestDist = THRESHOLD_M;
     let bestClass: RouteClass | null = null;
@@ -644,8 +793,9 @@ export async function classifyRoute(
   coords: LngLat[]
 ): Promise<RouteFriendliness> {
   if (coords.length < 2) return { classes: [], coverage: 0 };
-  const [grid, artGrid, hazardGrid] = await Promise.all([
+  const [grid, connectorGrid, artGrid, hazardGrid] = await Promise.all([
     loadNetworkIndex(),
+    loadConnectorIndex(),
     loadArterialIndex(),
     loadHazardIndex(),
   ]);
@@ -653,7 +803,7 @@ export async function classifyRoute(
   const ov = overrides();
   const classes = smoothClasses(
     coords,
-    rawClasses(coords, grid, artGrid, hazardGrid, ov)
+    rawClasses(coords, grid, connectorGrid, artGrid, hazardGrid, ov)
   );
 
   // Coverage = fraction NOT on a busy no-facility road. Every facility class and

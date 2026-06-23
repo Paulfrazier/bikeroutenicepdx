@@ -37,6 +37,9 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     private var corridorOverlays: [MKOverlay] = []
     /// The two tapped corridor endpoints (A, B), shown as teal dots while picking.
     private var corridorAnnotations: [CorridorEndpointAnnotation] = []
+    /// Persistent teal "your fix" overlays for every connector (personal +
+    /// community), shown regardless of whether a route is on screen.
+    private var connectorOverlays: [MKOverlay] = []
     /// Single rubber-banded preview line shown while a hand-edit drag is live.
     private var editPreviewOverlay: RoutePolyline?
     /// True while a route is on screen — fades the bike-network overlay back so
@@ -79,6 +82,12 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         // unrelated store change re-run reconcile, rebuild the line, or flip the
         // scroll lock back on mid-drag.
         if isEditing { return }
+
+        // Persistent "your fix" connector overlays — always reconciled (even while
+        // navigating) so a freshly drawn/deleted fix appears/disappears at once.
+        // (finishDrawing toggles isConnectorDrawMode/isDrawMode → updateUIView →
+        // sync(), so adding a connector with no route still refreshes this.)
+        syncConnectorOverlays(map)
 
         // Recenter on the user when the store's tick advances (locate button).
         if store.recenterTick != lastRecenterTick {
@@ -295,6 +304,29 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             manualOverlays.append(overlay)
             map.addOverlay(overlay, level: .aboveLabels)
         }
+    }
+
+    /// Rebuild the persistent teal "your fix" overlays from the bundled community
+    /// fixes + the rider's personal connectors. Always shown (a global map-fix
+    /// layer), beneath the planned route. Cheap — rebuilt wholesale (a handful of
+    /// short lines). Pre-cleaned (<2-point lines dropped) by the loaders.
+    private func syncConnectorOverlays(_ map: MKMapView) {
+        if !connectorOverlays.isEmpty {
+            map.removeOverlays(connectorOverlays)
+            connectorOverlays = []
+        }
+        var lines = CommunityConnectors.lines()
+        lines.append(contentsOf: Connectors.list().map { $0.coords })
+        var built: [MKOverlay] = []
+        for coords in lines where coords.count >= 2 {
+            built.append(ConnectorGlowPolyline(coordinates: coords, count: coords.count))
+            built.append(ConnectorPolyline(coordinates: coords, count: coords.count))
+        }
+        connectorOverlays = built
+        // .aboveRoads (like the bike-network overlay) sits strictly beneath the
+        // planned route (.aboveLabels), so the route always reads as foreground;
+        // added after the network so the fix paints on top of it.
+        if !built.isEmpty { map.addOverlays(built, level: .aboveRoads) }
     }
 
     /// Rebuild the "route through a section" (corridor) preview: a teal highlight
@@ -783,6 +815,23 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             // The picked "route through a section" street, highlighted in teal.
             let renderer = MKPolylineRenderer(polyline: polyline)
             renderer.strokeColor = UIColor(red: 0.051, green: 0.580, blue: 0.533, alpha: 1) // #0d9488 teal
+            renderer.lineWidth = 5
+            renderer.lineCap = .round
+            renderer.lineJoin = .round
+            return renderer
+        case let polyline as ConnectorGlowPolyline:
+            // Wide, low-alpha teal underlay faking a soft glow under the fix line.
+            let renderer = MKPolylineRenderer(polyline: polyline)
+            renderer.strokeColor = UIColor(red: 0.051, green: 0.580, blue: 0.533, alpha: 0.25) // #0d9488
+            renderer.lineWidth = 11
+            renderer.lineCap = .round
+            renderer.lineJoin = .round
+            return renderer
+        case let polyline as ConnectorPolyline:
+            // Persistent "your fix" connector, solid teal (#0d9488 — matches the
+            // web connector overlay + the corridor highlight).
+            let renderer = MKPolylineRenderer(polyline: polyline)
+            renderer.strokeColor = UIColor(red: 0.051, green: 0.580, blue: 0.533, alpha: 1) // #0d9488
             renderer.lineWidth = 5
             renderer.lineCap = .round
             renderer.lineJoin = .round

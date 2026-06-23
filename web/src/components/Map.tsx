@@ -30,6 +30,10 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { LngLat, RouteResponse, RouteGeometry, Via, ManualSegment } from "../types";
 import { hitTestRoute, VERTEX_HIT_PX, MAX_VIAS, type Px } from "../geo";
 import { ROUTE_CLASS_COLORS, ROUTE_CLASS_DASHED } from "../friendliness";
+import type { Connector } from "../connectors";
+
+/** Teal "your fix" color — shared by the connector overlay + its legend entry. */
+const CONNECTOR_COLOR = "#0d9488";
 
 // Protocol handler for PMTiles (lazy-import to keep bundle splittable)
 let pmtilesProtocolAdded = false;
@@ -192,6 +196,20 @@ function waypointFeatures(vias: Via[]): GeoJSON.FeatureCollection {
   };
 }
 
+/** One LineString per saved connector, for the teal "your fix" overlay. */
+function connectorFeatures(connectors: Connector[]): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: connectors
+      .filter((c) => c.coords.length >= 2)
+      .map((c) => ({
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: c.coords },
+        properties: { id: c.id },
+      })),
+  };
+}
+
 /** A single Point feature (for the corridor A/B endpoint markers). */
 function pointFeature(at: LngLat): GeoJSON.Feature {
   return {
@@ -216,6 +234,8 @@ const LEGEND_ITEMS = [
   { cls: "shared",    color: ROUTE_CLASS_COLORS.shared,    label: "Shared roadway",           dashed: true  },
   { cls: "quiet",     color: ROUTE_CLASS_COLORS.quiet,     label: "Quiet street",             dashed: false },
   { cls: "busy",      color: ROUTE_CLASS_COLORS.busy,      label: "Busy street — no bike lane", dashed: true  },
+  // Teal overlay drawn from saved connectors (community + your fixes).
+  { cls: "connector", color: CONNECTOR_COLOR,              label: "Your fix",                 dashed: false },
 ] as const;
 
 // Route line paint, derived from the shared class→color map so the route can
@@ -321,6 +341,14 @@ interface MapProps {
   onDrawSegment: (coords: LngLat[]) => void;
   /** Raw-nudge a point on a manual segment (drag, no re-route). */
   onManualNudge: (segId: string, vertexIndex: number, at: LngLat) => void;
+  /** When true, a freehand stroke on the map becomes a saved connector (a fix).
+   * Shares the manual-draw gesture; the stroke is routed to onDrawConnector. */
+  connectorDrawMode: boolean;
+  /** A connector freehand draw finished — its coords are saved as a fix. */
+  onDrawConnector: (coords: LngLat[]) => void;
+  /** Saved PERSONAL connectors, rendered as the teal "your fix" overlay
+   * (community connectors load separately from /community-fixes.geojson). */
+  connectors: Connector[];
   /** Corridor mode: first tapped point (start of the section), or null. */
   corridorA: LngLat | null;
   /** Corridor mode: second tapped point (end of the section), or null. */
@@ -353,6 +381,9 @@ export function Map({
   manualSegments,
   onDrawSegment,
   onManualNudge,
+  connectorDrawMode,
+  onDrawConnector,
+  connectors,
   corridorA,
   corridorB,
   corridorPreview,
@@ -397,15 +428,21 @@ export function Map({
   const onMoveEndpointRef = useRef(onMoveEndpoint);
   const onDrawSegmentRef = useRef(onDrawSegment);
   const onManualNudgeRef = useRef(onManualNudge);
+  const onDrawConnectorRef = useRef(onDrawConnector);
   const editingRef = useRef(editing);
   const drawModeRef = useRef(drawMode);
+  const connectorDrawModeRef = useRef(connectorDrawMode);
   const viasRef = useRef(vias);
   const manualSegmentsRef = useRef(manualSegments);
+  const connectorsRef = useRef(connectors);
   const routeFeaturesRef = useRef(routeFeatures);
   // Active manual-segment drag (raw nudge): which segment + vertex is moving.
   const manualEditRef = useRef<{ segId: string; vertex: number } | null>(null);
   // Freehand-draw stroke in progress (lng/lat points).
   const drawStrokeRef = useRef<LngLat[] | null>(null);
+  // Which draw mode armed the in-progress stroke: a connector (a saved fix) vs a
+  // per-route manual segment. Captured at down-time so onDrawEnd routes it right.
+  const drawStrokeIsConnectorRef = useRef(false);
   useEffect(() => {
     onReshapeRef.current = onReshape;
     onDeleteViaRef.current = onDeleteVia;
@@ -414,10 +451,13 @@ export function Map({
     onMoveEndpointRef.current = onMoveEndpoint;
     onDrawSegmentRef.current = onDrawSegment;
     onManualNudgeRef.current = onManualNudge;
+    onDrawConnectorRef.current = onDrawConnector;
     editingRef.current = editing;
     drawModeRef.current = drawMode;
+    connectorDrawModeRef.current = connectorDrawMode;
     viasRef.current = vias;
     manualSegmentsRef.current = manualSegments;
+    connectorsRef.current = connectors;
     routeFeaturesRef.current = routeFeatures;
   });
 
@@ -537,6 +577,57 @@ export function Map({
           "line-opacity": 0.85,
         },
       });
+
+      // ── Connectors ("your fixes") overlay ────────────────────────────────
+      // Saved map-fixes drawn as a persistent teal ribbon ABOVE the network but
+      // BELOW the route (the active route line stays clearly on top). Two
+      // sources: community fixes (static, like bike-network) + personal fixes
+      // (reactive, driven from the `connectors` prop). Each gets a soft teal glow,
+      // a white casing, and a teal line — mirroring the route's glow/casing idiom
+      // but thinner so the route reads as the primary line.
+      map.addSource("connectors-community", {
+        type: "geojson",
+        data: "/community-fixes.geojson",
+      });
+      map.addSource("connectors-personal", {
+        type: "geojson",
+        data: emptyGeojson(),
+      });
+      for (const src of ["connectors-community", "connectors-personal"]) {
+        map.addLayer({
+          id: `${src}-glow`,
+          type: "line",
+          source: src,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": CONNECTOR_COLOR,
+            "line-width": 11,
+            "line-blur": 6,
+            "line-opacity": 0.3,
+          },
+        });
+        map.addLayer({
+          id: `${src}-casing`,
+          type: "line",
+          source: src,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": "#ffffff", "line-width": 7 },
+        });
+        map.addLayer({
+          id: `${src}-line`,
+          type: "line",
+          source: src,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": CONNECTOR_COLOR, "line-width": 4 },
+        });
+      }
+      // Seed personal connectors saved from a previous session (the reactive
+      // effect only fires on later changes, after the style is loaded).
+      (
+        map.getSource("connectors-personal") as
+          | maplibregl.GeoJSONSource
+          | undefined
+      )?.setData(connectorFeatures(connectorsRef.current));
 
       // ── Route, colored by bike-network facility class (above the network) ─
       // The "route" source holds the run-split class FeatureCollection, drawn in
@@ -881,12 +972,17 @@ export function Map({
       map.off("touchend", onDrawEnd);
       map.dragPan.enable();
       const stroke = drawStrokeRef.current;
+      const isConnector = drawStrokeIsConnectorRef.current;
       drawStrokeRef.current = null;
       (
         map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
       )?.setData(emptyGeojson());
       suppressClickRef.current = true;
-      if (stroke && stroke.length >= 2) onDrawSegmentRef.current(stroke);
+      if (stroke && stroke.length >= 2) {
+        // The same gesture feeds either store, by which mode armed the stroke.
+        if (isConnector) onDrawConnectorRef.current(stroke);
+        else onDrawSegmentRef.current(stroke);
+      }
     };
 
     // The manual-segment vertex within grab range of `p`, else null.
@@ -911,10 +1007,12 @@ export function Map({
     const onDown = (
       e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
     ) => {
-      // Draw mode: capture a freehand stroke → a kept-verbatim manual segment.
-      if (drawModeRef.current) {
+      // Draw mode (manual segment OR connector): capture a freehand stroke. The
+      // stroke is routed to the right store in onDrawEnd by this captured flag.
+      if (drawModeRef.current || connectorDrawModeRef.current) {
         e.preventDefault();
         map.dragPan.disable();
+        drawStrokeIsConnectorRef.current = connectorDrawModeRef.current;
         drawStrokeRef.current = [[e.lngLat.lng, e.lngLat.lat]];
         (
           map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
@@ -1090,6 +1188,16 @@ export function Map({
       map.getSource("route-manual") as maplibregl.GeoJSONSource | undefined
     )?.setData(manualFeatures(manualSegments));
   }, [manualSegments]);
+
+  // ── Personal connectors: repaint the teal "your fix" overlay on change ──
+  // (community connectors are static — loaded once from the source data url).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    (
+      map.getSource("connectors-personal") as maplibregl.GeoJSONSource | undefined
+    )?.setData(connectorFeatures(connectors));
+  }, [connectors]);
 
   // ── Waypoint pins: repaint the handle layer whenever the via list changes ──
   // (a reshape adds/moves a via, a tap deletes one, endpoint changes clear them).

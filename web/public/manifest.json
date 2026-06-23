@@ -1,6 +1,6 @@
 {
-  "name": "BikeRouteNicePDX",
-  "short_name": "PDX Greenways",
+  "name": "BikeRoute PDX",
+  "short_name": "BikeRoute PDX",
   "description": "Portland greenway-aware bike routing",
   "start_url": "/",
   "display": "standalone",

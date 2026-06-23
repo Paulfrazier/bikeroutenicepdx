@@ -18,6 +18,7 @@ import matchHandler from "./routes/match.js";
 import corridorHandler from "./routes/corridor.js";
 import searchHandler from "./routes/search.js";
 import healthHandler from "./routes/health.js";
+import fixSubmitHandler from "./routes/fix-submit.js";
 
 const app = new Hono();
 
@@ -57,6 +58,7 @@ app.route("/match", matchHandler);
 app.route("/corridor", corridorHandler);
 app.route("/search", searchHandler);
 app.route("/health", healthHandler);
+app.route("/fix-submit", fixSubmitHandler);
 
 // 404 fallback
 app.notFound((c) => {

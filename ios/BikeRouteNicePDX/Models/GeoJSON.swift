@@ -78,3 +78,19 @@ struct APIErrorBody: Decodable {
     let error: String
     let code: String?
 }
+
+/// Request body for POST /fix-submit — a drawn connector filed for community
+/// review. Coordinates are [lng, lat] to match the server (and web
+/// `FixSubmitRequest`). `note`/`contact` are optional free text.
+struct FixSubmitRequest: Encodable {
+    let coords: [[Double]]
+    let note: String?
+    let contact: String?
+}
+
+/// Response from POST /fix-submit. `url` is the created issue's html_url (when
+/// the server is configured for it). Mirrors web `FixSubmitResponse`.
+struct FixSubmitResponse: Decodable {
+    let status: String
+    let url: String?
+}

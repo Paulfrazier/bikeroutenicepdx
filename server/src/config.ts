@@ -36,4 +36,15 @@ export const config = {
    * (kept in sync by scripts/export-bike-network.ts).
    */
   bikeNetworkPath: process.env.BIKE_NETWORK_PATH ?? "",
+  /**
+   * GitHub personal-access token for filing user-submitted map-fix issues.
+   * Needs `repo` scope (or fine-grained "Issues: write") on githubFixRepo.
+   * When unset the /fix-submit endpoint returns 503 (graceful for local/dev).
+   */
+  githubFixToken: process.env.GITHUB_FIX_TOKEN ?? "",
+  /**
+   * Target GitHub repository for fix issues ("owner/repo" form).
+   */
+  githubFixRepo:
+    process.env.GITHUB_FIX_REPO ?? "Paulfrazier/bikeroutenicepdx",
 } as const;

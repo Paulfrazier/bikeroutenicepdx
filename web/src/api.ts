@@ -12,6 +12,7 @@ import type {
   CorridorResponse,
   SearchResult,
   HealthResponse,
+  LngLat,
 } from "./types";
 
 const BASE_URL =
@@ -63,4 +64,34 @@ export async function searchPlaces(
 /** GET /health */
 export async function fetchHealth(): Promise<HealthResponse> {
   return request<HealthResponse>("/health");
+}
+
+/** A user-submitted map "fix" (a drawn connector) sent for community review. */
+export interface FixSubmitRequest {
+  /** The drawn connector polyline ([lng, lat][]). */
+  coords: LngLat[];
+  /** Optional free-text note (≤500 chars server-side). */
+  note?: string;
+  /** Optional contact (≤200 chars server-side). */
+  contact?: string;
+}
+
+/** Server reply to a fix submission. `url` is the created issue's html_url. */
+export interface FixSubmitResponse {
+  status: string;
+  url?: string;
+}
+
+/**
+ * POST /fix-submit — file a drawn connector for community review.
+ * Throws on any non-2xx (503 when the server isn't configured for it); the
+ * caller surfaces a friendly "couldn't submit" message.
+ */
+export async function submitFix(
+  req: FixSubmitRequest
+): Promise<FixSubmitResponse> {
+  return request<FixSubmitResponse>("/fix-submit", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }
