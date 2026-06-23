@@ -30,8 +30,9 @@ const RouteBody = z.object({
   // Ordered pass-through waypoints for drag-to-reshape. Capped so a runaway
   // edit can't overwhelm Valhalla.
   via: z.array(LngLat).max(50, "too many via points").optional(),
-  // Greenway-vs-speed preference (comfort↔fast slider). Defaults to "comfort".
-  preference: z.enum(["comfort", "balanced", "fast"]).optional(),
+  // Greenway-vs-speed preference (ultra↔fast slider). Defaults to "comfort".
+  // "ultra" prefers greenways/bike-infra hardest (custom BRouter safety-ultra).
+  preference: z.enum(["ultra", "comfort", "balanced", "fast"]).optional(),
 });
 
 // ---------------------------------------------------------------------------

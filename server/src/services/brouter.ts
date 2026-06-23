@@ -21,8 +21,13 @@ import {
   type NetworkClass,
 } from "./greenway-coverage.js";
 
-/** comfort↔fast preference → BRouter profile. `safety` won the greenway A/B. */
+/**
+ * preference → BRouter profile. `safety` won the greenway A/B (backs "comfort").
+ * `safety-ultra` is our custom profile (brouter-service/profiles/safety-ultra.brf)
+ * that prefers greenways/bike-infra even harder for the "ultra" tier.
+ */
 const PROFILE_BY_PREFERENCE: Record<string, string> = {
+  ultra: "safety-ultra",
   comfort: "safety",
   balanced: "trekking",
   fast: "fastbike",

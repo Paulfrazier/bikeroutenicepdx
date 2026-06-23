@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { fetchRoute } from "../api";
-import type { LngLat, RouteResponse } from "../types";
+import type { LngLat, RouteResponse, RoutePreference } from "../types";
 
 /**
  * Fetches a route whenever both `from` and `to` are non-null. Optional `vias`
@@ -18,7 +18,8 @@ const VIA_DEBOUNCE_MS = 0;
 export function useRoute(
   from: LngLat | null,
   to: LngLat | null,
-  vias: LngLat[] = []
+  vias: LngLat[] = [],
+  preference: RoutePreference = "comfort"
 ) {
   const [route, setRoute] = useState<RouteResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -48,7 +49,12 @@ export function useRoute(
 
     let cancelled = false;
     const timer = setTimeout(() => {
-      fetchRoute({ from, to, via: vias.length ? vias : undefined })
+      fetchRoute({
+        from,
+        to,
+        via: vias.length ? vias : undefined,
+        preference,
+      })
         .then((data) => {
           if (!cancelled) {
             setRoute(data);
@@ -71,7 +77,7 @@ export function useRoute(
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, viaKey]);
+  }, [from, to, viaKey, preference]);
 
   return { route, loading, error };
 }

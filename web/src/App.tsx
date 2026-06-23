@@ -26,6 +26,11 @@ import {
   useConnectorsVersion,
 } from "./components/Connectors";
 import { addConnector } from "./connectors";
+import { RoutePreferenceSelector } from "./components/RoutePreferenceSelector";
+import {
+  loadRoutePreference,
+  saveRoutePreference,
+} from "./routePreference";
 import { MapBoundary } from "./components/MapBoundary";
 import { useRoute } from "./hooks/useRoute";
 import { useFriendliness } from "./hooks/useFriendliness";
@@ -39,7 +44,13 @@ import {
 } from "./friendliness";
 import { arcLengthAt, haversineLength, applyManualSegments, MAX_VIAS } from "./geo";
 import { fetchCorridor } from "./api";
-import type { LngLat, Via, ManualSegment, CorridorResponse } from "./types";
+import type {
+  LngLat,
+  Via,
+  ManualSegment,
+  CorridorResponse,
+  RoutePreference,
+} from "./types";
 
 // Monotonic id source for waypoints — gives each via a stable identity so
 // re-routes never reorder or lose it.
@@ -226,11 +237,21 @@ export default function App() {
   }, [from, to, clearCorridorPick]);
 
   // ── Route ──────────────────────────────────────────────────────────────────
+  // Greenway-vs-speed tier (Ultra ↔ Fast). Persisted; changing it re-routes.
+  const [preference, setPreference] = useState<RoutePreference>(
+    loadRoutePreference
+  );
+  const handlePreferenceChange = useCallback((pref: RoutePreference) => {
+    setPreference(pref);
+    saveRoutePreference(pref);
+  }, []);
+
   const viaCoords = useMemo(() => vias.map((v) => v.at), [vias]);
   const { route, loading: routeLoading, error: routeError } = useRoute(
     from,
     to,
-    viaCoords
+    viaCoords,
+    preference
   );
   const reshaped = vias.length > 0;
 
@@ -576,6 +597,11 @@ export default function App() {
           }}
           onSwap={handleSwap}
           hasRoute={hasRoute}
+        />
+
+        <RoutePreferenceSelector
+          value={preference}
+          onChange={handlePreferenceChange}
         />
 
         {routeLoading && (

@@ -5,11 +5,21 @@ export type LngLat = [number, number];
 
 // ─── /route ─────────────────────────────────────────────────────────────────
 
+/**
+ * Greenway-vs-speed routing tier. Sent as `preference`; the server maps each to a
+ * BRouter profile. "ultra" prefers greenways/bike-infra hardest (custom
+ * safety-ultra profile). Raw values MUST match iOS RoutePreference + the server
+ * enum so a tier picked on any surface routes identically.
+ */
+export type RoutePreference = "ultra" | "comfort" | "balanced" | "fast";
+
 export interface RouteRequest {
   from: LngLat;
   to: LngLat;
   /** Ordered pass-through points (Valhalla "through" waypoints) for reshaping. */
   via?: LngLat[];
+  /** Greenway-vs-speed tier. Omitted → server defaults to "comfort". */
+  preference?: RoutePreference;
 }
 
 /**

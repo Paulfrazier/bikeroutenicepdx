@@ -23,6 +23,11 @@ RUN mkdir -p segments4 customprofiles \
     && curl -fsSL -o segments4/W125_N45.rd5 \
        https://brouter.de/brouter/segments4/W125_N45.rd5
 
+# Custom profiles. safety-ultra backs the app's "Ultra" routing tier — it sits in
+# profiles2/ alongside the stock safety.brf so `profile=safety-ultra` resolves the
+# same way `profile=safety` does. (See profiles/safety-ultra.brf for the diff.)
+COPY profiles/safety-ultra.brf brouter-1.7.9/profiles2/safety-ultra.brf
+
 # Railway injects $PORT. RouteServer binds the given port on all interfaces.
 # Args: <segmentdir> <profiledir> <customprofiledir> <port> <maxthreads>
 ENV PORT=17777

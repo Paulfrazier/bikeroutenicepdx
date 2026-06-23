@@ -1,0 +1,55 @@
+/* RoutePreferenceSelector — segmented tier picker (Ultra · Comfort · Balanced · Fast). */
+
+.route-pref {
+  margin: 0.5rem 0 0.25rem;
+}
+
+.route-pref__segments {
+  display: flex;
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.route-pref__segment {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0.4rem 0.25rem;
+  border: none;
+  border-right: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.route-pref__segment:last-child {
+  border-right: none;
+}
+
+.route-pref__segment:hover:not(.route-pref__segment--selected) {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.route-pref__segment--selected {
+  background: #0d9488;
+  color: #ffffff;
+}
+
+.route-pref__segment:focus-visible {
+  outline: 2px solid #0d9488;
+  outline-offset: -2px;
+}
+
+.route-pref__hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
