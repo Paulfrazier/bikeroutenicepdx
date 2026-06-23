@@ -13,6 +13,8 @@ interface RouteSummaryProps {
   coverage?: number;
   /** When true, the route has been reshaped by dragging (re-snapped to roads). */
   reshaped?: boolean;
+  /** When true, the coverage reflects the user's personal street ratings. */
+  personalized?: boolean;
 }
 
 function formatDistance(m: number): string {
@@ -33,6 +35,7 @@ export function RouteSummary({
   duration_s,
   coverage,
   reshaped = false,
+  personalized = false,
 }: RouteSummaryProps) {
   const coverageReady = coverage !== undefined;
   const coveragePct = coverageReady ? Math.round(coverage * 100) : 0;
@@ -71,6 +74,15 @@ export function RouteSummary({
       </span>
 
       {coveragePill}
+
+      {personalized && (
+        <span
+          className="route-summary__note route-summary__note--personalized"
+          title="Reflects your personal street ratings"
+        >
+          ★ Personalized
+        </span>
+      )}
 
       {reshaped && <span className="route-summary__note">Reshaped</span>}
     </div>

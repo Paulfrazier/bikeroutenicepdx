@@ -126,9 +126,18 @@ struct ControlsBar: View {
                                 .foregroundStyle(.secondary)
                         }
                         if let coverage = snapped.coverage {
-                            Text("🚲 \(Int((coverage * 100).rounded()))%")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
+                            HStack(spacing: 3) {
+                                Text("🚲 \(Int((coverage * 100).rounded()))%")
+                                    .font(.caption.weight(.medium))
+                                if StreetRatings.hasRatings {
+                                    // Score reflects the rider's personal street ratings.
+                                    Image(systemName: "person.fill.checkmark")
+                                        .font(.caption2)
+                                        .foregroundStyle(.green)
+                                        .accessibilityLabel("Personalized score")
+                                }
+                            }
+                            .foregroundStyle(.secondary)
                         } else {
                             Text(routeCaption)
                                 .font(.caption)

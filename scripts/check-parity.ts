@@ -33,6 +33,16 @@ const IOS_FILE = path.join(
   "BikeFriendliness.swift"
 );
 
+// Personal street-rating → RouteClass mapping (must also stay in lockstep).
+const WEB_RATINGS_FILE = path.join(REPO_ROOT, "web", "src", "streetRatings.ts");
+const IOS_RATINGS_FILE = path.join(
+  REPO_ROOT,
+  "ios",
+  "BikeRouteNicePDX",
+  "Services",
+  "StreetRatings.swift"
+);
+
 /** TS constant name → Swift constant name. Both hold the same value. */
 const CONSTANT_PAIRS: Array<[web: string, ios: string]> = [
   ["CELL", "cell"],
@@ -142,6 +152,54 @@ if (webMap.size && iosMap.size) {
   }
 }
 
+// ── Street-rating → RouteClass mapping ────────────────────────────────────────
+
+/** Web: parse `RATING_TO_CLASS = { great: "protected", ... }` → rating → class. */
+function extractWebRatings(): Map<string, string> {
+  const src = read(WEB_RATINGS_FILE, "web streetRatings.ts");
+  const block = src.match(/RATING_TO_CLASS[^{]*\{([\s\S]*?)\}/);
+  const map = new Map<string, string>();
+  if (!block) {
+    errors.push("could not locate RATING_TO_CLASS in web/src/streetRatings.ts");
+    return map;
+  }
+  const re = /(\w+)\s*:\s*"(\w+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(block[1])) !== null) map.set(m[1], m[2]);
+  return map;
+}
+
+/** iOS: parse the `routeClass` switch `case .great: return .protected` → map. */
+function extractIosRatings(): Map<string, string> {
+  const src = read(IOS_RATINGS_FILE, "iOS StreetRatings.swift");
+  const fn = src.match(/var routeClass: RouteClass \{[\s\S]*?\n {4}\}/);
+  const map = new Map<string, string>();
+  if (!fn) {
+    errors.push("could not locate StreetRating.routeClass in StreetRatings.swift");
+    return map;
+  }
+  const re = /case\s+\.(\w+):\s*return\s+\.(\w+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(fn[0])) !== null) map.set(m[1], m[2]);
+  return map;
+}
+
+const webRatings = extractWebRatings();
+const iosRatings = extractIosRatings();
+
+if (webRatings.size && iosRatings.size) {
+  const ratings = new Set([...webRatings.keys(), ...iosRatings.keys()]);
+  for (const k of ratings) {
+    const w = webRatings.get(k);
+    const i = iosRatings.get(k);
+    if (w !== i) {
+      errors.push(
+        `street-rating class mismatch for "${k}": web=${w ?? "(absent)"}  ≠  iOS=${i ?? "(absent)"}`,
+      );
+    }
+  }
+}
+
 // ── Report ───────────────────────────────────────────────────────────────────
 
 if (errors.length) {
@@ -154,5 +212,5 @@ if (errors.length) {
 }
 
 console.log(
-  `✓ web ↔ iOS friendliness in sync (${CONSTANT_PAIRS.length} constants, ${webMap.size} route-class colors)`,
+  `✓ web ↔ iOS friendliness in sync (${CONSTANT_PAIRS.length} constants, ${webMap.size} route-class colors, ${webRatings.size} street-rating classes)`,
 );

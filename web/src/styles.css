@@ -1348,3 +1348,119 @@ button {
 
 /* Let the map fill the screen while navigating (side panel/drawer are hidden). */
 .app-layout--navigating .map-area { width: 100%; }
+
+/* ── Personal street ratings ───────────────────────────────────────────────── */
+
+/* ★ button — stacked just below the help "?" FAB (both top-left). */
+.ratings-fab {
+  position: absolute;
+  top: calc(16px + 48px + env(safe-area-inset-top, 0px));
+  left: 16px;
+  z-index: 15;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: #f59e0b;
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: background var(--transition), transform var(--transition);
+}
+.ratings-fab:hover { background: var(--color-surface); transform: scale(1.05); }
+.ratings-fab:active { transform: scale(0.96); }
+/* Dot badge: ratings are active. */
+.ratings-fab__dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #2e9e48;
+  border: 1.5px solid var(--color-bg);
+}
+
+/* Rating chooser (shared by the manage panel and the tap-to-rate bar). */
+.rating-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rating-choice {
+  --swatch: #64748b;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.rating-choice::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--swatch);
+}
+.rating-choice--clear::before { display: none; }
+.rating-choice:hover { background: var(--color-surface); }
+.rating-choice--on {
+  border-color: var(--swatch);
+  box-shadow: inset 0 0 0 1px var(--swatch);
+}
+.rating-choice:disabled { opacity: 0.45; cursor: default; }
+
+/* Manage panel body (reuses .guide-* card chrome). */
+.ratings-intro {
+  margin: 0 0 12px;
+  font-size: 0.9rem;
+  color: var(--color-text-muted, #64748b);
+}
+.ratings-empty {
+  margin: 8px 0;
+  font-size: 0.9rem;
+  color: var(--color-text-muted, #64748b);
+}
+.ratings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ratings-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.ratings-row:last-child { border-bottom: none; padding-bottom: 0; }
+.ratings-row__name {
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+/* Tap-to-rate bar (extends .corridor-bar). */
+.rating-bar__pick {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* "★ Personalized" coverage note. */
+.route-summary__note--personalized {
+  font-style: normal;
+  font-weight: 600;
+  color: #b45309;
+}

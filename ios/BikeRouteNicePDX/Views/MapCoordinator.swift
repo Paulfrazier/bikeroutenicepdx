@@ -213,7 +213,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         let camera = MKMapCamera()
         camera.centerCoordinate = center
         camera.heading = nav.course
-        camera.pitch = 55
+        camera.pitch = 30   // was 55 — gentler tilt so the route ahead stays legible
         camera.centerCoordinateDistance = 340
         map.setCamera(camera, animated: true)
     }
@@ -387,9 +387,20 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     /// bare route line → drop a PRECISE anchor there (no snap) to force the route
     /// through that point. Elsewhere it's ignored (map handles its own gestures).
     @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began, store.isEditMode, !store.isDrawMode,
+        guard gesture.state == .began, !store.isDrawMode, nav?.isNavigating != true,
               let map = mapView else { return }
         let point = gesture.location(in: map)
+
+        // Outside edit mode a long-press rates the street under the finger (the
+        // least intrusive home for it — edit mode already claims long-press for
+        // precise anchors, and the planner tap drops pins). Resolve the street
+        // and let RootView present the four-way rating dialog.
+        if !store.isEditMode {
+            guard !store.isCorridorMode else { return }
+            let coordinate = map.convert(point, toCoordinateFrom: map)
+            store.requestRating(at: coordinate)
+            return
+        }
         if let viaIndex = nearestViaIndex(point, map: map) {
             store.toggleViaPrecise(at: viaIndex)
             syncViaAnnotations(map) // recolor immediately

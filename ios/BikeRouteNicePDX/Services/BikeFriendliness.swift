@@ -85,19 +85,29 @@ actor BikeFriendliness {
     // MARK: - Index storage
 
     /// One straight network segment plus precomputed bearing + facility class.
+    /// `name` is the normalized street name (for personal-rating override), or nil.
     private struct Seg {
         let a: CLLocationCoordinate2D
         let b: CLLocationCoordinate2D
         let bearing: Double
         let cls: RouteClass
+        let name: String?
     }
 
     /// One straight busy-arterial segment (position + bearing only — no class;
     /// merely being near one marks an otherwise-quiet route segment as busy).
+    /// `name` is the normalized street name (for personal-rating override), or nil.
     private struct ArtSeg {
         let a: CLLocationCoordinate2D
         let b: CLLocationCoordinate2D
         let bearing: Double
+        let name: String?
+    }
+
+    /// A matched arterial: present means "on a busy road"; `name` (if any) lets a
+    /// personal rating override the default `.busy`.
+    private struct ArtHit {
+        let name: String?
     }
 
     private struct CellKey: Hashable {
@@ -109,6 +119,11 @@ actor BikeFriendliness {
     private var grid: [CellKey: [Int]] = [:]
     private var artSegs: [ArtSeg] = []
     private var artGrid: [CellKey: [Int]] = [:]
+    /// Union of fast streets (speeds.geojson) + bicycle high-crash corridors
+    /// (high-crash.geojson) — the HAZARD layer that down-rates weak/absent
+    /// facilities to `.busy`. Reuses ArtSeg (name unused).
+    private var hazardSegs: [ArtSeg] = []
+    private var hazardGrid: [CellKey: [Int]] = [:]
     private var loaded = false
 
     // MARK: - Public API
@@ -118,6 +133,9 @@ actor BikeFriendliness {
     func classify(_ coords: [CLLocationCoordinate2D]) -> (classes: [RouteClass], coverage: Double) {
         loadIfNeeded()
         guard coords.count >= 2 else { return ([], 0) }
+
+        // Snapshot the user's personal street ratings for this classification pass.
+        let ov = StreetRatings.overrides()
 
         let segCount = coords.count - 1
         var rawClasses = [RouteClass](repeating: .busy, count: segCount)
@@ -133,7 +151,7 @@ actor BikeFriendliness {
                 longitude: (a.longitude + b.longitude) / 2
             )
             let routeBearing = Self.bearing(a, b)
-            rawClasses[i] = classForMidpoint(mid, routeBearing: routeBearing)
+            rawClasses[i] = classForMidpoint(mid, routeBearing: routeBearing, overrides: ov)
         }
 
         // Hysteresis smoothing → final per-segment classes.
@@ -188,12 +206,58 @@ actor BikeFriendliness {
         return best
     }
 
+    /// Nearest NAMED street to `target` within `maxMeters`, searching both the
+    /// bike-network and arterial spatial indexes (returns the normalized name, or
+    /// nil when nothing named is close). Used by tap-to-rate so the user can give
+    /// a street a personal, global rating. Mirrors the web `nearestStreetName`
+    /// (perpendicular distance, no bearing filter — we're identifying the street
+    /// under the finger, not aligning a route segment to it).
+    func nearestStreetName(_ target: CLLocationCoordinate2D, maxMeters: Double = 25) -> String? {
+        loadIfNeeded()
+        let cosLat = cos(target.latitude * .pi / 180)
+        let cx = Int(floor(target.longitude / Self.cell))
+        let cy = Int(floor(target.latitude / Self.cell))
+        let reach = max(1, Int(ceil(maxMeters / (Self.cell * 110_540))))
+
+        var bestDist = maxMeters
+        var bestName: String?
+        var seenBike = Set<Int>()
+        var seenArt = Set<Int>()
+        for gx in (cx - reach)...(cx + reach) {
+            for gy in (cy - reach)...(cy + reach) {
+                if let bucket = grid[CellKey(x: gx, y: gy)] {
+                    for idx in bucket {
+                        if !seenBike.insert(idx).inserted { continue }
+                        let seg = segs[idx]
+                        guard let name = seg.name else { continue }
+                        let d = perpDistanceMeters(mid: target, a: seg.a, b: seg.b, cosLat: cosLat)
+                        if d < bestDist { bestDist = d; bestName = name }
+                    }
+                }
+                if let bucket = artGrid[CellKey(x: gx, y: gy)] {
+                    for idx in bucket {
+                        if !seenArt.insert(idx).inserted { continue }
+                        let seg = artSegs[idx]
+                        guard let name = seg.name else { continue }
+                        let d = perpDistanceMeters(mid: target, a: seg.a, b: seg.b, cosLat: cosLat)
+                        if d < bestDist { bestDist = d; bestName = name }
+                    }
+                }
+            }
+        }
+        return bestName
+    }
+
     // MARK: - Classification core
 
     /// Facility class for a route-segment midpoint. First try to match a nearby
     /// bike facility and adopt its class. If none matches, fall back to the
     /// arterial index: on/along a busy road → `.busy`, otherwise → `.quiet`.
-    private func classForMidpoint(_ mid: CLLocationCoordinate2D, routeBearing: Double) -> RouteClass {
+    private func classForMidpoint(
+        _ mid: CLLocationCoordinate2D,
+        routeBearing: Double,
+        overrides ov: [String: RouteClass]
+    ) -> RouteClass {
         let latRad = mid.latitude * .pi / 180
         let cosLat = cos(latRad)
 
@@ -202,6 +266,12 @@ actor BikeFriendliness {
 
         var bestDist = Self.thresholdMeters
         var bestClass: RouteClass?
+        var bestName: String?
+        // Track the nearest STRONG (separated) facility too: where a protected/
+        // greenway/path facility coincides with a weaker one (the data maps both
+        // on a corridor), the separated infra wins — and must NOT be down-rated.
+        var strongDist = Self.thresholdMeters
+        var strongClass: RouteClass?
         var seen = Set<Int>()
 
         for gx in (cx - 1)...(cx + 1) {
@@ -222,20 +292,50 @@ actor BikeFriendliness {
                     if d <= bestDist {
                         bestDist = d
                         bestClass = seg.cls
+                        bestName = seg.name
+                    }
+                    if Self.isStrongFacility(seg.cls) && d < strongDist {
+                        strongDist = d
+                        strongClass = seg.cls
                     }
                 }
             }
         }
-        if let bestClass { return bestClass }
+        if let bestClass {
+            // A personal rating on the matched street always overrides the data class.
+            if let name = bestName, let o = ov[name] { return o }
+            // Separated/calm infrastructure stays safe regardless of the road.
+            if Self.isStrongFacility(bestClass) { return bestClass }
+            // A separated facility coincides with this weaker match → trust it.
+            if let strongClass, strongDist <= bestDist + 2 { return strongClass }
+            // Weak facility (lane/buffered/shared): a fast or high-crash street
+            // down-rates it to the danger signal.
+            return isOnHazard(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy)
+                ? .busy : bestClass
+        }
 
-        // No bike facility — busy arterial nearby → danger, else quiet street.
-        return isOnArterial(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy)
-            ? .busy : .quiet
+        // No bike facility — busy arterial OR hazard street nearby → danger, else
+        // quiet street. A personal rating on a named arterial wins.
+        if let hit = matchArterial(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy) {
+            if let name = hit.name, let o = ov[name] { return o }
+            return .busy
+        }
+        if isOnHazard(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy) {
+            return .busy
+        }
+        return .quiet
     }
 
-    /// Whether the midpoint is within `arterialThresholdMeters` of a busy
-    /// arterial segment that is bearing-aligned within `arterialBearingToleranceDeg`.
-    private func isOnArterial(
+    /// Facility classes with physical separation/calming — a hazard street does
+    /// NOT down-rate these. KEEP IN SYNC WITH web STRONG_FACILITY.
+    private static func isStrongFacility(_ cls: RouteClass) -> Bool {
+        cls == .protected || cls == .greenway || cls == .path
+    }
+
+    /// Whether the midpoint sits on/along a hazard (fast / bicycle high-crash)
+    /// street. Uses the arterial threshold/bearing constants (same "on a street"
+    /// semantics) — no new parity constants.
+    private func isOnHazard(
         _ mid: CLLocationCoordinate2D,
         routeBearing: Double,
         cosLat: Double,
@@ -243,6 +343,36 @@ actor BikeFriendliness {
         cy: Int
     ) -> Bool {
         var seen = Set<Int>()
+        for gx in (cx - 1)...(cx + 1) {
+            for gy in (cy - 1)...(cy + 1) {
+                guard let bucket = hazardGrid[CellKey(x: gx, y: gy)] else { continue }
+                for idx in bucket {
+                    if !seen.insert(idx).inserted { continue }
+                    let seg = hazardSegs[idx]
+                    if Self.angularDelta(routeBearing, seg.bearing) > Self.arterialBearingToleranceDeg {
+                        continue
+                    }
+                    if perpDistanceMeters(mid: mid, a: seg.a, b: seg.b, cosLat: cosLat)
+                        <= Self.arterialThresholdMeters { return true }
+                }
+            }
+        }
+        return false
+    }
+
+    /// If the midpoint is within `arterialThresholdMeters` of a bearing-aligned
+    /// busy arterial, return that arterial (with its name, for personal-rating
+    /// override). Returns nil when none matches (→ a quiet street).
+    private func matchArterial(
+        _ mid: CLLocationCoordinate2D,
+        routeBearing: Double,
+        cosLat: Double,
+        cx: Int,
+        cy: Int
+    ) -> ArtHit? {
+        var seen = Set<Int>()
+        var bestDist = Self.arterialThresholdMeters
+        var best: ArtHit?
         for gx in (cx - 1)...(cx + 1) {
             for gy in (cy - 1)...(cy + 1) {
                 guard let bucket = artGrid[CellKey(x: gx, y: gy)] else { continue }
@@ -255,11 +385,14 @@ actor BikeFriendliness {
                     let d = perpDistanceMeters(
                         mid: mid, a: seg.a, b: seg.b, cosLat: cosLat
                     )
-                    if d <= Self.arterialThresholdMeters { return true }
+                    if d <= bestDist {
+                        bestDist = d
+                        best = ArtHit(name: seg.name)
+                    }
                 }
             }
         }
-        return false
+        return best
     }
 
     /// Merge contiguous runs whose total length < minRunMeters into the
@@ -329,17 +462,19 @@ actor BikeFriendliness {
                 let type = geometry["type"] as? String
             else { continue }
 
-            let rawCls = (feature["properties"] as? [String: Any])?["class"] as? String ?? ""
+            let props = feature["properties"] as? [String: Any]
+            let rawCls = props?["class"] as? String ?? ""
             let cls = RouteClass.facility(forClass: rawCls)
+            let name = (props?["name"] as? String).map(StreetRatings.normalize)
 
             switch type {
             case "LineString":
                 if let line = geometry["coordinates"] as? [[Double]] {
-                    addLine(line, cls: cls)
+                    addLine(line, cls: cls, name: name)
                 }
             case "MultiLineString":
                 if let lines = geometry["coordinates"] as? [[[Double]]] {
-                    for line in lines { addLine(line, cls: cls) }
+                    for line in lines { addLine(line, cls: cls, name: name) }
                 }
             default:
                 continue
@@ -347,6 +482,66 @@ actor BikeFriendliness {
         }
 
         loadArterials()
+        loadHazards()
+    }
+
+    /// Build the hazard spatial index from the bundled fast-street + bicycle
+    /// high-crash overlays. Same cell size/helpers; segments carry bearing +
+    /// position only (name unused — overrides resolve via facility/arterial names).
+    private func loadHazards() {
+        for resource in ["speeds", "high-crash"] {
+            guard
+                let url = Bundle.main.url(forResource: resource, withExtension: "geojson"),
+                let data = try? Data(contentsOf: url),
+                let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let features = root["features"] as? [[String: Any]]
+            else {
+                continue // hazard overlays are optional
+            }
+            for feature in features {
+                guard
+                    let geometry = feature["geometry"] as? [String: Any],
+                    let type = geometry["type"] as? String
+                else { continue }
+                switch type {
+                case "LineString":
+                    if let line = geometry["coordinates"] as? [[Double]] {
+                        addHazardLine(line)
+                    }
+                case "MultiLineString":
+                    if let lines = geometry["coordinates"] as? [[[Double]]] {
+                        for line in lines { addHazardLine(line) }
+                    }
+                default:
+                    continue
+                }
+            }
+        }
+    }
+
+    /// Split one [[lng, lat], ...] hazard line into straight segments + index.
+    private func addHazardLine(_ line: [[Double]]) {
+        guard line.count >= 2 else { return }
+        var prev: CLLocationCoordinate2D?
+        for pair in line {
+            guard pair.count >= 2 else { prev = nil; continue }
+            let c = CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0])
+            if let a = prev {
+                let seg = ArtSeg(a: a, b: c, bearing: Self.bearing(a, c), name: nil)
+                let idx = hazardSegs.count
+                hazardSegs.append(seg)
+                let x0 = Int(floor(min(a.longitude, c.longitude) / Self.cell))
+                let x1 = Int(floor(max(a.longitude, c.longitude) / Self.cell))
+                let y0 = Int(floor(min(a.latitude, c.latitude) / Self.cell))
+                let y1 = Int(floor(max(a.latitude, c.latitude) / Self.cell))
+                for gx in x0...x1 {
+                    for gy in y0...y1 {
+                        hazardGrid[CellKey(x: gx, y: gy), default: []].append(idx)
+                    }
+                }
+            }
+            prev = c
+        }
     }
 
     /// Build the second spatial index over the bundled busy-arterial network.
@@ -370,14 +565,17 @@ actor BikeFriendliness {
                 let type = geometry["type"] as? String
             else { continue }
 
+            let name = ((feature["properties"] as? [String: Any])?["name"] as? String)
+                .map(StreetRatings.normalize)
+
             switch type {
             case "LineString":
                 if let line = geometry["coordinates"] as? [[Double]] {
-                    addArterialLine(line)
+                    addArterialLine(line, name: name)
                 }
             case "MultiLineString":
                 if let lines = geometry["coordinates"] as? [[[Double]]] {
-                    for line in lines { addArterialLine(line) }
+                    for line in lines { addArterialLine(line, name: name) }
                 }
             default:
                 continue
@@ -386,14 +584,14 @@ actor BikeFriendliness {
     }
 
     /// Split one [[lng, lat], ...] arterial line into straight segments + index.
-    private func addArterialLine(_ line: [[Double]]) {
+    private func addArterialLine(_ line: [[Double]], name: String?) {
         guard line.count >= 2 else { return }
         var prev: CLLocationCoordinate2D?
         for pair in line {
             guard pair.count >= 2 else { prev = nil; continue }
             let c = CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0])
             if let a = prev {
-                indexArterial(ArtSeg(a: a, b: c, bearing: Self.bearing(a, c)))
+                indexArterial(ArtSeg(a: a, b: c, bearing: Self.bearing(a, c), name: name))
             }
             prev = c
         }
@@ -422,14 +620,14 @@ actor BikeFriendliness {
     }
 
     /// Split one [[lng, lat], ...] line into straight segments and index each.
-    private func addLine(_ line: [[Double]], cls: RouteClass) {
+    private func addLine(_ line: [[Double]], cls: RouteClass, name: String?) {
         guard line.count >= 2 else { return }
         var prev: CLLocationCoordinate2D?
         for pair in line {
             guard pair.count >= 2 else { prev = nil; continue }
             let c = CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0])
             if let a = prev {
-                index(Seg(a: a, b: c, bearing: Self.bearing(a, c), cls: cls))
+                index(Seg(a: a, b: c, bearing: Self.bearing(a, c), cls: cls, name: name))
             }
             prev = c
         }

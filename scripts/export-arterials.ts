@@ -17,8 +17,11 @@
  *         ios/BikeRouteNicePDX/Resources/arterials.geojson    (bundled iOS)
  *
  * Each feature: { type:"Feature", geometry:LineString,
- *                 properties:{ class } }
+ *                 properties:{ class, name? } }
  *   class — OSM highway value: motorway|trunk|primary|secondary|tertiary
+ *   name  — OSM street name (when tagged); lets the friendliness classifier
+ *           apply the user's personal per-street ratings to a bare arterial
+ *           (e.g. "drop Lombard") the same way it does to a named bike facility.
  *
  * Coordinates are rounded to 5 decimals (~1 m) to keep the file small.
  *
@@ -80,7 +83,13 @@ async function main(): Promise<void> {
   console.log(`[overpass] fetching arterials for bbox ${BBOX}`);
   const res = await fetch(OVERPASS_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      // The public Overpass endpoint 406s requests with no UA / Accept header
+      // (Node's fetch sends neither by default).
+      "User-Agent": "BikeRouteNicePDX/1.0 (arterials export)",
+      Accept: "application/json",
+    },
     body: "data=" + encodeURIComponent(QUERY),
   });
   if (!res.ok) {
@@ -105,10 +114,16 @@ async function main(): Promise<void> {
     }
     if (coords.length < 2) continue;
 
+    // Carry the street name through so the friendliness classifier can match a
+    // user's per-street rating to a bare arterial (no leading/trailing space).
+    const name = el.tags?.name?.trim();
+    const properties: Record<string, string> = { class: cls };
+    if (name) properties.name = name;
+
     features.push({
       type: "Feature",
       geometry: { type: "LineString", coordinates: coords },
-      properties: { class: cls },
+      properties,
     });
     counts[cls] = (counts[cls] ?? 0) + 1;
   }

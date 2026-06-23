@@ -180,6 +180,48 @@ final class RouteStore {
 
     var bothPinsSet: Bool { start != nil && end != nil }
 
+    // ── Tap-to-rate a street ───────────────────────────────────────────────
+    /// The normalized street name awaiting a personal rating (a long-press on the
+    /// map resolved a street under the finger). Non-nil drives the rating
+    /// confirmation dialog in RootView; cleared when the user picks or cancels.
+    var pendingRatingStreet: String?
+    /// Bumped when a rate long-press landed on no nearby street, so RootView can
+    /// flash a brief "no street here" hint.
+    private(set) var noStreetTick = 0
+
+    init() {
+        // A personal street-rating change (from the manage sheet or tap-to-rate)
+        // must recolor the CURRENT route + update its comfort coverage live. The
+        // classifier already reads the new overrides on its next pass, so we just
+        // re-classify the route on screen. [weak self] → no retain cycle.
+        NotificationCenter.default.addObserver(
+            forName: .streetRatingsChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in await self?.reclassifyForRatingChange() }
+        }
+    }
+
+    /// Resolve the street under a map long-press and, if one is near, arm the
+    /// rating dialog; otherwise flash the "no street here" hint. Called by the
+    /// map coordinator (which has the tapped coordinate).
+    func requestRating(at coordinate: CLLocationCoordinate2D) {
+        Task {
+            let name = await BikeFriendliness.shared.nearestStreetName(coordinate)
+            if let name {
+                pendingRatingStreet = name
+            } else {
+                noStreetTick += 1
+            }
+        }
+    }
+
+    /// Re-classify the route currently on screen (no server call) so a rating
+    /// change updates its per-segment colors + coverage immediately.
+    func reclassifyForRatingChange() async {
+        guard let current = snapped else { return }
+        snapped = await classified(current)
+    }
+
     // MARK: - Pins
 
     func setPin(_ coordinate: CLLocationCoordinate2D, kind: WaypointKind, label: String) {

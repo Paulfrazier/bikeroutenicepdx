@@ -13,6 +13,9 @@ struct RootView: View {
     @State private var showTour = false
     @State private var showGuide = false
     @State private var showHistory = false
+    @State private var showRatings = false
+    // Brief "no street here" hint after a rate long-press misses.
+    @State private var showNoStreet = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -29,6 +32,17 @@ struct RootView: View {
                     savedRide = ride
                     showRideSaved = ride != nil
                 }
+            }
+
+            if showNoStreet {
+                Label("No street here — long-press right on a street to rate it.", systemImage: "mappin.slash")
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+                    .padding(.top, 120)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .sheet(isPresented: $showRideSaved) {
@@ -50,6 +64,42 @@ struct RootView: View {
         }
         .sheet(isPresented: $showHistory) {
             RideHistoryView()
+        }
+        .sheet(isPresented: $showRatings) {
+            StreetRatingsView()
+        }
+        // Tap-to-rate: a long-press resolved a street → offer the four ratings.
+        .confirmationDialog(
+            store.pendingRatingStreet ?? "",
+            isPresented: Binding(
+                get: { store.pendingRatingStreet != nil },
+                set: { if !$0 { store.pendingRatingStreet = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let street = store.pendingRatingStreet {
+                ForEach(StreetRating.allCases) { rating in
+                    Button(rating.label) {
+                        StreetRatings.set(rating, for: street)
+                        store.pendingRatingStreet = nil
+                    }
+                }
+                if StreetRatings.rating(for: street) != nil {
+                    Button("Clear rating", role: .destructive) {
+                        StreetRatings.remove(street)
+                        store.pendingRatingStreet = nil
+                    }
+                }
+                Button("Cancel", role: .cancel) { store.pendingRatingStreet = nil }
+            }
+        } message: {
+            Text("Rate this street — it recolors every route you plan.")
+        }
+        .onChange(of: store.noStreetTick) { _, _ in
+            withAnimation { showNoStreet = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                withAnimation { showNoStreet = false }
+            }
         }
         .sheet(isPresented: $showGuide) {
             GestureGuideView(
@@ -106,6 +156,8 @@ struct RootView: View {
                 .padding(.leading, 12)
                 .padding(.top, 8)
             historyButton
+                .padding(.top, 8)
+            ratingsButton
                 .padding(.top, 8)
             Spacer()
             LegendView()
@@ -218,6 +270,32 @@ struct RootView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("How to use the map")
+    }
+
+    /// Opens "My street ratings" (personal global per-street opinions). A small
+    /// emerald dot marks that the score is personalized when any rating exists.
+    private var ratingsButton: some View {
+        Button {
+            showRatings = true
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.tint)
+                .frame(width: 40, height: 40)
+                .background(.regularMaterial, in: Circle())
+                .overlay(alignment: .topTrailing) {
+                    if StreetRatings.hasRatings {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 10, height: 10)
+                            .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 1.5))
+                            .offset(x: 1, y: -1)
+                    }
+                }
+                .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("My street ratings")
     }
 
     /// Opens the saved-rides history (distance / time / greenway %).

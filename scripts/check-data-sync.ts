@@ -52,6 +52,16 @@ const GROUPS: Group[] = [
     script: "npm run export:arterials",
     targets: [WEB, IOS],
   },
+  {
+    file: "speeds.geojson",
+    script: "npm run export:speeds",
+    targets: [WEB, IOS],
+  },
+  {
+    file: "high-crash.geojson",
+    script: "npm run export:high-crash",
+    targets: [WEB, IOS],
+  },
 ];
 
 function sha256(file: string): string {

@@ -23,6 +23,8 @@ interface RouteDrawerProps {
   duration_s: number;
   coverage?: number;
   reshaped?: boolean;
+  /** Coverage reflects the user's personal street ratings. */
+  personalized?: boolean;
   onStartNav: () => void;
   /** Whether the edit panel (mode selector) is open. */
   editOpen: boolean;
@@ -47,6 +49,7 @@ export function RouteDrawer({
   duration_s,
   coverage,
   reshaped,
+  personalized,
   onStartNav,
   editOpen,
   onToggleEdit,
@@ -65,6 +68,7 @@ export function RouteDrawer({
         duration_s={duration_s}
         coverage={coverage}
         reshaped={reshaped}
+        personalized={personalized}
       />
 
       <div className="route-actions">

@@ -25,6 +25,7 @@
  */
 
 import { closestPointOnSegmentMeters, haversineLength } from "./geo";
+import { normalizeStreetName, overrides } from "./streetRatings";
 import type { LngLat } from "./types";
 
 // ── Tuning constants (KEEP IN SYNC WITH iOS) ────────────────────────────────
@@ -161,6 +162,8 @@ interface NetSegment {
   b: LngLat;
   cls: RouteClass;
   bearing: number;
+  /** Normalized street name (for personal-rating override), or null. */
+  name: string | null;
 }
 
 type Grid = Map<string, NetSegment[]>;
@@ -185,12 +188,17 @@ function addToGrid(grid: Grid, seg: NetSegment): void {
 }
 
 /** Push every straight piece of a coordinate ring into the grid. */
-function indexLineString(grid: Grid, coords: LngLat[], cls: RouteClass): void {
+function indexLineString(
+  grid: Grid,
+  coords: LngLat[],
+  cls: RouteClass,
+  name: string | null
+): void {
   if (coords.length < 2) return;
   for (let i = 0; i < coords.length - 1; i++) {
     const a = coords[i];
     const b = coords[i + 1];
-    addToGrid(grid, { a, b, cls, bearing: bearing(a, b) });
+    addToGrid(grid, { a, b, cls, bearing: bearing(a, b), name });
   }
 }
 
@@ -201,13 +209,15 @@ async function buildIndex(url: string): Promise<Grid> {
   const fc = (await res.json()) as GeoJSON.FeatureCollection;
   for (const feat of fc.features ?? []) {
     const cls = normalizeClass((feat.properties?.class as string | undefined) ?? "shared");
+    const rawName = feat.properties?.name as string | undefined;
+    const name = rawName ? normalizeStreetName(rawName) : null;
     const geom = feat.geometry;
     if (!geom) continue;
     if (geom.type === "LineString") {
-      indexLineString(grid, geom.coordinates as LngLat[], cls);
+      indexLineString(grid, geom.coordinates as LngLat[], cls, name);
     } else if (geom.type === "MultiLineString") {
       for (const line of geom.coordinates) {
-        indexLineString(grid, line as LngLat[], cls);
+        indexLineString(grid, line as LngLat[], cls, name);
       }
     }
   }
@@ -285,6 +295,8 @@ interface ArtSegment {
   a: LngLat;
   b: LngLat;
   bearing: number;
+  /** Normalized street name (for personal-rating override), or null. */
+  name: string | null;
 }
 
 type ArtGrid = Map<string, ArtSegment[]>;
@@ -304,11 +316,15 @@ function addArtToGrid(grid: ArtGrid, seg: ArtSegment): void {
   }
 }
 
-function indexArtLineString(grid: ArtGrid, coords: LngLat[]): void {
+function indexArtLineString(
+  grid: ArtGrid,
+  coords: LngLat[],
+  name: string | null
+): void {
   for (let i = 0; i < coords.length - 1; i++) {
     const a = coords[i];
     const b = coords[i + 1];
-    addArtToGrid(grid, { a, b, bearing: bearing(a, b) });
+    addArtToGrid(grid, { a, b, bearing: bearing(a, b), name });
   }
 }
 
@@ -320,32 +336,158 @@ async function buildArterialIndex(url: string): Promise<ArtGrid> {
   for (const feat of fc.features ?? []) {
     const geom = feat.geometry;
     if (!geom) continue;
+    const rawName = feat.properties?.name as string | undefined;
+    const name = rawName ? normalizeStreetName(rawName) : null;
     if (geom.type === "LineString") {
-      indexArtLineString(grid, geom.coordinates as LngLat[]);
+      indexArtLineString(grid, geom.coordinates as LngLat[], name);
     } else if (geom.type === "MultiLineString") {
-      for (const line of geom.coordinates) indexArtLineString(grid, line as LngLat[]);
+      for (const line of geom.coordinates) indexArtLineString(grid, line as LngLat[], name);
     }
   }
   return grid;
 }
 
 let artIndexPromise: Promise<ArtGrid> | null = null;
+let resolvedArtGrid: ArtGrid | null = null;
 
 /** Fetch + index the arterial network once; cached for the page lifetime. */
 export function loadArterialIndex(
   url = "/arterials.geojson"
 ): Promise<ArtGrid> {
-  if (!artIndexPromise) artIndexPromise = buildArterialIndex(url);
+  if (!artIndexPromise) {
+    artIndexPromise = buildArterialIndex(url).then((grid) => {
+      resolvedArtGrid = grid;
+      return grid;
+    });
+  }
   return artIndexPromise;
 }
 
-/** Whether a route-segment midpoint sits on/along a busy arterial. */
-function isOnArterial(M: LngLat, routeBearing: number, artGrid: ArtGrid): boolean {
+/**
+ * Nearest NAMED street to `target` (normalized name), for tap-to-rate. Searches
+ * the bike network first (named facilities), then named arterials, within
+ * `maxMeters`. Returns the normalized name — the same global key the rating store
+ * uses — or null when nothing named is close. Loads the indexes on first call
+ * (returns null that time; warms the cache).
+ */
+export function nearestStreetName(
+  target: LngLat,
+  maxMeters = 25
+): string | null {
+  void loadNetworkIndex();
+  void loadArterialIndex();
+  const cellLat = Math.floor(target[1] / CELL);
+  const cellLng = Math.floor(target[0] / CELL);
+  const reach = Math.max(1, Math.ceil(maxMeters / (CELL * M_PER_DEG_LAT)));
+
+  let bestDist = maxMeters;
+  let bestName: string | null = null;
+  const consider = (
+    a: LngLat,
+    b: LngLat,
+    name: string | null
+  ): void => {
+    if (!name) return;
+    const d = perpDistanceM(target, a, b);
+    if (d < bestDist) {
+      bestDist = d;
+      bestName = name;
+    }
+  };
+
+  for (let dy = -reach; dy <= reach; dy++) {
+    for (let dx = -reach; dx <= reach; dx++) {
+      const key = `${cellLat + dy},${cellLng + dx}`;
+      const bikeBucket = resolvedGrid?.get(key);
+      if (bikeBucket) for (const s of bikeBucket) consider(s.a, s.b, s.name);
+      const artBucket = resolvedArtGrid?.get(key);
+      if (artBucket) for (const s of artBucket) consider(s.a, s.b, s.name);
+    }
+  }
+  return bestName;
+}
+
+/**
+ * If a route-segment midpoint sits on/along a busy arterial, return the nearest
+ * matching arterial's name (or null when the arterial is unnamed) so the caller
+ * can both flag it "busy" AND apply a personal rating to a named arterial.
+ * Returns null when no arterial matches (→ a quiet street).
+ */
+function matchArterial(
+  M: LngLat,
+  routeBearing: number,
+  artGrid: ArtGrid
+): { name: string | null } | null {
+  const cellLat = Math.floor(M[1] / CELL);
+  const cellLng = Math.floor(M[0] / CELL);
+  let best: { name: string | null } | null = null;
+  let bestDist = ARTERIAL_THRESHOLD_M;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const bucket = artGrid.get(`${cellLat + dy},${cellLng + dx}`);
+      if (!bucket) continue;
+      for (const seg of bucket) {
+        if (bearingDiff(routeBearing, seg.bearing) > ARTERIAL_BEARING_TOL_DEG) continue;
+        const d = perpDistanceM(M, seg.a, seg.b);
+        if (d <= bestDist) {
+          bestDist = d;
+          best = { name: seg.name };
+        }
+      }
+    }
+  }
+  return best;
+}
+
+// ── Hazard index (fast streets + bicycle high-crash corridors) ───────────────
+// A third index, the UNION of speeds.geojson (posted ≥30 mph) and
+// high-crash.geojson (PBOT bicycle high-crash network). A route segment on a
+// hazard street is down-rated to "busy" UNLESS it has separated infrastructure
+// (protected/greenway/path) — those stay safe — or the user has personally rated
+// it. Uses the arterial threshold/bearing constants (same "on/along a street"
+// semantics), so no new parity constants are introduced.
+
+async function buildHazardIndex(urls: string[]): Promise<ArtGrid> {
+  const grid: ArtGrid = new Map();
+  for (const url of urls) {
+    let fc: GeoJSON.FeatureCollection;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue; // hazard overlays are optional — skip if absent
+      fc = (await res.json()) as GeoJSON.FeatureCollection;
+    } catch {
+      continue;
+    }
+    for (const feat of fc.features ?? []) {
+      const geom = feat.geometry;
+      if (!geom) continue;
+      if (geom.type === "LineString") {
+        indexArtLineString(grid, geom.coordinates as LngLat[], null);
+      } else if (geom.type === "MultiLineString") {
+        for (const line of geom.coordinates) indexArtLineString(grid, line as LngLat[], null);
+      }
+    }
+  }
+  return grid;
+}
+
+let hazardIndexPromise: Promise<ArtGrid> | null = null;
+
+/** Fetch + index the hazard overlays once; cached for the page lifetime. */
+export function loadHazardIndex(
+  urls = ["/speeds.geojson", "/high-crash.geojson"]
+): Promise<ArtGrid> {
+  if (!hazardIndexPromise) hazardIndexPromise = buildHazardIndex(urls);
+  return hazardIndexPromise;
+}
+
+/** Whether a route-segment midpoint sits on/along a hazard (fast/high-crash) street. */
+function isOnHazard(M: LngLat, routeBearing: number, hazardGrid: ArtGrid): boolean {
   const cellLat = Math.floor(M[1] / CELL);
   const cellLng = Math.floor(M[0] / CELL);
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
-      const bucket = artGrid.get(`${cellLat + dy},${cellLng + dx}`);
+      const bucket = hazardGrid.get(`${cellLat + dy},${cellLng + dx}`);
       if (!bucket) continue;
       for (const seg of bucket) {
         if (bearingDiff(routeBearing, seg.bearing) > ARTERIAL_BEARING_TOL_DEG) continue;
@@ -356,15 +498,34 @@ function isOnArterial(M: LngLat, routeBearing: number, artGrid: ArtGrid): boolea
   return false;
 }
 
+/**
+ * Facility classes with physical separation/calming — a hazard street does NOT
+ * down-rate these (a protected lane on a fast road is still protected). KEEP IN
+ * SYNC WITH iOS (BikeFriendliness.isStrongFacility).
+ */
+const STRONG_FACILITY: ReadonlySet<RouteClass> = new Set<RouteClass>([
+  "protected",
+  "greenway",
+  "path",
+]);
+
 // ── Classification ──────────────────────────────────────────────────────────
 
 /**
  * Classify each route segment. First try to match a nearby bike facility and
  * adopt its class (so the route matches the bike-map legend). If none matches,
  * fall back to the arterial index: on/along a busy road → "busy" (danger),
- * otherwise a quiet neighborhood street → "quiet".
+ * otherwise a quiet neighborhood street → "quiet". A personal rating on the
+ * matched street always wins; otherwise a hazard street (fast / high-crash)
+ * down-rates a weak or absent facility to "busy".
  */
-function rawClasses(coords: LngLat[], grid: Grid, artGrid: ArtGrid): RouteClass[] {
+function rawClasses(
+  coords: LngLat[],
+  grid: Grid,
+  artGrid: ArtGrid,
+  hazardGrid: ArtGrid,
+  ov: Map<string, RouteClass>
+): RouteClass[] {
   const n = coords.length - 1;
   const classes: RouteClass[] = new Array(n);
   for (let i = 0; i < n; i++) {
@@ -377,6 +538,12 @@ function rawClasses(coords: LngLat[], grid: Grid, artGrid: ArtGrid): RouteClass[
 
     let bestDist = THRESHOLD_M;
     let bestClass: RouteClass | null = null;
+    let bestName: string | null = null;
+    // Track the nearest STRONG (separated) facility too: where a protected/
+    // greenway/path facility coincides with a weaker one (the data maps both on
+    // a corridor), the separated infra wins — and must NOT be hazard-down-rated.
+    let strongDist = THRESHOLD_M;
+    let strongClass: RouteClass | null = null;
 
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -388,15 +555,43 @@ function rawClasses(coords: LngLat[], grid: Grid, artGrid: ArtGrid): RouteClass[
           if (d < bestDist) {
             bestDist = d;
             bestClass = seg.cls;
+            bestName = seg.name;
+          }
+          if (STRONG_FACILITY.has(seg.cls) && d < strongDist) {
+            strongDist = d;
+            strongClass = seg.cls;
           }
         }
       }
     }
     if (bestClass) {
-      classes[i] = bestClass;
+      // A personal rating on the matched street always overrides the data class.
+      const o = bestName ? ov.get(bestName) : undefined;
+      if (o) {
+        classes[i] = o;
+      } else if (STRONG_FACILITY.has(bestClass)) {
+        // Separated/calm infrastructure stays safe regardless of the road.
+        classes[i] = bestClass;
+      } else if (strongClass && strongDist <= bestDist + 2) {
+        // A separated facility coincides with this weaker match → trust it.
+        classes[i] = strongClass;
+      } else {
+        // Weak facility (lane/buffered/shared): a fast or high-crash street
+        // down-rates it to the danger signal.
+        classes[i] = isOnHazard(M, routeBearing, hazardGrid) ? "busy" : bestClass;
+      }
     } else {
-      // No bike facility — busy arterial nearby → danger, else quiet street.
-      classes[i] = isOnArterial(M, routeBearing, artGrid) ? "busy" : "quiet";
+      // No bike facility — busy arterial OR hazard street nearby → danger, else
+      // quiet street. A personal rating on a named arterial wins.
+      const art = matchArterial(M, routeBearing, artGrid);
+      const o = art?.name ? ov.get(art.name) : undefined;
+      if (o) {
+        classes[i] = o;
+      } else if (art || isOnHazard(M, routeBearing, hazardGrid)) {
+        classes[i] = "busy";
+      } else {
+        classes[i] = "quiet";
+      }
     }
   }
   return classes;
@@ -449,11 +644,17 @@ export async function classifyRoute(
   coords: LngLat[]
 ): Promise<RouteFriendliness> {
   if (coords.length < 2) return { classes: [], coverage: 0 };
-  const [grid, artGrid] = await Promise.all([
+  const [grid, artGrid, hazardGrid] = await Promise.all([
     loadNetworkIndex(),
     loadArterialIndex(),
+    loadHazardIndex(),
   ]);
-  const classes = smoothClasses(coords, rawClasses(coords, grid, artGrid));
+  // Snapshot the user's personal street ratings for this classification pass.
+  const ov = overrides();
+  const classes = smoothClasses(
+    coords,
+    rawClasses(coords, grid, artGrid, hazardGrid, ov)
+  );
 
   // Coverage = fraction NOT on a busy no-facility road. Every facility class and
   // a quiet street all count as comfortable; only "busy" — a busy street with no

@@ -12,12 +12,23 @@ import { Map, useMapClickHandler } from "./components/Map";
 import { EndpointInputs } from "./components/EndpointInputs";
 import { RouteDrawer, type EditTool } from "./components/RouteDrawer";
 import { Tour, GestureGuide, HelpButton, useFirstRunTour } from "./components/Help";
+import {
+  StreetRatingsButton,
+  StreetRatingsPanel,
+  RatingBar,
+  useHasRatings,
+} from "./components/StreetRatings";
+import { setRating, removeRating, type StreetRating } from "./streetRatings";
 import { MapBoundary } from "./components/MapBoundary";
 import { useRoute } from "./hooks/useRoute";
 import { useFriendliness } from "./hooks/useFriendliness";
 import { useNavigation } from "./hooks/useNavigation";
 import { NavHud } from "./components/NavHud";
-import { toRouteClassFeatureCollection, snapToNetwork } from "./friendliness";
+import {
+  toRouteClassFeatureCollection,
+  snapToNetwork,
+  nearestStreetName,
+} from "./friendliness";
 import { arcLengthAt, haversineLength, applyManualSegments, MAX_VIAS } from "./geo";
 import { fetchCorridor } from "./api";
 import type { LngLat, Via, ManualSegment, CorridorResponse } from "./types";
@@ -73,6 +84,18 @@ export default function App() {
     setCorridorError(null);
   }, []);
 
+  // ── Personal street ratings (rate-a-street) ────────────────────────────────
+  // The ★ panel manages saved ratings; "rating mode" lets you tap a street on the
+  // map to rate it. A rating is global by street name and recolors/re-scores the
+  // route via the friendliness classifier.
+  const [ratingsPanelOpen, setRatingsPanelOpen] = useState(false);
+  const [ratingMode, setRatingMode] = useState(false);
+  // null = no tap yet; { name } = last tapped street (name null = nothing there).
+  const [ratingTarget, setRatingTarget] = useState<{ name: string | null } | null>(
+    null
+  );
+  const personalized = useHasRatings();
+
   // ── Edit panel ─────────────────────────────────────────────────────────────
   // The three reshape tools (drag / draw / through-a-section) are grouped behind
   // one "Edit route" toggle. `editOpen` controls the mode selector's visibility;
@@ -114,6 +137,36 @@ export default function App() {
       return true;
     });
   }, [clearCorridorPick]);
+
+  // Enter rating mode (from the panel's "rate on the map" CTA): close the panel,
+  // abandon any reshape mode, and reset the tap target.
+  const startRatingOnMap = useCallback(() => {
+    setRatingsPanelOpen(false);
+    setEditOpen(false);
+    setEditing(false);
+    setDrawMode(false);
+    setCorridorMode(false);
+    clearCorridorPick();
+    setRatingTarget(null);
+    setRatingMode(true);
+  }, [clearCorridorPick]);
+
+  const stopRatingOnMap = useCallback(() => {
+    setRatingMode(false);
+    setRatingTarget(null);
+  }, []);
+
+  // Apply (or clear) a rating for the currently tapped street; keep the target so
+  // the new choice stays highlighted until another street is tapped.
+  const handlePickRating = useCallback(
+    (rating: StreetRating | null) => {
+      const name = ratingTarget?.name;
+      if (!name) return;
+      if (rating) setRating(name, rating);
+      else removeRating(name);
+    },
+    [ratingTarget]
+  );
 
   // Leaving edit mode on an endpoint change is fine (pins persist in state and
   // reappear on re-enter); we deliberately do NOT clear `vias` here. An in-
@@ -366,6 +419,12 @@ export default function App() {
     (lngLat: LngLat) => {
       // Map taps are inert while navigating (the HUD owns the screen).
       if (nav.navigating) return;
+      // Rating mode: tap a street → resolve its name → show the rating picker.
+      // Endpoints are untouched while rating.
+      if (ratingMode) {
+        setRatingTarget({ name: nearestStreetName(lngLat) });
+        return;
+      }
       // Corridor mode: tap A, then tap B → resolve the street between them.
       if (corridorMode) {
         if (!corridorA) {
@@ -399,7 +458,7 @@ export default function App() {
       }
       clickCount.current += 1;
     },
-    [corridorMode, corridorA, resolveCorridorPick, nav.navigating]
+    [ratingMode, corridorMode, corridorA, resolveCorridorPick, nav.navigating]
   );
 
   // Also wire the reusable handler from Map (for external use, e.g. tests)
@@ -481,6 +540,7 @@ export default function App() {
               distance_m={displayDistanceM}
               duration_s={route.duration_s}
               coverage={friendliness?.coverage}
+              personalized={personalized}
               reshaped={reshaped || manualSegments.length > 0}
               onStartNav={handleStartNav}
               editOpen={editOpen}
@@ -539,6 +599,19 @@ export default function App() {
         {nav.navigating && <NavHud nav={nav} onEnd={nav.stop} />}
 
         {!nav.navigating && <HelpButton onClick={() => setGuideOpen(true)} />}
+
+        {!nav.navigating && (
+          <StreetRatingsButton onClick={() => setRatingsPanelOpen(true)} />
+        )}
+
+        {/* ── Rate-a-street pick banner ── */}
+        {!nav.navigating && ratingMode && (
+          <RatingBar
+            target={ratingTarget}
+            onPick={handlePickRating}
+            onDone={stopRatingOnMap}
+          />
+        )}
 
         {/* ── Corridor ("route through a section") pick banner ── */}
         {!nav.navigating && corridorMode && (
@@ -606,6 +679,7 @@ export default function App() {
                 distance_m={displayDistanceM}
                 duration_s={route.duration_s}
                 coverage={friendliness?.coverage}
+                personalized={personalized}
                 reshaped={reshaped || manualSegments.length > 0}
                 onStartNav={handleStartNav}
                 editOpen={editOpen}
@@ -620,6 +694,13 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* ── Street ratings panel ── */}
+      <StreetRatingsPanel
+        open={ratingsPanelOpen}
+        onClose={() => setRatingsPanelOpen(false)}
+        onRateOnMap={startRatingOnMap}
+      />
 
       {/* ── Help overlays ── */}
       <Tour open={tourOpen} onClose={closeTour} />
