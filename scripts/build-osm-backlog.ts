@@ -10,10 +10,13 @@
  *   PRESENCE  — an OSM way that PBOT classifies as a built facility but which has
  *               NO OSM bike tag (cycleway / bicycle=designated / lcn). The router
  *               sees a plain road. (~2,359 citywide; 40% of SE 17th.)
- *   CONTRAFLOW— a `oneway=yes` segment on a street that ELSEWHERE declares
- *               `oneway:bicycle=no` (a two-way cycletrack) but is itself missing
- *               that tag, so the router refuses contraflow. (SE 16th pattern.)
- *               High-precision: only flags streets that already assert contraflow.
+ *   CONTRAFLOW— a `oneway=yes` facility segment that is an ENCLOSED HOLE inside a
+ *               contiguous two-way cycletrack: BOTH its endpoints touch a segment
+ *               that already asserts `oneway:bicycle=no`, but it itself is missing
+ *               that tag, so the router refuses contraflow at the gap. Geometry
+ *               adjacency + same-name continuity, NOT street-name grouping (which
+ *               propagated the tag down whole one-way arterials like N Williams and
+ *               routed bikes the wrong way). Currently flags 1 (an SW Naito hole).
  *
  * READS:  data/reconciled/current/way-tags.json   (PBOT class per OSM way id)
  *         data/reconciled/current/osm-ways.geojson (OSM tags + geometry)
@@ -92,19 +95,12 @@ function main(): void {
   const wayTags = JSON.parse(fs.readFileSync(path.join(RECON, "way-tags.json"), "utf8")) as Record<string, WayTag>;
   const osm = JSON.parse(fs.readFileSync(path.join(RECON, "osm-ways.geojson"), "utf8")) as { features: OsmFeature[] };
 
-  // Index OSM ways by id; collect per-name segments for the contraflow scan.
+  // Index OSM ways by id.
   const byId = new Map<string, OsmFeature>();
-  const byName = new Map<string, { id: string; p: Record<string, unknown>; f: OsmFeature }[]>();
   for (const f of osm.features) {
     const p = f.properties ?? {};
     const id = String(p["@id"] ?? "");
     if (id) byId.set(id, f);
-    const name = String(p["name"] ?? "");
-    if (name) {
-      const arr = byName.get(name) ?? [];
-      arr.push({ id, p, f });
-      byName.set(name, arr);
-    }
   }
 
   interface Gap {
@@ -138,25 +134,65 @@ function main(): void {
     });
   }
 
-  // ---- CONTRAFLOW: oneway=yes facility segments on a street that elsewhere
-  //      declares oneway:bicycle=no but is itself missing it ----
-  for (const [name, segs] of byName) {
-    if (!segs.some((s) => isOnewayBike(s.p))) continue; // street must assert contraflow somewhere
-    for (const s of segs) {
-      if (String(s.p["oneway"] ?? "") !== "yes") continue;
-      if (isOnewayBike(s.p)) continue; // already correct
-      if (!hasCyclewayFacility(s.p)) continue; // only flag where there's a bike facility
-      const f = s.f;
-      if (!f.geometry || f.geometry.type !== "LineString") continue;
-      const coords = f.geometry.coordinates;
-      const [lng, lat] = lineMidpoint(coords);
-      gaps.push({
-        type: "contraflow", osm_way_id: s.id, name,
-        pbot_class: null, suggested: { "oneway:bicycle": "no" },
-        geometry: { type: "LineString", coordinates: coords }, lng, lat,
-        length_m: 0,
-      });
+  // ---- CONTRAFLOW: fill a genuine HOLE in a contiguous two-way cycletrack ----
+  //   A oneway=yes facility segment is flagged ONLY if BOTH its endpoints touch a
+  //   segment that already asserts oneway:bicycle=no (an enclosed gap inside a real
+  //   two-way run). The previous rule grouped by street NAME and propagated the tag
+  //   to every same-named oneway=yes segment off a single assertion. That spammed
+  //   oneway:bicycle=no down entire one-way arterials — e.g. 3 stray assertions on
+  //   N Williams flagged 44 northbound segments, so the self-build router rode bikes
+  //   the WRONG WAY southbound (Williams is one-way NB; southbound bikes use Vancouver).
+  //   The same name-collision hit SW Broadway, NE Weidler, SE Washington, Hawthorne
+  //   Bridge, etc. Geometry adjacency confines the fix to actual holes: across the
+  //   whole city this currently flags 1 segment (a real SW Naito / Better Naito
+  //   two-way hole); all the name-collision false positives are gone.
+  const nodeKey = (c: [number, number]): string => `${c[0].toFixed(6)},${c[1].toFixed(6)}`;
+  const assertNodes = new Map<string, Set<string>>(); // node -> ids of oneway:bicycle=no ways touching it
+  for (const f of osm.features) {
+    const p = f.properties ?? {};
+    if (!isOnewayBike(p) || !f.geometry || f.geometry.type !== "LineString") continue;
+    const cs = f.geometry.coordinates;
+    if (cs.length < 2) continue;
+    const id = String(p["@id"] ?? "");
+    for (const end of [cs[0], cs[cs.length - 1]]) {
+      const k = nodeKey(end);
+      (assertNodes.get(k) ?? assertNodes.set(k, new Set<string>()).get(k)!).add(id);
     }
+  }
+  for (const f of osm.features) {
+    const p = f.properties ?? {};
+    if (String(p["oneway"] ?? "") !== "yes") continue;
+    if (isOnewayBike(p)) continue; // already correct
+    if (!hasCyclewayFacility(p)) continue; // only where there's a bike facility
+    if (!f.geometry || f.geometry.type !== "LineString") continue;
+    const coords = f.geometry.coordinates;
+    if (coords.length < 2) continue;
+    const id = String(p["@id"] ?? "");
+    const name = String(p["name"] ?? "");
+    if (!name) continue; // need a name to prove same-cycletrack continuity
+    // Enclosed = each endpoint touches an asserting segment of the SAME street name
+    // (a real two-way cycletrack continuing through this gap). Requiring same-name
+    // rejects coincidental intersections of two unrelated contraflow streets — e.g. a
+    // Williams segment whose ends merely touch N Jessup + a stray Williams assertion,
+    // or an NW 18th segment bracketed by NW Pettygrove + NW Johnson. Those would still
+    // route bikes the wrong way down a one-way arterial.
+    const sameNameAssertAt = (c: [number, number]): boolean => {
+      const ids = assertNodes.get(nodeKey(c));
+      if (!ids) return false;
+      for (const x of ids) {
+        if (x === id) continue;
+        if (String((byId.get(x)?.properties ?? {})["name"] ?? "") === name) return true;
+      }
+      return false;
+    };
+    if (!sameNameAssertAt(coords[0]) || !sameNameAssertAt(coords[coords.length - 1])) continue;
+    const [lng, lat] = lineMidpoint(coords);
+    gaps.push({
+      type: "contraflow", osm_way_id: id, name,
+      pbot_class: null, suggested: { "oneway:bicycle": "no" },
+      geometry: { type: "LineString", coordinates: coords }, lng, lat,
+      length_m: 0,
+    });
   }
 
   // Priority: protected/greenway presence first, then by length; contraflow high.
