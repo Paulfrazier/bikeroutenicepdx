@@ -108,6 +108,17 @@ assign hascycleway = not
 
 assign isbike = or hasbikerouteoraccess hascycleway
 
+# ULTRA: a STRONG, separated/striped bike lane (PBOT buffered=cycleway=lane,
+# protected=cycleway=track) — as opposed to a sharrow (shared_lane) or a mere
+# bicycle=designated hint. Used to give good on-street bike lanes nearly the
+# same "magnetism" as an lcn cycle-route, so a built buffered lane (e.g. SE 17th)
+# isn't detoured around in favor of a parallel greenway-route. (shared_lane excluded.)
+assign strongbikelane =
+       or  cycleway=lane|track
+       or  cycleway:right=lane|track
+       or  cycleway:left=lane|track
+       cycleway:both=lane|track
+
 assign ispaved = or surface=paved|asphalt|concrete|paving_stones|sett smoothness=excellent|good
 assign isunpaved = not or ispaved or ( and surface= smoothness= ) or surface=fine_gravel|cobblestone smoothness=intermediate|bad
 assign probablyGood = or ispaved and ( or isbike highway=footway ) not isunpaved
@@ -273,6 +284,24 @@ assign town_penalty
      switch estimated_town_class=5  1.4
      switch estimated_town_class=6  1.6 99 0
 
+# ULTRA: speed-based avoidance. The stock cost model keys off highway CLASS and
+# leaves bike-laned arterials cheap (a buffered lane on a 45 mph stroad costs
+# ~1.1), so the router would happily send you onto fast streets the map paints
+# red. This penalty applies REGARDLESS of bike infrastructure, keying off posted
+# speed. NOTE: BRouter quantizes `maxspeed` into buckets and 35 & 40 mph share
+# ONE bucket (with 60/65 km/h), so we CANNOT split them — penalizing 40 would
+# also penalize every 35 mph street and trash normal routing. So we act only at
+# 45 mph and up (each its own bucket), matched by token (numeric `maxspeed > x`
+# is not a valid expression). The map still reds 40 mph lanes from precise PBOT
+# speeds; routing intentionally leaves true-40 mph streets alone.
+# BRouter matches the CANONICAL (km/h) token of each maxspeed bucket, not the
+# "45_mph" alias: 45 mph→70, 50→80, 55→90, 60+→100/110/120/130.
+#   ≤40 mph → 0   45 mph → +0.4   50/55+ mph → +0.7
+assign speedpenalty
+   switch maxspeed=70                          0.4
+   switch maxspeed=80|90|100|110|120|130       0.7
+   0
+
 #
 # calculate the cost-factor, which is the factor
 # by which the distance of a way-segment is multiplied
@@ -306,6 +335,7 @@ assign costfactor
   add no_river_penalty
   add noise_penalty
   add traffic_penalty
+  add speedpenalty
 
   #
   # apply oneway-and access-penalties
@@ -325,7 +355,10 @@ assign costfactor
   #
   else if ( is_ldcr ) then 1                   # always treated as perfect (=1)
   else
-  add ( if stick_to_cycleroutes then 0.5 else 0.05 )  # everything else somewhat up
+  # ULTRA: a strong striped/separated bike lane gets nearly cycle-route credit
+  # (+0.1) instead of the full non-cycleroute surcharge (+0.5), so built buffered/
+  # protected lanes compete with parallel greenway-routes instead of being detoured.
+  add ( if stick_to_cycleroutes then ( if strongbikelane then 0.1 else 0.5 ) else 0.05 )
 
   #
   # some other highway types

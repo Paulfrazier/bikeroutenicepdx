@@ -1,0 +1,7 @@
+data/
+.claude/
+ios/
+node_modules/
+*.xcodeproj
+*.rd5
+tests/

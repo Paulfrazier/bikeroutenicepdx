@@ -11,6 +11,10 @@ final class DraftPolyline: MKPolyline {}
 /// clear which part of the route is forced verbatim vs. routed.
 final class ManualPolyline: MKPolyline {}
 
+/// A pure freehand SKETCH stroke (Build + Snap off) — a visual-only annotation
+/// drawn in slate ink. Not routed, not spliced; nothing downstream reads it.
+final class SketchPolyline: MKPolyline {}
+
 /// Wide, low-alpha underlay drawn beneath the casing to fake a soft outer glow
 /// (MKPolylineRenderer has no real blur), lifting the route off the basemap so
 /// it reads as a raised ribbon regardless of the bike-network color beneath.
@@ -36,6 +40,11 @@ final class ConnectorPolyline: MKPolyline {}
 /// (MKPolylineRenderer has no real blur), lifting the fix off the basemap.
 final class ConnectorGlowPolyline: MKPolyline {}
 
+/// The in-progress connector being built by tapping nodes (tap-to-add). Rendered
+/// as a dashed teal line so it reads as a draft distinct from the saved (solid)
+/// `ConnectorPolyline` fixes already on the map.
+final class ConnectorDraftPolyline: MKPolyline {}
+
 /// One contiguous same-class run of the routed line. The route is rendered as a
 /// sequence of these so its color matches the bike-map legend along its length.
 final class RouteTierPolyline: MKPolyline {
@@ -50,8 +59,10 @@ final class BikeMultiPolyline: MKMultiPolyline {
 }
 
 /// Display categories for the City of Portland Bicycle Network, matching the
-/// `class` values produced by `scripts/export-bike-network.ts`. Colors are kept
-/// in sync with the web map legend.
+/// `class`/`rclass` values in bike-network.geojson. Colors are kept in sync
+/// with the web map legend. `busy` is a baked render class (not a physical
+/// facility): an unprotected lane along a fast (≥40 mph) street — rendered
+/// red dashed, consistent with the route's `.busy` class.
 enum BikeClass: String, CaseIterable {
     case greenway
     case `protected`
@@ -59,6 +70,10 @@ enum BikeClass: String, CaseIterable {
     case lane
     case path
     case shared
+    /// Fast unprotected lane — baked into `rclass` in the data when a lane/
+    /// buffered/shared facility runs along a ≥40 mph street. Not a separate
+    /// physical facility; excluded from the legend.
+    case busy
 
     /// Human-readable legend label.
     var label: String {
@@ -69,10 +84,11 @@ enum BikeClass: String, CaseIterable {
         case .lane: return "Bike Lane"
         case .path: return "Off-Street Path"
         case .shared: return "Enhanced Shared Roadway"
+        case .busy: return "Fast Unprotected Lane"
         }
     }
 
-    /// Stroke color (matches web palette).
+    /// Stroke color (matches web palette + RouteClass colors).
     var color: UIColor {
         switch self {
         case .greenway: return UIColor(red: 0.180, green: 0.620, blue: 0.282, alpha: 1) // #2E9E48
@@ -81,22 +97,26 @@ enum BikeClass: String, CaseIterable {
         case .lane: return UIColor(red: 0.961, green: 0.620, blue: 0.043, alpha: 1) // #F59E0B
         case .path: return UIColor(red: 0.706, green: 0.325, blue: 0.035, alpha: 1) // #B45309
         case .shared: return UIColor(red: 0.612, green: 0.639, blue: 0.686, alpha: 1) // #9CA3AF
+        case .busy: return UIColor(red: 0.863, green: 0.149, blue: 0.149, alpha: 1) // #DC2626
         }
     }
 
     var lineWidth: CGFloat {
         switch self {
         case .greenway, .protected, .path: return 4
-        case .buffered, .lane: return 3
+        case .buffered, .lane, .busy: return 3
         case .shared: return 2.5
         }
     }
 
-    var dashed: Bool { self == .shared }
+    /// Shared roadways and baked-busy lanes both render dashed.
+    var dashed: Bool { self == .shared || self == .busy }
 
     /// Lower draws first (underneath). Higher-quality facilities sit on top.
+    /// `busy` renders below `shared` — it is a downgraded lane, not new infra.
     var zPriority: Int {
         switch self {
+        case .busy: return -1
         case .shared: return 0
         case .lane: return 1
         case .path: return 2
@@ -107,6 +127,8 @@ enum BikeClass: String, CaseIterable {
     }
 
     /// Order facilities appear in the legend (best/most familiar first).
+    /// `busy` is excluded — it is a data-derived render indicator, not a
+    /// distinct facility type the legend needs to explain.
     static let legendOrder: [BikeClass] = [.greenway, .protected, .buffered, .lane, .path, .shared]
 }
 

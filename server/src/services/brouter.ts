@@ -22,13 +22,15 @@ import {
 } from "./greenway-coverage.js";
 
 /**
- * preference → BRouter profile. `safety` won the greenway A/B (backs "comfort").
- * `safety-ultra` is our custom profile (brouter-service/profiles/safety-ultra.brf)
- * that prefers greenways/bike-infra even harder for the "ultra" tier.
+ * preference → BRouter profile. Both bike tiers are our custom profiles in
+ * brouter-service/profiles/: `safety-ultra` prefers greenways/bike-infra hardest
+ * for "ultra", and `safety-comfort` is stock `safety` (the greenway A/B winner)
+ * plus a maxspeed penalty so "comfort" also leans off fast bike-laned streets.
+ * `balanced`/`fast` use the unmodified stock BRouter profiles.
  */
 const PROFILE_BY_PREFERENCE: Record<string, string> = {
   ultra: "safety-ultra",
-  comfort: "safety",
+  comfort: "safety-comfort",
   balanced: "trekking",
   fast: "fastbike",
 };
@@ -47,19 +49,47 @@ interface BrouterGeoJSON {
   }>;
 }
 
-export async function getRouteBrouter(
+/** Raw geometry from one BRouter call — no step naming, no map-match. */
+export interface BrouterGeometry {
+  coords: [number, number][];
+  distance_m: number;
+  duration_s: number;
+}
+
+/**
+ * Fetch a single BRouter route as bare geometry (+ length/time), skipping the
+ * expensive Valhalla step-naming. This is the cheap building block for fetching
+ * several candidates per request (alternatives, facility-via probes); the one
+ * map-match is paid only once, on the chosen winner, by getRouteBrouter.
+ *
+ * `profile` is a resolved BRouter profile name (not a preference). `alternativeidx`
+ * selects BRouter's ranked alternatives (0 = primary, 1..3 = variants).
+ */
+/**
+ * Routing engine selector. "prod" = stock brouter.de tiles (config.brouterUrl);
+ * "selfbuild" = the self-built PBOT-patched tiles (config.brouterUrlSelfbuild).
+ * Used for the in-app prod-vs-selfbuild A/B. Unknown/absent → "prod".
+ */
+export type RouteEngine = "prod" | "selfbuild";
+
+export function resolveBrouterUrl(engine: string = "prod"): string {
+  return engine === "selfbuild" ? config.brouterUrlSelfbuild : config.brouterUrl;
+}
+
+export async function fetchBrouterGeometry(
   from: [number, number], // [lng, lat]
   to: [number, number], // [lng, lat]
   vias: [number, number][] = [],
-  preference: string = "comfort"
-): Promise<RouteResult> {
-  const profile = PROFILE_BY_PREFERENCE[preference] ?? "safety";
+  profile: string = "safety",
+  alternativeidx: number = 0,
+  brouterBaseUrl: string = config.brouterUrl
+): Promise<BrouterGeometry> {
   const lonlats = [from, ...vias, to]
     .map(([lng, lat]) => `${lng},${lat}`)
     .join("|");
   const url =
-    `${config.brouterUrl}/brouter?lonlats=${encodeURIComponent(lonlats)}` +
-    `&profile=${profile}&alternativeidx=0&format=geojson`;
+    `${brouterBaseUrl}/brouter?lonlats=${encodeURIComponent(lonlats)}` +
+    `&profile=${profile}&alternativeidx=${alternativeidx}&format=geojson`;
 
   let res: Response;
   try {
@@ -103,6 +133,25 @@ export async function getRouteBrouter(
   ]);
   const distance_m = Math.round(Number(feat.properties?.["track-length"] ?? 0));
   const duration_s = Math.round(Number(feat.properties?.["total-time"] ?? 0));
+  return { coords, distance_m, duration_s };
+}
+
+export async function getRouteBrouter(
+  from: [number, number], // [lng, lat]
+  to: [number, number], // [lng, lat]
+  vias: [number, number][] = [],
+  preference: string = "comfort",
+  engine: string = "prod"
+): Promise<RouteResult> {
+  const profile = PROFILE_BY_PREFERENCE[preference] ?? "safety";
+  const { coords, distance_m, duration_s } = await fetchBrouterGeometry(
+    from,
+    to,
+    vias,
+    profile,
+    0,
+    resolveBrouterUrl(engine)
+  );
 
   // Coverage is always computed from BRouter's geometry. Steps prefer named
   // turn-by-turn from Valhalla trace_route; fall back to class-only runs.

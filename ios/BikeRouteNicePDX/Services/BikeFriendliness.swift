@@ -39,9 +39,11 @@ enum RouteClass: String, Equatable, Sendable {
     /// danger signal. Everything else renders solid.
     var dashed: Bool { self == .shared || self == .busy }
 
-    /// Normalize a raw bike-network `class` value to a known facility class.
-    /// Off-network "quiet" vs "busy" is never decided here — it's resolved by the
-    /// arterial fallback when no facility matches.
+    /// Normalize a raw bike-network `class` (or `rclass`) value to a known
+    /// facility class. `rclass` may carry `"busy"` when the data has already
+    /// baked a speed-based downgrade; pass it straight through. Off-network
+    /// "quiet" vs "busy" is never decided here — it's resolved by the arterial
+    /// fallback when no facility matches.
     static func facility(forClass cls: String) -> RouteClass {
         switch cls {
         case "protected": return .protected
@@ -50,6 +52,7 @@ enum RouteClass: String, Equatable, Sendable {
         case "buffered": return .buffered
         case "lane": return .lane
         case "shared": return .shared
+        case "busy": return .busy // baked rclass downgrade — fast unprotected lane
         default: return .shared // anything unrecognized
         }
     }
@@ -322,10 +325,9 @@ actor BikeFriendliness {
             if Self.isStrongFacility(bestClass) { return bestClass }
             // A separated facility coincides with this weaker match → trust it.
             if let strongClass, strongDist <= bestDist + 2 { return strongClass }
-            // Weak facility (lane/buffered/shared): a fast or high-crash street
-            // down-rates it to the danger signal.
-            return isOnHazard(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy)
-                ? .busy : bestClass
+            // Weak facility (lane/buffered/shared): the speed-based downgrade to
+            // .busy is already baked into rclass in the data — use bestClass directly.
+            return bestClass
         }
 
         // No bike facility — busy arterial OR hazard street nearby → danger, else
@@ -505,7 +507,9 @@ actor BikeFriendliness {
             else { continue }
 
             let props = feature["properties"] as? [String: Any]
-            let rawCls = props?["class"] as? String ?? ""
+            // Prefer the baked render class (rclass) which may be "busy" for
+            // fast unprotected lanes; fall back to the raw facility class.
+            let rawCls = (props?["rclass"] as? String) ?? (props?["class"] as? String) ?? ""
             let cls = RouteClass.facility(forClass: rawCls)
             let name = (props?["name"] as? String).map(StreetRatings.normalize)
 

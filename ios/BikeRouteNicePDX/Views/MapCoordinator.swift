@@ -32,6 +32,8 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     private var routeOverlays: [MKOverlay] = []
     /// Dashed-violet overlays marking the hand-drawn (manual) stretches.
     private var manualOverlays: [ManualPolyline] = []
+    /// Slate-ink overlays for pure freehand sketch strokes (Build + Snap off).
+    private var sketchOverlays: [SketchPolyline] = []
     /// Teal highlight (line + white casing) of the picked "route through a
     /// section" street, shown only while in corridor mode.
     private var corridorOverlays: [MKOverlay] = []
@@ -40,6 +42,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     /// Persistent teal "your fix" overlays for every connector (personal +
     /// community), shown regardless of whether a route is on screen.
     private var connectorOverlays: [MKOverlay] = []
+    /// Teal node dots + dashed draft line for the connector currently being built
+    /// by tapping (connector-build mode). Rebuilt wholesale on each tap.
+    private var connectorNodeAnnotations: [ConnectorNodeAnnotation] = []
+    private var connectorDraftOverlay: ConnectorDraftPolyline?
     /// Single rubber-banded preview line shown while a hand-edit drag is live.
     private var editPreviewOverlay: RoutePolyline?
     /// True while a route is on screen — fades the bike-network overlay back so
@@ -119,27 +125,32 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             return
         }
 
-        // Lock map interaction while drawing so our pan gesture owns the touch.
-        let drawing = store.isDrawMode
-        map.isScrollEnabled = !drawing
-        map.isZoomEnabled = !drawing
-        map.isRotateEnabled = !drawing
-        map.isPitchEnabled = !drawing
-        panGesture?.isEnabled = drawing
-        tapGesture?.isEnabled = !drawing
+        // Lock map interaction while drawing OR freehand-sketching (Build + Snap
+        // off) so our pan gesture owns the touch. Sketching uses the same freehand
+        // pan as draw; taps are disabled so a drag isn't read as a waypoint tap.
+        let sketching = store.isBuildMode && !store.snapToRoads
+        let freehand = store.isDrawMode || sketching
+        map.isScrollEnabled = !freehand
+        map.isZoomEnabled = !freehand
+        map.isRotateEnabled = !freehand
+        map.isPitchEnabled = !freehand
+        panGesture?.isEnabled = freehand
+        tapGesture?.isEnabled = !freehand
 
         // Hand-edit pan is live only when a finished route is on screen, we're not
         // drawing, AND the user has explicitly entered edit mode. Outside edit mode
         // the route is non-interactive so the map pans freely over it (no accidental
         // grabs). It's also off in corridor mode so taps pick the section instead of
         // being swallowed. shouldBegin further gates it to touches on the line.
-        editPanGesture?.isEnabled = (store.snapped != nil && !drawing && store.isEditMode && !store.isCorridorMode)
+        editPanGesture?.isEnabled = (store.snapped != nil && !freehand && store.isEditMode && !store.isCorridorMode)
 
         syncAnnotation(&startAnnotation, waypoint: store.start, title: "Start", map: map)
         syncAnnotation(&endAnnotation, waypoint: store.end, title: "End", map: map)
         syncViaAnnotations(map)
         syncManualOverlays(map)
+        syncSketchOverlays(map)
         syncCorridorPreview(map)
+        syncConnectorBuild(map)
 
         syncRouteOverlays(map)
     }
@@ -306,6 +317,20 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         }
     }
 
+    /// Rebuild the slate-ink freehand sketch overlays from `store.sketchStrokes` —
+    /// a pure visual annotation (Build + Snap off), not part of any route.
+    private func syncSketchOverlays(_ map: MKMapView) {
+        if !sketchOverlays.isEmpty {
+            map.removeOverlays(sketchOverlays)
+            sketchOverlays = []
+        }
+        for stroke in store.sketchStrokes where stroke.count >= 2 {
+            let overlay = SketchPolyline(coordinates: stroke, count: stroke.count)
+            sketchOverlays.append(overlay)
+            map.addOverlay(overlay, level: .aboveLabels)
+        }
+    }
+
     /// Rebuild the persistent teal "your fix" overlays from the bundled community
     /// fixes + the rider's personal connectors. Always shown (a global map-fix
     /// layer), beneath the planned route. Cheap — rebuilt wholesale (a handful of
@@ -363,7 +388,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             map.removeAnnotations(viaAnnotations)
             viaAnnotations = []
         }
-        guard store.isEditMode else { return }
+        guard store.isEditMode || store.isBuildMode else { return }
         for via in store.vias {
             let annotation = ViaAnnotation()
             annotation.coordinate = via.coordinate
@@ -401,6 +426,34 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     @objc func handleTap(_ gesture: UITapGestureRecognizer) {
         guard !store.isDrawMode, let map = mapView else { return }
         let point = gesture.location(in: map)
+        // Connector-build mode owns the tap: hit an existing node → remove it;
+        // tap anywhere else → append a node (tap order). The map stays interactive
+        // so the rider can pan/zoom between taps to place precise link ends.
+        if store.isConnectorDrawMode {
+            if let nodeIndex = nearestConnectorNodeIndex(point, map: map) {
+                store.removeConnectorNode(at: nodeIndex)
+            } else {
+                store.addConnectorPoint(map.convert(point, toCoordinateFrom: map))
+            }
+            return
+        }
+        // Build (guided-draw) mode owns the tap: hit a waypoint pin → remove it;
+        // tap anywhere else → append a new waypoint (tap order). The from/to pin
+        // cycle is bypassed while building. Skipped when Snap is off — then the
+        // freehand sketch pan owns the gesture, not taps.
+        if store.isBuildMode && store.snapToRoads {
+            if let viaIndex = nearestViaIndex(point, map: map) {
+                if viaIndex < viaAnnotations.count {
+                    map.removeAnnotation(viaAnnotations[viaIndex])
+                    viaAnnotations.remove(at: viaIndex)
+                }
+                Task { await store.deleteVia(at: viaIndex) }
+            } else {
+                let coordinate = map.convert(point, toCoordinateFrom: map)
+                Task { await store.addWaypoint(coordinate) }
+            }
+            return
+        }
         // In edit mode, tapping a waypoint pin deletes it (and re-routes).
         if store.isEditMode, let viaIndex = nearestViaIndex(point, map: map) {
             // Optimistically drop the tapped pin so it disappears immediately.
@@ -448,7 +501,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     // MARK: - Finger draw
 
     @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
-        guard store.isDrawMode, let map = mapView else { return }
+        // The freehand pan serves two modes: draw (splice a ManualSegment) and
+        // sketch (Build + Snap off → a pure visual-only line).
+        let sketching = store.isBuildMode && !store.snapToRoads
+        guard store.isDrawMode || sketching, let map = mapView else { return }
         let point = gesture.location(in: map)
 
         switch gesture.state {
@@ -462,8 +518,12 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         case .ended:
             let coords = draftCoords
             removeDraft(map)
-            store.commitTrace(coords)
-            Task { await store.finishDrawing() }
+            if sketching {
+                store.addSketchStroke(coords)
+            } else {
+                store.commitTrace(coords)
+                Task { await store.finishDrawing() }
+            }
         case .cancelled, .failed:
             removeDraft(map)
         default:
@@ -632,6 +692,49 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             if d <= best { best = d; idx = i }
         }
         return idx
+    }
+
+    /// Index of the connector-build node within grab range of `point`, else nil. A
+    /// tap near a node removes it; anywhere else appends a new one.
+    private func nearestConnectorNodeIndex(_ point: CGPoint, map: MKMapView) -> Int? {
+        var best = Self.vertexGrabPx
+        var idx: Int?
+        for (i, coord) in store.connectorPoints.enumerated() {
+            let p = map.convert(coord, toPointTo: map)
+            let d = hypot(point.x - p.x, point.y - p.y)
+            if d <= best { best = d; idx = i }
+        }
+        return idx
+    }
+
+    /// Rebuild the in-progress connector's node dots + dashed draft line from
+    /// `store.connectorPoints`. Shown only in connector-build mode; rebuilt
+    /// wholesale on each tap (the node list is tiny).
+    private func syncConnectorBuild(_ map: MKMapView) {
+        if !connectorNodeAnnotations.isEmpty {
+            map.removeAnnotations(connectorNodeAnnotations)
+            connectorNodeAnnotations = []
+        }
+        if let existing = connectorDraftOverlay {
+            map.removeOverlay(existing)
+            connectorDraftOverlay = nil
+        }
+        guard store.isConnectorDrawMode else { return }
+        let coords = store.connectorPoints
+        if coords.count >= 2 {
+            let overlay = ConnectorDraftPolyline(coordinates: coords, count: coords.count)
+            connectorDraftOverlay = overlay
+            map.addOverlay(overlay, level: .aboveLabels)
+        }
+        for (i, coord) in coords.enumerated() {
+            let annotation = ConnectorNodeAnnotation()
+            annotation.coordinate = coord
+            // The first + last node are the link ends (what gets attached to the
+            // road network) → drawn larger so they read as the meaningful ends.
+            annotation.isEnd = (i == 0 || i == coords.count - 1)
+            map.addAnnotation(annotation)
+            connectorNodeAnnotations.append(annotation)
+        }
     }
 
     /// The manual-segment vertex within grab range of `point`, else nil. Grabbing
@@ -803,6 +906,14 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             renderer.lineJoin = .round
             renderer.lineDashPattern = [2, 8]
             return renderer
+        case let polyline as SketchPolyline:
+            // Pure freehand sketch (Build + Snap off): solid slate ink, visual only.
+            let renderer = MKPolylineRenderer(polyline: polyline)
+            renderer.strokeColor = UIColor(red: 0.200, green: 0.255, blue: 0.333, alpha: 0.9) // #334155
+            renderer.lineWidth = 4
+            renderer.lineCap = .round
+            renderer.lineJoin = .round
+            return renderer
         case let polyline as CorridorCasingPolyline:
             // White casing under the teal corridor highlight (mirrors the web).
             let renderer = MKPolylineRenderer(polyline: polyline)
@@ -842,6 +953,16 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             renderer.lineWidth = 5
             renderer.lineDashPattern = [2, 8]
             renderer.lineCap = .round
+            return renderer
+        case let polyline as ConnectorDraftPolyline:
+            // The in-progress (tap-built) connector: dashed teal, reading as a draft
+            // of the solid teal fixes already saved on the map.
+            let renderer = MKPolylineRenderer(polyline: polyline)
+            renderer.strokeColor = UIColor(red: 0.051, green: 0.580, blue: 0.533, alpha: 0.9) // #0d9488
+            renderer.lineWidth = 5
+            renderer.lineDashPattern = [2, 8]
+            renderer.lineCap = .round
+            renderer.lineJoin = .round
             return renderer
         case let multi as BikeMultiPolyline:
             let renderer = MKMultiPolylineRenderer(multiPolyline: multi)
@@ -913,6 +1034,27 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             view.layer.backgroundColor = UIColor(red: 0.051, green: 0.580, blue: 0.533, alpha: 1).cgColor // #0d9488 teal
             view.layer.borderColor = UIColor.white.cgColor
             view.layer.borderWidth = 3
+            view.canShowCallout = false
+            view.isUserInteractionEnabled = false
+            return view
+        }
+
+        // Connector-build node: a teal dot the rider tapped to trace a fix. The
+        // link ends (first/last) are larger with a heavier ring; intermediate
+        // nodes are smaller. Non-interactive so the next tap reaches the map's tap
+        // gesture (which appends/removes a node).
+        if let node = annotation as? ConnectorNodeAnnotation {
+            let id = "connectorNode"
+            let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
+                ?? MKAnnotationView(annotation: annotation, reuseIdentifier: id)
+            view.annotation = annotation
+            let size: CGFloat = node.isEnd ? 18 : 13
+            view.frame = CGRect(x: 0, y: 0, width: size, height: size)
+            view.backgroundColor = .clear
+            view.layer.cornerRadius = size / 2
+            view.layer.backgroundColor = UIColor(red: 0.051, green: 0.580, blue: 0.533, alpha: 1).cgColor // #0d9488 teal
+            view.layer.borderColor = UIColor.white.cgColor
+            view.layer.borderWidth = node.isEnd ? 3 : 2
             view.canShowCallout = false
             view.isUserInteractionEnabled = false
             return view
@@ -995,6 +1137,12 @@ final class ViaAnnotation: MKPointAnnotation {
 /// A tapped endpoint (A or B) of a "route through a section" pick. Subclass so
 /// `viewFor` can render it as a distinct teal dot while the section is chosen.
 final class CorridorEndpointAnnotation: MKPointAnnotation {}
+
+/// A tapped node of the connector being built (connector-build mode). `isEnd`
+/// marks the first/last node — the link ends — so `viewFor` draws them larger.
+final class ConnectorNodeAnnotation: MKPointAnnotation {
+    var isEnd = false
+}
 
 /// Shortest distance from point `p` to the line segment `a`–`b`, in the same
 /// (screen) coordinate space. Free function — pure CGPoint math.

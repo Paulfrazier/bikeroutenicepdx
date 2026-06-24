@@ -78,12 +78,14 @@ enum BikeNetworkLoader {
         return try? JSONSerialization.data(withJSONObject: root)
     }
 
-    /// Parse the feature's `class` property (raw JSON Data) into a BikeClass.
+    /// Parse the feature's `rclass` (or `class`) property (raw JSON Data) into
+    /// a BikeClass. Prefers `rclass` so fast unprotected lanes baked to "busy"
+    /// in the data render red dashed without a runtime speed lookup.
     private static func bikeClass(from data: Data?) -> BikeClass {
         guard
             let data,
             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let raw = obj["class"] as? String,
+            let raw = (obj["rclass"] as? String) ?? (obj["class"] as? String),
             let cls = BikeClass(rawValue: raw)
         else {
             return .lane

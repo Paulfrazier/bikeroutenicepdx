@@ -19,6 +19,9 @@ struct RouteRequest: Encodable {
     /// "comfort" | "balanced" | "fast" — maps to the server's use_roads. Omitted
     /// (nil) lets the server default to comfort.
     let preference: String?
+    /// "prod" | "selfbuild" — routing engine override. Omitted (nil) lets the
+    /// server default to "prod" (backward-compatible).
+    let engine: String?
 }
 
 /// Response from POST /match (and /route) — a GeoJSON LineString + totals.

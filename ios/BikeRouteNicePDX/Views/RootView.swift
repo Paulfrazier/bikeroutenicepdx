@@ -17,6 +17,8 @@ struct RootView: View {
     @State private var showConnectors = false
     // Brief "no street here" hint after a rate long-press misses.
     @State private var showNoStreet = false
+    // Confirm the resolved link roads before saving a tap-built connector.
+    @State private var confirmingConnectorSave = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -98,6 +100,13 @@ struct RootView: View {
             }
         } message: {
             Text("Rate this street — it recolors every route you plan.")
+        }
+        // Confirm which roads a tap-built fix links before saving it.
+        .alert("Save this fix?", isPresented: $confirmingConnectorSave) {
+            Button("Save") { store.saveConnector() }
+            Button("Keep editing", role: .cancel) {}
+        } message: {
+            Text("Links \(linkLabel(store.connectorLinkStart)) ↔ \(linkLabel(store.connectorLinkEnd)). It'll reroute trips that pass near both ends.")
         }
         .onChange(of: store.noStreetTick) { _, _ in
             withAnimation { showNoStreet = true }
@@ -185,7 +194,13 @@ struct RootView: View {
             // zone — since "Route through here" is a commit action, not passive
             // status (top is a reach + far from where the eye is).
             corridorBanner
-            ControlsBar(showSearch: $showSearch, showDirections: $showDirections)
+            connectorBanner
+            // The connector banner carries its own controls (and the map tap is
+            // claimed for node-dropping), so hide the planner bar while building one
+            // — its "tap to set start" hint would otherwise mislead.
+            if !store.isConnectorDrawMode {
+                ControlsBar(showSearch: $showSearch, showDirections: $showDirections)
+            }
         }
     }
 
@@ -194,9 +209,7 @@ struct RootView: View {
         if store.isDrawMode {
             banner(
                 icon: "hand.draw",
-                text: store.isConnectorDrawMode
-                    ? "Trace a short fix where the router misses a connection — it's saved and applied to your routes."
-                    : "Trace your route with one finger — follow the colored bikeways."
+                text: "Trace your route with one finger — follow the colored bikeways."
             )
         } else if store.phase == .snapping {
             banner(icon: "point.topleft.down.curvedto.point.bottomright.up", text: "Snapping to the bike network…")
@@ -262,6 +275,92 @@ struct RootView: View {
             .padding(.horizontal, 16)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
+    }
+
+    /// Connector-build pick banner — the analog of `corridorBanner` for tap-to-add
+    /// fixes. Walks: tap start → tap end (+ any midpoints) → confirm the resolved
+    /// link roads → save. Sits in the thumb zone; reading the state here also keeps
+    /// the MapView's node/draft overlays in sync (its updateUIView fires on render).
+    @ViewBuilder
+    private var connectorBanner: some View {
+        if store.isConnectorDrawMode {
+            let count = store.connectorPoints.count
+            VStack(spacing: 10) {
+                if count >= 2 {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Links")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("\(linkLabel(store.connectorLinkStart)) ↔ \(linkLabel(store.connectorLinkEnd))")
+                            .font(.subheadline.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 12) {
+                        Button {
+                            confirmingConnectorSave = true
+                        } label: {
+                            Text("Save fix")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.teal)
+                        Button { store.undoConnectorPoint() } label: {
+                            Image(systemName: "arrow.uturn.backward")
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.vertical, 10)
+                                .padding(.horizontal, 14)
+                        }
+                        .buttonStyle(.bordered)
+                        Button { store.exitConnectorMode() } label: {
+                            Text("Cancel")
+                                .font(.subheadline.weight(.medium))
+                                .padding(.vertical, 10)
+                                .padding(.horizontal, 12)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                } else {
+                    Text(count == 0
+                        ? "Tap the map to start a fix — drop a point at **each end** of the missing link."
+                        : "Now tap the **other end** (and any points in between).")
+                        .font(.subheadline.weight(.medium))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 12) {
+                        if count == 1 {
+                            Button { store.undoConnectorPoint() } label: {
+                                Label("Undo", systemImage: "arrow.uturn.backward")
+                                    .font(.subheadline.weight(.medium))
+                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 14)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        Button { store.exitConnectorMode() } label: {
+                            Text("Cancel")
+                                .font(.subheadline.weight(.medium))
+                                .padding(.vertical, 10)
+                                .padding(.horizontal, 16)
+                        }
+                        .buttonStyle(.bordered)
+                        Spacer()
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.horizontal, 16)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    /// Display name for a resolved link end, or a graceful placeholder when the
+    /// tapped node didn't land near any named street.
+    private func linkLabel(_ name: String?) -> String {
+        name ?? "an unnamed spot"
     }
 
     /// "?" button that opens the gesture guide (which can replay the tour).

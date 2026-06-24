@@ -96,7 +96,10 @@ export interface RouteFriendliness {
   coverage: number;
 }
 
-/** Normalize a raw bike-network `class` value to a known facility class. */
+/** Normalize a bike-network render class (`rclass`, falling back to `class`) to a
+ * known RouteClass. "busy" is a valid baked value — an unprotected lane on a fast
+ * street that the export down-rated (see scripts/lib/render-class.ts) — so the
+ * overlay and the route draw it red without any runtime speed lookup. */
 function normalizeClass(cls: string): RouteClass {
   switch (cls) {
     case "protected":
@@ -105,6 +108,7 @@ function normalizeClass(cls: string): RouteClass {
     case "buffered":
     case "lane":
     case "shared":
+    case "busy":
       return cls;
     default:
       return "shared";
@@ -209,7 +213,11 @@ async function buildIndex(url: string): Promise<Grid> {
   if (!res.ok) throw new Error(`bike-network fetch failed: ${res.status}`);
   const fc = (await res.json()) as GeoJSON.FeatureCollection;
   for (const feat of fc.features ?? []) {
-    const cls = normalizeClass((feat.properties?.class as string | undefined) ?? "shared");
+    // Prefer the baked render class (rclass) — it already down-rates unprotected
+    // lanes on fast streets to "busy" — falling back to the raw facility class.
+    const cls = normalizeClass(
+      ((feat.properties?.rclass ?? feat.properties?.class) as string | undefined) ?? "shared"
+    );
     const rawName = feat.properties?.name as string | undefined;
     const name = rawName ? normalizeStreetName(rawName) : null;
     const geom = feat.geometry;
@@ -725,9 +733,11 @@ function rawClasses(
         // A separated facility coincides with this weaker match → trust it.
         classes[i] = strongClass;
       } else {
-        // Weak facility (lane/buffered/shared): a fast or high-crash street
-        // down-rates it to the danger signal.
-        classes[i] = isOnHazard(M, routeBearing, hazardGrid) ? "busy" : bestClass;
+        // Weak facility (lane/buffered/shared). The speed down-rate is already
+        // baked into the feature's rclass (an unprotected lane on a ≥40 mph
+        // street arrives here as "busy"), so adopt it directly — no runtime
+        // hazard lookup, which keeps the route identical to the map overlay.
+        classes[i] = bestClass;
       }
     } else {
       // No bike facility — busy arterial OR hazard street nearby → danger, else

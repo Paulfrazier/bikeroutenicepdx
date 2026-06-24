@@ -59,6 +59,20 @@ enum RoutePreference: String, CaseIterable, Identifiable {
     }
 }
 
+/// Routing engine selection. Sent to the server as `engine`; "prod" uses the
+/// production BRouter instance, "selfbuild" uses the experimental self-built graph.
+enum RoutingEngine: String, CaseIterable, Identifiable {
+    case prod, selfbuild
+    var id: String { rawValue }
+    /// Short label for the segmented control.
+    var label: String {
+        switch self {
+        case .prod: return "Prod"
+        case .selfbuild: return "Self-build"
+        }
+    }
+}
+
 /// Single source of truth for the draw-a-route flow. Injected at the app root
 /// and read by every view via `@Environment(RouteStore.self)`.
 @MainActor
@@ -82,12 +96,35 @@ final class RouteStore {
         }
     }
 
+    /// Routing engine ("prod" | "selfbuild"). Persisted across launches.
+    /// Changing it while a route is shown recomputes it.
+    var routingEngine: RoutingEngine = {
+        let raw = UserDefaults.standard.string(forKey: "routingEngine") ?? RoutingEngine.prod.rawValue
+        return RoutingEngine(rawValue: raw) ?? .prod
+    }() {
+        didSet {
+            guard oldValue != routingEngine else { return }
+            UserDefaults.standard.set(routingEngine.rawValue, forKey: "routingEngine")
+            // Recompute the current route under the new engine.
+            if bothPinsSet, !isDrawMode { scheduleAutoRoute() }
+        }
+    }
+
     // Draw mode
     var isDrawMode = false
-    /// True while the active finger-draw is creating a CONNECTOR (a saved global
-    /// map-fix) rather than a per-route ManualSegment. The stroke is saved to
-    /// `Connectors` on finish instead of being spliced as a one-off segment.
+    /// True while the rider is building a CONNECTOR (a saved global map-fix) by
+    /// TAPPING nodes onto the map. Unlike manual draw (`isDrawMode`, freehand pan)
+    /// the map stays interactive and each tap appends a node to `connectorPoints`;
+    /// the finished link is saved to `Connectors`, not spliced as a one-off.
     var isConnectorDrawMode = false
+    /// Tapped nodes of the connector currently being built. The first and last are
+    /// the link ends whose nearest roads we resolve + confirm before saving.
+    var connectorPoints: [CLLocationCoordinate2D] = []
+    /// Nearest named road to the connector's first / last node, resolved live as
+    /// the rider taps so the build banner + save confirmation can show which
+    /// streets the fix links. nil → no road resolved near that end yet.
+    var connectorLinkStart: String?
+    var connectorLinkEnd: String?
     var drawnTrace: [CLLocationCoordinate2D] = []
 
     /// Ordered drag-to-reshape waypoints (stable id + precise flag). Each
@@ -127,6 +164,25 @@ final class RouteStore {
     /// false the route is non-interactive and the map pans freely over it (no
     /// accidental grabs). Reset whenever a fresh route or new endpoint appears.
     var isEditMode = false
+
+    /// Guided-draw ("Build") mode: tap the map to APPEND pass-through waypoints
+    /// one at a time (the router auto-snaps the path between them), tap a pin to
+    /// remove it. Unlike drag mode (arc-length insertion) Build appends in tap
+    /// order, so the route is built piecemeal start → wp₁ → … → end. The route
+    /// line itself stays locked (no drag). Mutually exclusive with the other
+    /// reshape modes. Mirrors the web `buildMode`.
+    var isBuildMode = false
+
+    /// "Snap to roads" toggle inside Build. ON (default) = tap to place routed
+    /// waypoints. OFF = the gesture flips to freehand finger-drag and each stroke
+    /// is kept VERBATIM as a pure visual sketch (no router, no distance, no nav,
+    /// not spliced). Mirrors the web `snapToRoads`.
+    var snapToRoads = true
+
+    /// Standalone freehand sketch strokes (Build + Snap off). Pure map overlay —
+    /// nothing downstream reads them. Persist across endpoint tweaks; cleared only
+    /// on an explicit reset (like `manualSegments`).
+    var sketchStrokes: [[CLLocationCoordinate2D]] = []
 
     // ── "Route through a section" (corridor) ───────────────────────────────
     // Tap point A then point B on a street; the server resolves the street
@@ -251,6 +307,7 @@ final class RouteStore {
         // auto-route re-routes start → vias → end so a careful edit isn't wiped.
         snapped = nil
         isEditMode = false
+        isBuildMode = false
         // An in-progress corridor pick is anchored to the old route — abandon it.
         isCorridorMode = false
         clearCorridorPick()
@@ -313,7 +370,7 @@ final class RouteStore {
         errorMessage = nil
         do {
             let routed = try await router.route(
-                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue
             )
             if Task.isCancelled { return }
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
@@ -339,7 +396,7 @@ final class RouteStore {
     /// or nil on failure (the caller keeps guiding on the old line).
     func navReroute(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) async -> SnappedRoute? {
         do {
-            let routed = try await router.route(from: from, to: to, vias: [], preference: routePreference.rawValue)
+            let routed = try await router.route(from: from, to: to, vias: [], preference: routePreference.rawValue, engine: routingEngine.rawValue)
             guard routed.coordinates.count >= 2 else { return nil }
             let enriched = await classified(routed)
             snapped = enriched
@@ -437,27 +494,102 @@ final class RouteStore {
     func enterDrawMode() {
         autoRouteTask?.cancel()
         guard bothPinsSet, autoRoute != nil else { return }
+        isEditMode = false
+        isBuildMode = false
+        isCorridorMode = false
+        clearCorridorPick()
         isDrawMode = true
         drawnTrace = []
         errorMessage = nil
         phase = .drawing
     }
 
-    /// Enter CONNECTOR-draw mode: a stroke drawn now is saved as a global
-    /// connector (a comfortable `path` map-fix) instead of a per-route segment.
-    /// Unlike `enterDrawMode`, this needs no existing route — connectors are drawn
+    /// Enter CONNECTOR-build mode: TAP nodes onto the map to trace a fix, which is
+    /// saved as a global connector (a comfortable `path` map-fix) instead of a
+    /// per-route segment. The map stays interactive (pan/zoom) — unlike the
+    /// freehand `enterDrawMode` — and needs no existing route: connectors are built
     /// standalone and apply to every future route. Mutually exclusive with the
     /// other reshape modes.
-    func enterConnectorDrawMode() {
+    func enterConnectorMode() {
         autoRouteTask?.cancel()
         isEditMode = false
+        isBuildMode = false
         isCorridorMode = false
+        isDrawMode = false
         clearCorridorPick()
         isConnectorDrawMode = true
-        isDrawMode = true
-        drawnTrace = []
+        connectorPoints = []
+        connectorLinkStart = nil
+        connectorLinkEnd = nil
         errorMessage = nil
-        phase = .drawing
+    }
+
+    /// Append a tapped node to the connector being built, then refresh the
+    /// resolved link-road names so the banner shows what this fix will link.
+    func addConnectorPoint(_ coordinate: CLLocationCoordinate2D) {
+        connectorPoints.append(coordinate)
+        refreshConnectorLinks()
+    }
+
+    /// Remove the placed node at `index` (tapping an existing node deletes it).
+    func removeConnectorNode(at index: Int) {
+        guard connectorPoints.indices.contains(index) else { return }
+        connectorPoints.remove(at: index)
+        refreshConnectorLinks()
+    }
+
+    /// Drop the last placed node (the build banner's Undo).
+    func undoConnectorPoint() {
+        guard !connectorPoints.isEmpty else { return }
+        connectorPoints.removeLast()
+        refreshConnectorLinks()
+    }
+
+    /// Resolve the nearest named road to the first + last node so the rider can
+    /// confirm which streets the fix links. Best-effort (a node off any street →
+    /// nil → shown as "an unnamed spot"). A slightly generous radius since a tap
+    /// rarely lands exactly on the centerline.
+    private func refreshConnectorLinks() {
+        let first = connectorPoints.first
+        let last = connectorPoints.count >= 2 ? connectorPoints.last : nil
+        Task {
+            let a = first == nil ? nil
+                : await BikeFriendliness.shared.nearestStreetName(first!, maxMeters: 45)
+            let b = last == nil ? nil
+                : await BikeFriendliness.shared.nearestStreetName(last!, maxMeters: 45)
+            connectorLinkStart = a
+            connectorLinkEnd = b
+        }
+    }
+
+    /// A human label for the fix built from its resolved link roads (e.g.
+    /// "NE 21st Ave ↔ NE Tillamook St"), or nil when neither end resolved.
+    func connectorLinkName() -> String? {
+        switch (connectorLinkStart, connectorLinkEnd) {
+        case let (a?, b?): return "\(a) ↔ \(b)"
+        case let (a?, nil): return a
+        case let (nil, b?): return b
+        default: return nil
+        }
+    }
+
+    /// Save the built connector as a personal fix linking its two ends, auto-named
+    /// from the resolved roads. The `.connectorsChanged` observer then rebuilds the
+    /// classifier index and re-splices/recolors any route on screen. Needs ≥2 nodes.
+    @discardableResult
+    func saveConnector() -> Bool {
+        guard connectorPoints.count >= 2 else { return false }
+        Connectors.add(coords: connectorPoints, name: connectorLinkName())
+        exitConnectorMode()
+        return true
+    }
+
+    /// Leave connector-build mode, discarding any in-progress nodes.
+    func exitConnectorMode() {
+        isConnectorDrawMode = false
+        connectorPoints = []
+        connectorLinkStart = nil
+        connectorLinkEnd = nil
     }
 
     /// Clear manual segments (and the drawn trace), keep the auto route + pins.
@@ -483,11 +615,17 @@ final class RouteStore {
         snapped = nil
         isManuallyEdited = false
         isEditMode = false
+        isBuildMode = false
+        snapToRoads = true
+        sketchStrokes = []
         vias = []
         searchResults = []
         errorMessage = nil
         isDrawMode = false
         isConnectorDrawMode = false
+        connectorPoints = []
+        connectorLinkStart = nil
+        connectorLinkEnd = nil
         isCorridorMode = false
         clearCorridorPick()
         phase = .idle
@@ -546,7 +684,7 @@ final class RouteStore {
 
         do {
             let routed = try await router.route(
-                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue
             )
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             autoRoute = routed
@@ -581,12 +719,75 @@ final class RouteStore {
 
         do {
             let routed = try await router.route(
-                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue
             )
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             autoRoute = routed
             await recomputeDisplay()
             isManuallyEdited = !vias.isEmpty
+            phase = .routed
+        } catch {
+            vias = previousVias
+            autoRoute = previousAuto
+            snapped = previousSnapped
+        }
+    }
+
+    /// Guided-draw ("Build") mode: a bare map tap APPENDS a pass-through waypoint
+    /// at the end of the chain (tap order, NOT arc-length), so the route builds
+    /// piecemeal start → wp₁ → … → end. The point snaps to the nearest bike-network
+    /// edge (unless that collapses onto an existing via, ≤8m) and is capped at
+    /// maxVias. Re-routes; reverts on failure. Mirrors the web `handleAddWaypoint`.
+    func addWaypoint(_ rawAt: CLLocationCoordinate2D) async {
+        guard vias.count < Self.maxVias,
+              let startC = start?.coordinate, let endC = end?.coordinate else { return }
+
+        let previousVias = vias
+        let previousSnapped = snapped
+        let previousAuto = autoRoute
+        let snappedPt = await BikeFriendliness.shared.nearestNetworkPoint(rawAt) ?? rawAt
+        let at = vias.contains(where: { GeoMath.distance($0.coordinate, snappedPt) < 8 }) ? rawAt : snappedPt
+        vias.append(Via(coordinate: at, precise: false))
+        isManuallyEdited = true
+        phase = .routed
+
+        do {
+            let routed = try await router.route(
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue
+            )
+            guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
+            autoRoute = routed
+            await recomputeDisplay()
+            isManuallyEdited = false
+        } catch {
+            vias = previousVias
+            autoRoute = previousAuto
+            snapped = previousSnapped
+            isManuallyEdited = !previousVias.isEmpty
+        }
+    }
+
+    /// Build mode: drop the most-recently-added waypoint (undo) and re-route.
+    func undoWaypoint() async {
+        guard !vias.isEmpty else { return }
+        await deleteVia(at: vias.count - 1)
+    }
+
+    /// Build mode: remove every waypoint at once and re-route start → end.
+    func clearWaypoints() async {
+        guard !vias.isEmpty, let startC = start?.coordinate, let endC = end?.coordinate else { return }
+        let previousVias = vias
+        let previousSnapped = snapped
+        let previousAuto = autoRoute
+        vias = []
+        do {
+            let routed = try await router.route(
+                from: startC, to: endC, vias: [], preference: routePreference.rawValue, engine: routingEngine.rawValue
+            )
+            guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
+            autoRoute = routed
+            await recomputeDisplay()
+            isManuallyEdited = false
             phase = .routed
         } catch {
             vias = previousVias
@@ -614,7 +815,7 @@ final class RouteStore {
 
         do {
             let routed = try await router.route(
-                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue
             )
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             autoRoute = routed
@@ -648,19 +849,9 @@ final class RouteStore {
     /// changes re-splice it. Too short a stroke is dropped.
     func finishDrawing() async {
         isDrawMode = false
-        let wasConnector = isConnectorDrawMode
-        isConnectorDrawMode = false
         let stroke = drawnTrace
         drawnTrace = []
         guard stroke.count >= 2 else {
-            if autoRoute != nil { phase = .routed } else { recomputeIdlePhase() }
-            return
-        }
-        if wasConnector {
-            // Save the stroke as a global connector. The `.connectorsChanged`
-            // observer rebuilds the classifier index and re-splices/recolors the
-            // route on screen, so qualifying routes pick it up immediately.
-            Connectors.add(coords: stroke)
             if autoRoute != nil { phase = .routed } else { recomputeIdlePhase() }
             return
         }
@@ -678,6 +869,7 @@ final class RouteStore {
         let next = !isCorridorMode
         if next {
             isEditMode = false
+            isBuildMode = false
             isDrawMode = false
         }
         clearCorridorPick()
@@ -688,18 +880,52 @@ final class RouteStore {
     /// modes are mutually exclusive — exactly one active at a time).
     func enterEditMode() {
         isDrawMode = false
+        isBuildMode = false
         isCorridorMode = false
         clearCorridorPick()
         isEditMode = true
     }
 
-    /// Leave all three reshape modes (drag/draw/corridor) — backs the grouped
+    /// Enter guided-draw ("Build") mode: tap the map to append waypoints one at a
+    /// time. Needs an existing route to extend (mirrors the web panel only showing
+    /// once routed). Turns off the other reshape modes.
+    func enterBuildMode() {
+        autoRouteTask?.cancel()
+        guard bothPinsSet, autoRoute != nil else { return }
+        isDrawMode = false
+        isEditMode = false
+        isCorridorMode = false
+        clearCorridorPick()
+        isBuildMode = true
+    }
+
+    /// Leave all reshape modes (drag/draw/corridor/build) — backs the grouped
     /// "Done editing" toggle.
     func exitReshapeModes() {
         isEditMode = false
+        isBuildMode = false
+        snapToRoads = true
         isDrawMode = false
         isCorridorMode = false
         clearCorridorPick()
+    }
+
+    // MARK: - Freehand sketch (Build + Snap off)
+
+    /// A freehand sketch stroke finished — keep it VERBATIM as a pure visual-only
+    /// line (no router, no splice, no distance/nav). Mirrors web `handleSketchStroke`.
+    func addSketchStroke(_ coords: [CLLocationCoordinate2D]) {
+        guard coords.count >= 2 else { return }
+        sketchStrokes.append(coords)
+    }
+
+    /// Sketch: drop the most-recent stroke (undo) / clear all strokes.
+    func undoSketch() {
+        guard !sketchStrokes.isEmpty else { return }
+        sketchStrokes.removeLast()
+    }
+    func clearSketch() {
+        sketchStrokes = []
     }
 
     /// Clear an in-progress corridor pick (both endpoints, the preview, and any
@@ -806,7 +1032,7 @@ final class RouteStore {
 
         do {
             let routed = try await router.route(
-                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue
             )
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             autoRoute = routed

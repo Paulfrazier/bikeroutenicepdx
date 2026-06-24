@@ -41,9 +41,9 @@ struct ConnectorsView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        drawFix()
+                        addFix()
                     } label: {
-                        Label("Draw a fix", systemImage: "hand.draw")
+                        Label("Add a fix", systemImage: "hand.tap")
                     }
                 }
             }
@@ -145,10 +145,10 @@ struct ConnectorsView: View {
         }
     }
 
-    /// Enter connector-draw mode and dismiss so the rider can trace a fix on the
-    /// map. No route is required.
-    private func drawFix() {
-        store.enterConnectorDrawMode()
+    /// Enter connector-build mode and dismiss so the rider can tap nodes to trace a
+    /// fix on the map. No route is required.
+    private func addFix() {
+        store.enterConnectorMode()
         dismiss()
     }
 
@@ -178,15 +178,15 @@ struct ConnectorsView: View {
                 .foregroundStyle(.teal)
             Text("No fixes yet")
                 .font(.headline)
-            Text("Draw a short link where the router misses a connection — a cycletrack it can't see, a median crossing, a cut-through. Your fix is saved on this device, shown on the map, scored as comfortable, and spliced into routes that pass near it.")
+            Text("Tap to drop points where the router misses a connection — a cycletrack it can't see, a median crossing, a cut-through. Your fix is saved on this device, shown on the map, scored as comfortable, and spliced into routes that pass near it.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
             Button {
-                drawFix()
+                addFix()
             } label: {
-                Label("Draw a fix", systemImage: "hand.draw")
+                Label("Add a fix", systemImage: "hand.tap")
                     .font(.headline)
                     .padding(.vertical, 10)
                     .padding(.horizontal, 18)

@@ -1,0 +1,6 @@
+# Keep Railway deploy archives lean and robust. None of these are needed by any
+# service build (server NIXPACKS workspace, or the brouter Dockerfiles):
+.claude/
+data/
+ios/
+*.xcodeproj

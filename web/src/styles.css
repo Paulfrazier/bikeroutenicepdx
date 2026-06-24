@@ -702,6 +702,63 @@ button {
   color: var(--color-text-muted, #64748b);
 }
 
+/* Build-mode "Snap to roads" toggle (off → freehand sketch) */
+.snap-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text, #1f2937);
+  cursor: pointer;
+}
+
+.snap-toggle input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* Build-mode (guided draw) controls: waypoint count + undo/clear */
+.build-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 0 4px;
+}
+
+.build-controls__count {
+  flex: 1 1 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted, #64748b);
+}
+
+.build-controls__btn {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text, #1f2937);
+  background: var(--color-surface, #f8fafc);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.15));
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.build-controls__btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.build-controls__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 /* ── Directions panel ──────────────────────────────────────────────────────── */
 .directions-panel {
   list-style: none;

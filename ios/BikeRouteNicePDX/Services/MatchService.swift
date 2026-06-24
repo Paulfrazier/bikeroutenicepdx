@@ -39,13 +39,15 @@ struct RouteService {
         from: CLLocationCoordinate2D,
         to: CLLocationCoordinate2D,
         vias: [CLLocationCoordinate2D],
-        preference: String? = nil
+        preference: String? = nil,
+        engine: String? = nil
     ) async throws -> SnappedRoute {
         let body = RouteRequest(
             from: [from.longitude, from.latitude],
             to: [to.longitude, to.latitude],
             via: vias.map { [$0.longitude, $0.latitude] },
-            preference: preference
+            preference: preference,
+            engine: engine
         )
         let response = try await APIClient.post(path: "route", body: body, as: RouteResponse.self)
         let coords = response.geometry.coordinates.compactMap { pair -> CLLocationCoordinate2D? in

@@ -29,6 +29,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { bakeRenderClass, MIN_FAST_MPH } from "./lib/render-class.js";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -213,6 +214,25 @@ async function main(): Promise<void> {
   }
 
   console.log("[classes]", JSON.stringify(byClass));
+
+  // Bake the render class (rclass): down-rate unprotected lanes on fast streets
+  // to "busy" by joining against the posted-speed export, so the overlay + route
+  // color them red without any runtime speed lookup. Requires speeds.geojson
+  // (run export:speeds first); skipped with a warning if it's missing.
+  const speedsPath = path.join(REPO_ROOT, "web", "public", "speeds.geojson");
+  if (fs.existsSync(speedsPath)) {
+    const speeds = JSON.parse(fs.readFileSync(speedsPath, "utf8"));
+    const { downgraded } = bakeRenderClass(kept, speeds, MIN_FAST_MPH);
+    console.log(
+      `[rclass] ${downgraded} unprotected lanes on ≥${MIN_FAST_MPH} mph streets → "busy"`
+    );
+  } else {
+    console.warn(
+      `[rclass] WARN: ${path.relative(REPO_ROOT, speedsPath)} not found — run export:speeds, then bake:render-class. Writing without downgrade.`
+    );
+    for (const f of kept) if (f.properties) f.properties["rclass"] = f.properties["class"];
+  }
+
   writeBoth(kept);
   console.log(`\nDone — ${kept.length} bike-network features.`);
 }

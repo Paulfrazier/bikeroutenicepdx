@@ -8,6 +8,12 @@ export const config = {
   valhallaUrl: (process.env.VALHALLA_URL ?? "http://localhost:8002").replace(/\/$/, ""),
   /** BRouter engine — powers /route (greenway-preferring). /match stays on Valhalla. */
   brouterUrl: (process.env.BROUTER_URL ?? "http://localhost:17777").replace(/\/$/, ""),
+  /**
+   * Second BRouter engine serving the self-built PBOT-patched tiles, for the
+   * prod-vs-selfbuild A/B (POST /route { engine: "selfbuild" }). Falls back to
+   * brouterUrl when unset, so a single-engine deploy still answers either engine.
+   */
+  brouterUrlSelfbuild: (process.env.BROUTER_SELFBUILD_URL ?? process.env.BROUTER_URL ?? "http://localhost:17777").replace(/\/$/, ""),
   nominatimUrl: (process.env.NOMINATIM_URL ?? "https://nominatim.openstreetmap.org").replace(/\/$/, ""),
   /**
    * Photon (komoot) powers as-you-type autocomplete: fuzzy prefix matching plus

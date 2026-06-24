@@ -255,3 +255,161 @@ export function dominantClass(coords: [number, number][]): NetworkClass | null {
 export function isGreenwayEquivalent(cls: NetworkClass | null): boolean {
   return cls !== null && GREENWAY_EQUIVALENT.has(cls);
 }
+
+// ---------------------------------------------------------------------------
+// Facility coverage + corridor finder (PBOT-aware route steering)
+// ---------------------------------------------------------------------------
+
+/**
+ * Total length (m) of a route polyline whose segments classify (via classifyPoint,
+ * midpoint then endpoints) into one of `classes`. The metric primitive for
+ * scoring a candidate route by facility type — e.g. pass {buffered, protected}
+ * to measure on-bike-lane distance, or GREENWAY_EQUIVALENT for greenway_coverage.
+ */
+export function facilityMeters(
+  coords: [number, number][],
+  classes: ReadonlySet<NetworkClass>
+): number {
+  if (coords.length < 2) return 0;
+  let meters = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const a = coords[i];
+    const b = coords[i + 1];
+    const segLen = distMeters(a, b);
+    if (segLen === 0) continue;
+    const mid: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const cls =
+      classifyPoint(mid[0], mid[1]) ??
+      classifyPoint(a[0], a[1]) ??
+      classifyPoint(b[0], b[1]);
+    if (cls && classes.has(cls)) meters += segLen;
+  }
+  return meters;
+}
+
+export interface FacilityCorridor {
+  /** Representative on-facility points, ordered along the origin→dest axis. */
+  spine: [number, number][];
+  /** Along-corridor span (m) the facility band covers. */
+  lengthM: number;
+  /** Count of contributing segments per class. */
+  classCounts: Record<string, number>;
+}
+
+export interface FacilityCorridorOpts {
+  halfWidthM?: number; // max perpendicular offset from the OD axis (default 350)
+  overshootM?: number; // allow facilities slightly before/after the OD ends (default 150)
+  minAlignCos?: number; // min |cos| between facility + OD direction (default 0.6)
+  bandM?: number; // offset-clustering band width to isolate one parallel facility (default 120)
+  minSpanM?: number; // discard facility bands shorter than this along-corridor (default 120)
+  classes?: ReadonlySet<NetworkClass>; // which facility classes to seek (default buffered+protected)
+}
+
+/**
+ * Find the strongest PBOT facility (buffered/protected by default) running ALONG
+ * the straight origin→destination corridor, and return an ordered "spine" of
+ * on-facility points. Callers inject one or more spine points as mandatory vias
+ * to nudge BRouter onto the lane (BRouter snaps each via to the legal edge).
+ *
+ * Approach: project every qualifying network segment's midpoint onto the OD axis
+ * (along) and its perpendicular (offset); keep those within the corridor window
+ * and roughly parallel to it; cluster by offset into bands (so a parallel street
+ * a block over is a separate band) and return the band covering the most
+ * along-corridor distance. Returns null if nothing qualifies.
+ */
+export function facilitiesInCorridor(
+  from: [number, number],
+  to: [number, number],
+  opts: FacilityCorridorOpts = {}
+): FacilityCorridor | null {
+  const halfWidth = opts.halfWidthM ?? 350;
+  const overshoot = opts.overshootM ?? 150;
+  const minAlignCos = opts.minAlignCos ?? 0.6;
+  const bandM = opts.bandM ?? 120;
+  const minSpan = opts.minSpanM ?? 120;
+  const classes =
+    opts.classes ?? new Set<NetworkClass>(["buffered", "protected"]);
+  const segs = loadNetwork();
+
+  // OD axis in local meters, origin at `from`.
+  const mLat = M_PER_DEG_LAT;
+  const mLng = metersPerDegLng((from[1] + to[1]) / 2);
+  const toLocal = (c: [number, number]): [number, number] => [
+    (c[0] - from[0]) * mLng,
+    (c[1] - from[1]) * mLat,
+  ];
+  const [tx, ty] = toLocal(to);
+  const L = Math.hypot(tx, ty);
+  if (L < 1) return null;
+  const ux = tx / L;
+  const uy = ty / L; // unit along
+  const px = -uy;
+  const py = ux; // unit perpendicular
+
+  interface Hit {
+    along: number;
+    offset: number;
+    pt: [number, number];
+    cls: NetworkClass;
+  }
+  const hits: Hit[] = [];
+  for (const s of segs) {
+    if (!classes.has(s.cls)) continue;
+    for (let i = 0; i < s.coords.length - 1; i++) {
+      const a = s.coords[i];
+      const b = s.coords[i + 1];
+      const mid: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      const [mx, my] = toLocal(mid);
+      const along = mx * ux + my * uy;
+      if (along < -overshoot || along > L + overshoot) continue;
+      const offset = mx * px + my * py;
+      if (Math.abs(offset) > halfWidth) continue;
+      const [ax, ay] = toLocal(a);
+      const [bx, by] = toLocal(b);
+      const sx = bx - ax;
+      const sy = by - ay;
+      const slen = Math.hypot(sx, sy) || 1;
+      const cos = Math.abs((sx * ux + sy * uy) / slen);
+      if (cos < minAlignCos) continue;
+      hits.push({ along, offset, pt: mid, cls: s.cls });
+    }
+  }
+  if (hits.length === 0) return null;
+
+  // Cluster by perpendicular offset into bands; isolate one parallel facility.
+  hits.sort((a, b) => a.offset - b.offset);
+  const bands: Hit[][] = [];
+  let cur: Hit[] = [];
+  let bandStart = hits[0].offset;
+  for (const h of hits) {
+    if (cur.length > 0 && h.offset - bandStart > bandM) {
+      bands.push(cur);
+      cur = [];
+      bandStart = h.offset;
+    }
+    cur.push(h);
+  }
+  if (cur.length > 0) bands.push(cur);
+
+  // Pick the band covering the most along-corridor distance.
+  let best: Hit[] | null = null;
+  let bestSpan = -1;
+  for (const band of bands) {
+    const alongs = band.map((h) => h.along);
+    const span = Math.max(...alongs) - Math.min(...alongs);
+    if (span > bestSpan) {
+      bestSpan = span;
+      best = band;
+    }
+  }
+  if (best === null || bestSpan < minSpan) return null;
+
+  best.sort((a, b) => a.along - b.along);
+  const classCounts: Record<string, number> = {};
+  for (const h of best) classCounts[h.cls] = (classCounts[h.cls] ?? 0) + 1;
+  return {
+    spine: best.map((h) => h.pt),
+    lengthM: Math.round(bestSpan),
+    classCounts,
+  };
+}

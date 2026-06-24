@@ -182,6 +182,20 @@ function manualFeatures(segments: ManualSegment[]): GeoJSON.FeatureCollection {
   };
 }
 
+/** One LineString per freehand sketch stroke (the "route-sketch" overlay). */
+function sketchFeatures(strokes: LngLat[][]): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: strokes
+      .filter((s) => s.length >= 2)
+      .map((s, i) => ({
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: s },
+        properties: { i },
+      })),
+  };
+}
+
 /** Point features for each waypoint pin (the "route-waypoints" handle layer).
  * Carries `precise` (snap=emerald vs precise=amber) and `corridor` (a "route
  * through a section" point, drawn teal) so the layer can color them apart. */
@@ -233,7 +247,7 @@ const LEGEND_ITEMS = [
   { cls: "lane",      color: ROUTE_CLASS_COLORS.lane,      label: "Bike lane",                dashed: false },
   { cls: "shared",    color: ROUTE_CLASS_COLORS.shared,    label: "Shared roadway",           dashed: true  },
   { cls: "quiet",     color: ROUTE_CLASS_COLORS.quiet,     label: "Quiet street",             dashed: false },
-  { cls: "busy",      color: ROUTE_CLASS_COLORS.busy,      label: "Busy street — no bike lane", dashed: true  },
+  { cls: "busy",      color: ROUTE_CLASS_COLORS.busy,      label: "Busy or fast street — avoid", dashed: true  },
   // Teal overlay drawn from saved connectors (community + your fixes).
   { cls: "connector", color: CONNECTOR_COLOR,              label: "Your fix",                 dashed: false },
 ] as const;
@@ -319,6 +333,18 @@ interface MapProps {
   /** When true, the route line is draggable; otherwise it's locked and the map
    * pans freely over it (prevents accidental moves). */
   editing: boolean;
+  /** Guided-draw ("Build") mode: a bare map tap appends a waypoint, a tap on a
+   * waypoint pin removes it. The route line itself stays locked (no drag). */
+  buildMode: boolean;
+  /** Build mode: a bare map tap dropped a new waypoint here (append, tap order). */
+  onAddWaypoint: (at: LngLat) => void;
+  /** Build + Snap OFF: freehand-sketch mode. A finger-drag draws a verbatim line
+   * kept as a pure visual overlay (no router, no splice). */
+  sketchMode: boolean;
+  /** A freehand sketch stroke finished — kept verbatim as a visual-only line. */
+  onSketchStroke: (coords: LngLat[]) => void;
+  /** Standalone freehand sketch strokes (rendered as the slate "route-sketch" layer). */
+  sketchStrokes: LngLat[][];
   /** Ordered drag-to-reshape waypoints (owned by App). */
   vias: Via[];
   /** A drag finished: `dragged` is the released point; `movingViaIndex` is the
@@ -371,6 +397,11 @@ export function Map({
   onMapClick,
   onStepFlyTo,
   editing,
+  buildMode,
+  onAddWaypoint,
+  sketchMode,
+  onSketchStroke,
+  sketchStrokes,
   vias,
   onReshape,
   onDeleteVia,
@@ -423,6 +454,8 @@ export function Map({
   // Props that map listeners read live (identities change every render).
   const onReshapeRef = useRef(onReshape);
   const onDeleteViaRef = useRef(onDeleteVia);
+  const onAddWaypointRef = useRef(onAddWaypoint);
+  const onSketchStrokeRef = useRef(onSketchStroke);
   const onInsertPreciseRef = useRef(onInsertPrecise);
   const onToggleViaRef = useRef(onToggleVia);
   const onMoveEndpointRef = useRef(onMoveEndpoint);
@@ -430,22 +463,28 @@ export function Map({
   const onManualNudgeRef = useRef(onManualNudge);
   const onDrawConnectorRef = useRef(onDrawConnector);
   const editingRef = useRef(editing);
+  const buildModeRef = useRef(buildMode);
+  const sketchModeRef = useRef(sketchMode);
   const drawModeRef = useRef(drawMode);
   const connectorDrawModeRef = useRef(connectorDrawMode);
   const viasRef = useRef(vias);
   const manualSegmentsRef = useRef(manualSegments);
+  const sketchStrokesRef = useRef(sketchStrokes);
   const connectorsRef = useRef(connectors);
   const routeFeaturesRef = useRef(routeFeatures);
   // Active manual-segment drag (raw nudge): which segment + vertex is moving.
   const manualEditRef = useRef<{ segId: string; vertex: number } | null>(null);
   // Freehand-draw stroke in progress (lng/lat points).
   const drawStrokeRef = useRef<LngLat[] | null>(null);
-  // Which draw mode armed the in-progress stroke: a connector (a saved fix) vs a
-  // per-route manual segment. Captured at down-time so onDrawEnd routes it right.
-  const drawStrokeIsConnectorRef = useRef(false);
+  // Which mode armed the in-progress stroke — captured at down-time so onDrawEnd
+  // routes it: a saved connector fix, a per-route manual segment, or a pure
+  // visual sketch (Build + Snap off).
+  const drawStrokeKindRef = useRef<"segment" | "connector" | "sketch">("segment");
   useEffect(() => {
     onReshapeRef.current = onReshape;
     onDeleteViaRef.current = onDeleteVia;
+    onAddWaypointRef.current = onAddWaypoint;
+    onSketchStrokeRef.current = onSketchStroke;
     onInsertPreciseRef.current = onInsertPrecise;
     onToggleViaRef.current = onToggleVia;
     onMoveEndpointRef.current = onMoveEndpoint;
@@ -453,10 +492,13 @@ export function Map({
     onManualNudgeRef.current = onManualNudge;
     onDrawConnectorRef.current = onDrawConnector;
     editingRef.current = editing;
+    buildModeRef.current = buildMode;
+    sketchModeRef.current = sketchMode;
     drawModeRef.current = drawMode;
     connectorDrawModeRef.current = connectorDrawMode;
     viasRef.current = vias;
     manualSegmentsRef.current = manualSegments;
+    sketchStrokesRef.current = sketchStrokes;
     connectorsRef.current = connectors;
     routeFeaturesRef.current = routeFeatures;
   });
@@ -503,24 +545,27 @@ export function Map({
 
     map.on("load", () => {
       // ── Bike network overlay ─────────────────────────────────────────────
-      // Full Portland bike network colored by facility class.
-      // Two layers: shared (dashed, drawn first/bottom) + all others (solid, on top).
-      // Within the solid layer, line-sort-key controls sub-ordering so higher-quality
-      // facilities render above lower-quality ones at intersection points.
+      // Full Portland bike network colored by RENDER class (rclass) — the baked
+      // class that already down-rates an unprotected lane on a ≥40 mph street to
+      // "busy" (red), so the static overlay matches the route line exactly.
+      // Two layers: dashed (shared + busy, drawn first/bottom) + solid facilities
+      // (on top). Within the solid layer, line-sort-key controls sub-ordering so
+      // higher-quality facilities render above lower-quality ones at crossings.
       map.addSource("bike-network", {
         type: "geojson",
         data: "/bike-network.geojson",
       });
 
-      // Layer 1 — shared roadways only, dashed gray (drawn at bottom z-order)
+      // Layer 1 — dashed: shared roadways (gray) + fast-street lanes (red), bottom.
       map.addLayer({
         id: "bike-network-shared",
         type: "line",
         source: "bike-network",
-        filter: ["==", ["get", "class"], "shared"],
+        filter: ["in", ["get", "rclass"], ["literal", ["shared", "busy"]]],
         layout: { "line-cap": "butt", "line-join": "round" },
         paint: {
-          "line-color": "#9CA3AF",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          "line-color": ["match", ["get", "rclass"], "busy", "#DC2626", "#9CA3AF"] as any,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1, 16, 2.5] as any,
           "line-dasharray": [4, 3],
@@ -528,18 +573,18 @@ export function Map({
         },
       });
 
-      // Layer 2 — all non-shared classes, solid lines, color by class
+      // Layer 2 — solid facilities (everything but the dashed shared/busy), color by rclass
       map.addLayer({
         id: "bike-network-solid",
         type: "line",
         source: "bike-network",
-        filter: ["!=", ["get", "class"], "shared"],
+        filter: ["!", ["in", ["get", "rclass"], ["literal", ["shared", "busy"]]]],
         layout: {
           "line-cap": "round",
           "line-join": "round",
           // Draw order within this layer: higher number = painted on top
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          "line-sort-key": ["match", ["get", "class"],
+          "line-sort-key": ["match", ["get", "rclass"],
             "lane", 2,
             "buffered", 3,
             "path", 4,
@@ -551,7 +596,7 @@ export function Map({
         paint: {
           "line-color": [
             "match",
-            ["get", "class"],
+            ["get", "rclass"],
             "greenway",  "#2E9E48",
             "protected", "#6D28D9",
             "buffered",  "#0891B2",
@@ -563,12 +608,12 @@ export function Map({
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           "line-width": [
             "interpolate", ["linear"], ["zoom"],
-            10, ["match", ["get", "class"],
+            10, ["match", ["get", "rclass"],
               ["protected", "greenway", "path"], 1.5,
               ["lane", "buffered"], 1.2,
               1.0,
             ],
-            16, ["match", ["get", "class"],
+            16, ["match", ["get", "rclass"],
               ["protected", "greenway", "path"], 5,
               ["lane", "buffered"], 3.5,
               2.5,
@@ -721,6 +766,25 @@ export function Map({
           "line-color": "#8B5CF6",
           "line-width": 5,
           "line-dasharray": [1.5, 1.5],
+        },
+      });
+
+      // ── Freehand sketch strokes (Build + Snap off) — slate ink overlay ──
+      // Pure visual annotation: not routed, not spliced, nothing downstream reads
+      // it. Distinct from the violet manual segments and teal connectors.
+      map.addSource("route-sketch", {
+        type: "geojson",
+        data: emptyGeojson(),
+      });
+      map.addLayer({
+        id: "route-sketch-line",
+        type: "line",
+        source: "route-sketch",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#334155",
+          "line-width": 4,
+          "line-opacity": 0.9,
         },
       });
 
@@ -972,15 +1036,16 @@ export function Map({
       map.off("touchend", onDrawEnd);
       map.dragPan.enable();
       const stroke = drawStrokeRef.current;
-      const isConnector = drawStrokeIsConnectorRef.current;
+      const kind = drawStrokeKindRef.current;
       drawStrokeRef.current = null;
       (
         map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
       )?.setData(emptyGeojson());
       suppressClickRef.current = true;
       if (stroke && stroke.length >= 2) {
-        // The same gesture feeds either store, by which mode armed the stroke.
-        if (isConnector) onDrawConnectorRef.current(stroke);
+        // The same gesture feeds a different store, by which mode armed the stroke.
+        if (kind === "connector") onDrawConnectorRef.current(stroke);
+        else if (kind === "sketch") onSketchStrokeRef.current(stroke);
         else onDrawSegmentRef.current(stroke);
       }
     };
@@ -1007,12 +1072,16 @@ export function Map({
     const onDown = (
       e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
     ) => {
-      // Draw mode (manual segment OR connector): capture a freehand stroke. The
-      // stroke is routed to the right store in onDrawEnd by this captured flag.
-      if (drawModeRef.current || connectorDrawModeRef.current) {
+      // Draw mode (manual segment OR connector OR freehand sketch): capture a
+      // freehand stroke. onDrawEnd routes it to the right store by this kind.
+      if (drawModeRef.current || connectorDrawModeRef.current || sketchModeRef.current) {
         e.preventDefault();
         map.dragPan.disable();
-        drawStrokeIsConnectorRef.current = connectorDrawModeRef.current;
+        drawStrokeKindRef.current = connectorDrawModeRef.current
+          ? "connector"
+          : sketchModeRef.current
+            ? "sketch"
+            : "segment";
         drawStrokeRef.current = [[e.lngLat.lng, e.lngLat.lat]];
         (
           map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
@@ -1102,6 +1171,15 @@ export function Map({
         suppressClickRef.current = false;
         return;
       }
+      // Guided-draw ("Build") mode owns the tap: hit an existing waypoint pin →
+      // remove it; tap anywhere else → append a new waypoint (tap order). The
+      // App-level from/to cycle is bypassed while building.
+      if (buildModeRef.current && !sketchModeRef.current) {
+        const hitVia = nearestViaIndexPx({ x: e.point.x, y: e.point.y });
+        if (hitVia !== null) onDeleteViaRef.current(hitVia);
+        else onAddWaypointRef.current([e.lngLat.lng, e.lngLat.lat]);
+        return;
+      }
       onMapClickRef.current([e.lngLat.lng, e.lngLat.lat]);
     });
 
@@ -1188,6 +1266,15 @@ export function Map({
       map.getSource("route-manual") as maplibregl.GeoJSONSource | undefined
     )?.setData(manualFeatures(manualSegments));
   }, [manualSegments]);
+
+  // ── Freehand sketch strokes: repaint the slate overlay when they change ──
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    (
+      map.getSource("route-sketch") as maplibregl.GeoJSONSource | undefined
+    )?.setData(sketchFeatures(sketchStrokes));
+  }, [sketchStrokes]);
 
   // ── Personal connectors: repaint the teal "your fix" overlay on change ──
   // (community connectors are static — loaded once from the source data url).

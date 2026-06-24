@@ -45,3 +45,9 @@ web/public/*.pmtiles
 tests/results/
 .gstack/
 .vercel
+
+# BRouter self-build (regenerable: PBFs, SRTM, intermediates, .rd5)
+data/brouter-build/
+
+# Claude Code harness state (worktrees, transcripts) — never commit
+.claude/

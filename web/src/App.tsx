@@ -82,6 +82,18 @@ export default function App() {
   // across edits; cleared only on an explicit reset.
   const [manualSegments, setManualSegments] = useState<ManualSegment[]>([]);
   const [drawMode, setDrawMode] = useState(false);
+  // Guided-draw ("Build") mode: tap the map to append pass-through waypoints one
+  // at a time (router auto-snaps the path between them), tap a pin to remove it.
+  // Unlike drag mode (arc-length insertion), Build APPENDS in tap order.
+  const [buildMode, setBuildMode] = useState(false);
+  // "Snap to roads" toggle inside Build. ON (default) = routed waypoints. OFF =
+  // the gesture flips to freehand finger-drag and each stroke is kept VERBATIM as
+  // a pure visual sketch (no router, no distance, no nav, not spliced).
+  const [snapToRoads, setSnapToRoads] = useState(true);
+  // Standalone freehand sketch strokes (Build + Snap OFF). Pure map overlay —
+  // nothing downstream reads them. Persist across endpoint tweaks; cleared only
+  // on an explicit reset (like manualSegments).
+  const [sketchStrokes, setSketchStrokes] = useState<LngLat[][]>([]);
 
   // ── "Route through this section" (corridor) ────────────────────────────────
   // Tap point A then point B on a street; the server resolves the street between
@@ -136,7 +148,9 @@ export default function App() {
       ? "draw"
       : corridorMode
         ? "through"
-        : null;
+        : buildMode
+          ? "build"
+          : null;
   // Select a reshape mode — turns exactly one on, the others off, and abandons
   // any half-finished corridor pick (mirrors handleToggleCorridorMode).
   const selectEditTool = useCallback(
@@ -144,6 +158,7 @@ export default function App() {
       setEditing(tool === "drag");
       setDrawMode(tool === "draw");
       setCorridorMode(tool === "through");
+      setBuildMode(tool === "build");
       setConnectorDrawMode(false);
       clearCorridorPick();
     },
@@ -157,12 +172,15 @@ export default function App() {
         setEditing(false);
         setDrawMode(false);
         setCorridorMode(false);
+        setBuildMode(false);
+        setSnapToRoads(true);
         clearCorridorPick();
         return false;
       }
       setEditing(true);
       setDrawMode(false);
       setCorridorMode(false);
+      setBuildMode(false);
       setConnectorDrawMode(false);
       clearCorridorPick();
       return true;
@@ -177,6 +195,7 @@ export default function App() {
     setEditing(false);
     setDrawMode(false);
     setCorridorMode(false);
+    setBuildMode(false);
     setConnectorDrawMode(false);
     clearCorridorPick();
     setRatingTarget(null);
@@ -198,6 +217,7 @@ export default function App() {
     setEditing(false);
     setDrawMode(false);
     setCorridorMode(false);
+    setBuildMode(false);
     clearCorridorPick();
     setRatingMode(false);
     setRatingTarget(null);
@@ -232,6 +252,8 @@ export default function App() {
     setEditing(false);
     setDrawMode(false);
     setCorridorMode(false);
+    setBuildMode(false);
+    setSnapToRoads(true);
     setConnectorDrawMode(false);
     clearCorridorPick();
   }, [from, to, clearCorridorPick]);
@@ -254,6 +276,8 @@ export default function App() {
     preference
   );
   const reshaped = vias.length > 0;
+  // Freehand-sketch active = Build with snap turned off.
+  const sketchMode = buildMode && !snapToRoads;
 
   // ── Live turn-by-turn navigation (foreground; iOS has the native version) ──
   const nav = useNavigation();
@@ -368,6 +392,53 @@ export default function App() {
       }
       return prev.filter((_, i) => i !== index);
     });
+  }, []);
+
+  // Guided-draw ("Build") mode: a bare map tap APPENDS a pass-through waypoint at
+  // the end of the chain (tap order), so the route is built piecemeal start →
+  // wp₁ → … → end. Unlike a drag insert, we don't reorder by arc-length. The
+  // point snaps to the nearest bike-network edge (unless that collapses onto an
+  // existing waypoint) and is capped at MAX_VIAS.
+  const handleAddWaypoint = useCallback((rawAt: LngLat) => {
+    setVias((prev) => {
+      if (prev.length >= MAX_VIAS) return prev;
+      const snapped = snapToNetwork(rawAt);
+      const at =
+        snapped &&
+        !prev.some((v) => haversineLength([v.at, snapped]) < VIA_DEDUPE_M)
+          ? snapped
+          : rawAt;
+      return [...prev, { id: nextViaId(), at, precise: false }];
+    });
+  }, []);
+
+  // Build mode: drop the most-recently-added waypoint (undo).
+  const handleUndoWaypoint = useCallback(() => {
+    setVias((prev) => prev.slice(0, -1));
+  }, []);
+
+  // Build mode: remove every waypoint at once.
+  const handleClearWaypoints = useCallback(() => {
+    setVias([]);
+  }, []);
+
+  // Build + Snap OFF: a freehand stroke finished — keep it VERBATIM as a pure
+  // visual sketch line (no router, no splice, no distance/nav).
+  const handleSketchStroke = useCallback((coords: LngLat[]) => {
+    if (coords.length < 2) return;
+    setSketchStrokes((prev) => [...prev, coords]);
+  }, []);
+
+  // Sketch: drop the most-recent stroke (undo) / clear all strokes.
+  const handleUndoSketch = useCallback(() => {
+    setSketchStrokes((prev) => prev.slice(0, -1));
+  }, []);
+  const handleClearSketch = useCallback(() => {
+    setSketchStrokes([]);
+  }, []);
+
+  const handleToggleSnap = useCallback(() => {
+    setSnapToRoads((v) => !v);
   }, []);
 
   // Finished a freehand draw: keep it VERBATIM as a manual segment spliced into
@@ -528,7 +599,9 @@ export default function App() {
         setToLabel("");
         setVias([]);
         setManualSegments([]);
+        setSketchStrokes([]);
         setDrawMode(false);
+        setBuildMode(false);
         setConnectorDrawMode(false);
         clickCount.current = -1; // will be incremented to 0 below
       }
@@ -628,6 +701,14 @@ export default function App() {
               onToggleEdit={toggleEditPanel}
               activeTool={activeTool}
               onSelectTool={selectEditTool}
+              onUndoWaypoint={handleUndoWaypoint}
+              onClearWaypoints={handleClearWaypoints}
+              waypointCount={vias.length}
+              snapToRoads={snapToRoads}
+              onToggleSnap={handleToggleSnap}
+              sketchCount={sketchStrokes.length}
+              onUndoSketch={handleUndoSketch}
+              onClearSketch={handleClearSketch}
               steps={route.steps}
               onStepClick={handleStepClick}
               showDirections
@@ -661,6 +742,11 @@ export default function App() {
           onStepFlyTo={flyTo}
           navCamera={nav.camera}
           editing={editing}
+          buildMode={buildMode}
+          onAddWaypoint={handleAddWaypoint}
+          sketchMode={sketchMode}
+          onSketchStroke={handleSketchStroke}
+          sketchStrokes={sketchStrokes}
           vias={vias}
           onReshape={handleReshape}
           onDeleteVia={handleDeleteVia}
@@ -792,6 +878,14 @@ export default function App() {
                 onToggleEdit={toggleEditPanel}
                 activeTool={activeTool}
                 onSelectTool={selectEditTool}
+                onUndoWaypoint={handleUndoWaypoint}
+                onClearWaypoints={handleClearWaypoints}
+                waypointCount={vias.length}
+                snapToRoads={snapToRoads}
+                onToggleSnap={handleToggleSnap}
+                sketchCount={sketchStrokes.length}
+                onUndoSketch={handleUndoSketch}
+                onClearSketch={handleClearSketch}
                 steps={route.steps}
                 onStepClick={handleStepClick}
                 showDirections={drawerExpanded}

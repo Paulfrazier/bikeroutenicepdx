@@ -33,6 +33,9 @@ const RouteBody = z.object({
   // Greenway-vs-speed preference (ultra↔fast slider). Defaults to "comfort".
   // "ultra" prefers greenways/bike-infra hardest (custom BRouter safety-ultra).
   preference: z.enum(["ultra", "comfort", "balanced", "fast"]).optional(),
+  // Routing-engine A/B: "prod" = stock brouter.de tiles, "selfbuild" = self-built
+  // PBOT-patched tiles. Defaults to "prod". See docs/BROUTER_SELF_BUILD.md.
+  engine: z.enum(["prod", "selfbuild"]).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -53,7 +56,7 @@ app.post(
     }
   }),
   async (c) => {
-    const { from, to, via, preference } = c.req.valid("json");
+    const { from, to, via, preference, engine } = c.req.valid("json");
 
     // Reject if from === to with no via points (Valhalla would error anyway, but
     // friendlier message). With vias the route is well-defined even if endpoints match.
@@ -65,7 +68,7 @@ app.post(
     }
 
     try {
-      const result = await getRouteBrouter(from, to, via ?? [], preference ?? "comfort");
+      const result = await getRouteBrouter(from, to, via ?? [], preference ?? "comfort", engine ?? "prod");
       return c.json(result);
     } catch (err) {
       if (err instanceof ValhallaError) {

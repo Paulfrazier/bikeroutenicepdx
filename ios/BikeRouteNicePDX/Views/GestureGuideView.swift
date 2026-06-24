@@ -30,6 +30,12 @@ struct GestureGuideView: View {
             Gesture(action: "Use my location", result: "Sets the start to where you are"),
             Gesture(action: "Trash button", result: "Clears everything and starts over"),
         ]),
+        Group(icon: "mappin.and.ellipse", tint: .green, mode: "Build — guided draw", hint: "Tap “Edit”, then “Build”", gestures: [
+            Gesture(action: "Tap the map", result: "Adds a waypoint; the route builds piece by piece through each one"),
+            Gesture(action: "Tap a waypoint", result: "Removes it"),
+            Gesture(action: "Undo / Clear", result: "Drops the last waypoint, or all of them"),
+            Gesture(action: "Turn off “Snap to roads”", result: "Drag to sketch a freehand line on the map (not routed)"),
+        ]),
         Group(icon: "hand.draw.fill", tint: .blue, mode: "Edit route — anchors", hint: "Tap “Edit” first", gestures: [
             Gesture(action: "Drag the route", result: "Reshapes it, re-snapping to the nearest roads"),
             Gesture(action: "Long-press the line", result: "Drops a precise anchor exactly there (no snap)"),

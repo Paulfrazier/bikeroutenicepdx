@@ -2,7 +2,7 @@
   "name": "bikeroutenicepdx",
   "version": "0.1.0",
   "private": true,
-  "description": "Portland Greenway Router — bike routing PWA using PBOT's authoritative greenway GIS",
+  "description": "Portland Greenway Router \u2014 bike routing PWA using PBOT's authoritative greenway GIS",
   "license": "MIT",
   "workspaces": [
     "server",
@@ -14,6 +14,7 @@
     "build:graph": "tsx scripts/build-graph.ts",
     "export:greenways": "tsx scripts/export-greenways.ts",
     "export:bike-network": "tsx scripts/export-bike-network.ts",
+    "bake:render-class": "tsx scripts/bake-render-class.ts",
     "export:arterials": "tsx scripts/export-arterials.ts",
     "export:speeds": "tsx scripts/export-speeds.ts",
     "export:high-crash": "tsx scripts/export-high-crash.ts",

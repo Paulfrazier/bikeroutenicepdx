@@ -231,6 +231,16 @@ const GROUPS: Group[] = [
     ],
   },
   {
+    mode: "📍 Build — guided draw",
+    hint: "Tap “Edit”, then “Build”",
+    gestures: [
+      { do: "Tap the map", gets: "Adds a waypoint; the route builds piece by piece through each one" },
+      { do: "Tap a waypoint", gets: "Removes it" },
+      { do: "Undo / Clear", gets: "Drops the last waypoint, or all of them" },
+      { do: "Turn off “Snap to roads”", gets: "Drag to sketch a freehand line on the map (not routed)" },
+    ],
+  },
+  {
     mode: "✎ Edit route — anchors",
     hint: "Tap “Edit route” first",
     gestures: [

@@ -166,6 +166,7 @@ struct ControlsBar: View {
                     }
                 }
                 preferencePicker
+                enginePicker
                 // Action row: just the two primary CTAs, equal width via
                 // frame(maxWidth:.infinity), uniform height via controlSize +
                 // shared font. lineLimit keeps both labels on one line.
@@ -187,6 +188,9 @@ struct ControlsBar: View {
                     editToolsRow
                     if let hintText = activeReshapeHint {
                         hint(hintText)
+                    }
+                    if store.isBuildMode {
+                        buildControlsRow
                     }
                 }
             }
@@ -221,6 +225,23 @@ struct ControlsBar: View {
         ) {
             ForEach(RoutePreference.allCases) { pref in
                 Text(pref.label).tag(pref)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    /// Prod↔Self-build engine toggle. Changing it recomputes the current route
+    /// (RouteStore re-routes in its didSet).
+    private var enginePicker: some View {
+        Picker(
+            "Engine",
+            selection: Binding(
+                get: { store.routingEngine },
+                set: { store.routingEngine = $0 }
+            )
+        ) {
+            ForEach(RoutingEngine.allCases) { engine in
+                Text(engine.label).tag(engine)
             }
         }
         .pickerStyle(.segmented)
@@ -325,6 +346,9 @@ struct ControlsBar: View {
     /// through a tapped section.
     private var editToolsRow: some View {
         HStack(spacing: 6) {
+            editToolButton("Build", icon: "mappin.and.ellipse", active: store.isBuildMode) {
+                store.enterBuildMode()
+            }
             editToolButton("Drag", icon: "hand.point.up.left.fill", active: store.isEditMode) {
                 store.enterEditMode()
             }
@@ -368,6 +392,11 @@ struct ControlsBar: View {
     /// Contextual hint for the active reshape mode. Draw has its own (.drawing
     /// phase) hint, so it isn't covered here.
     private var activeReshapeHint: String? {
+        if store.isBuildMode {
+            return store.snapToRoads
+                ? "Tap the map to add waypoints one at a time; tap a waypoint to remove it."
+                : "Drag on the map to sketch a freehand line (not routed)."
+        }
         if store.isEditMode {
             return "Drag the route on the map to reshape it — it re-snaps to roads."
         }
@@ -375,6 +404,60 @@ struct ControlsBar: View {
             return "Tap the start then the end of a section on the map."
         }
         return nil
+    }
+
+    /// Build-mode controls: a "Snap to roads" toggle, then either waypoint
+    /// controls (snap on) or freehand-sketch controls (snap off).
+    private var buildControlsRow: some View {
+        VStack(spacing: 8) {
+            Toggle("Snap to roads", isOn: Binding(
+                get: { store.snapToRoads },
+                set: { store.snapToRoads = $0 }
+            ))
+            .font(.caption.weight(.semibold))
+            if store.snapToRoads {
+                countControls(
+                    count: store.vias.count,
+                    noun: "waypoint",
+                    undo: { Task { await store.undoWaypoint() } },
+                    clear: { Task { await store.clearWaypoints() } }
+                )
+            } else {
+                countControls(
+                    count: store.sketchStrokes.count,
+                    noun: "sketch",
+                    undo: { store.undoSketch() },
+                    clear: { store.clearSketch() }
+                )
+            }
+        }
+    }
+
+    /// Shared count + Undo (drop last) + Clear (drop all) row for Build/Sketch.
+    private func countControls(
+        count: Int,
+        noun: String,
+        undo: @escaping () -> Void,
+        clear: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text("\(count) \(count == 1 ? noun : noun + "s")")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: undo) {
+                Label("Undo", systemImage: "arrow.uturn.backward")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(count == 0)
+            Button(role: .destructive, action: clear) {
+                Label("Clear", systemImage: "xmark")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(count == 0)
+        }
     }
 
     private var clearAllButton: some View {
