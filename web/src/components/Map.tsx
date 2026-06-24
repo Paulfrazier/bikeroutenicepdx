@@ -247,7 +247,7 @@ const LEGEND_ITEMS = [
   { cls: "lane",      color: ROUTE_CLASS_COLORS.lane,      label: "Bike lane",                dashed: false },
   { cls: "shared",    color: ROUTE_CLASS_COLORS.shared,    label: "Shared roadway",           dashed: true  },
   { cls: "quiet",     color: ROUTE_CLASS_COLORS.quiet,     label: "Quiet street",             dashed: false },
-  { cls: "busy",      color: ROUTE_CLASS_COLORS.busy,      label: "Busy or fast street — avoid", dashed: true  },
+  { cls: "busy",      color: ROUTE_CLASS_COLORS.busy,      label: "Bike lane on a fast/busy road — use caution", dashed: true  },
   // Teal overlay drawn from saved connectors (community + your fixes).
   { cls: "connector", color: CONNECTOR_COLOR,              label: "Your fix",                 dashed: false },
 ] as const;
