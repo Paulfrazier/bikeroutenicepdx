@@ -28,7 +28,8 @@
     "typecheck:web": "npm --workspace web run typecheck",
     "check:parity": "tsx scripts/check-parity.ts",
     "check:data": "tsx scripts/check-data-sync.ts",
-    "check": "npm run typecheck:server && npm run typecheck:web && npm run check:parity && npm run check:data",
+    "check:contraflow": "tsx scripts/check-contraflow.ts",
+    "check": "npm run typecheck:server && npm run typecheck:web && npm run check:parity && npm run check:data && npm run check:contraflow",
     "dev:server": "npm --workspace server run dev",
     "dev:web": "npm --workspace web run dev"
   },
