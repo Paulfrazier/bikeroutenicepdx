@@ -97,6 +97,17 @@ assign hascycleway = not
 
 assign isbike = or hasbikerouteoraccess hascycleway
 
+# A residential street that is a DESIGNATED bikeway (a PBOT neighborhood greenway,
+# tagged in OSM as bicycle=designated / lcn / bicycle_road / cyclestreet, or added
+# by the self-build patch). Narrower than isbike on purpose: excludes bare
+# bicycle=yes|permissive and sharrows, so we reward real greenways — not every
+# street bikes are merely allowed on. Used to drop these to greenway cost below.
+assign isgreenwaydesignated =
+       or bicycle=designated
+       or lcn=yes
+       or bicycle_road=yes
+       cyclestreet=yes
+
 assign ispaved = or surface=paved|asphalt|concrete|paving_stones|sett smoothness=excellent|good
 assign isunpaved = not or ispaved or ( and surface= smoothness= ) or surface=fine_gravel|cobblestone smoothness=intermediate|bad
 assign probablyGood = or ispaved and ( or isbike highway=footway ) not isunpaved
@@ -334,7 +345,7 @@ assign costfactor
   if      ( highway=pedestrian                ) then ( if isbike then ( if hascycleway then 1.1 else 2.2 ) else 3 )
   else if ( highway=bridleway                 ) then 5
   else if ( highway=cycleway                  ) then 1
-  else if ( isresidentialorliving             ) then ( if isunpaved then 1.5 else 1.1 )
+  else if ( isresidentialorliving             ) then ( if isunpaved then 1.5 else if isgreenwaydesignated then 1.0 else 1.1 )
   else if ( highway=service                   ) then ( if isunpaved then 1.6 else 1.3 )
 
   #
