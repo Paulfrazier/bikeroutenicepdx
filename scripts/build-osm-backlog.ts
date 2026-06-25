@@ -61,6 +61,45 @@ interface OsmFeature {
   geometry: { type: string; coordinates: [number, number][] } | null;
 }
 
+/** Highways that carry motor traffic. A separated/off-street facility or a
+ *  neighborhood greenway cannot physically lie on their carriageway; freeways
+ *  (motorway/trunk) carry NO bike facility of any class. primary/secondary/
+ *  tertiary CAN host a real protected on-street cycletrack, so those survive for
+ *  the `protected` class — only off_street/greenway are rejected on them. */
+const FREEWAY = new Set(["motorway", "trunk", "motorway_link", "trunk_link"]);
+const MOTOR_ROAD = new Set([
+  ...FREEWAY,
+  "primary", "secondary", "tertiary",
+  "primary_link", "secondary_link", "tertiary_link",
+]);
+
+/**
+ * Reject a presence suggestion that would mis-stamp a bike facility onto a way
+ * that physically can't carry it. PBOT facility geometry is reconciled to OSM by
+ * 2D proximity, which has no notion of bridge decks or sidewalk-vs-carriageway —
+ * so a facility line snaps to whichever way is nearest in lon/lat. On a stacked
+ * double-decker bridge (the Steel Bridge), the lower-deck bike *path* snapped to
+ * the UPPER car deck (highway=secondary) and its sidewalks (footway=sidewalk),
+ * and bridge/freeway approaches snapped to the motor carriageway. Baking
+ * cycleway=track;bicycle=designated onto those made the self-build router cross
+ * the car deck / route up a freeway. Three never-correct cases:
+ *   1. ANY facility on a freeway carriageway (motorway/trunk).
+ *   2. an off-street path / neighborhood greenway (off_street|greenway — they
+ *      assert bicycle=designated+lcn) on a motor through-road carriageway.
+ *   3. ANY facility on a footway=sidewalk (a pedestrian sidewalk is never a
+ *      PBOT on-street lane or off-street path).
+ * On-street lane classes (buffered/standard) and protected cycletracks on
+ * arterials are legitimate and pass. Returns a reason string, or null if OK.
+ */
+function facilityMismatch(cls: PbotClass, p: Record<string, unknown>): string | null {
+  const hw = String(p["highway"] ?? "");
+  if (FREEWAY.has(hw)) return `freeway carriageway (highway=${hw})`;
+  if ((cls === "off_street" || cls === "greenway") && MOTOR_ROAD.has(hw))
+    return `${cls} facility on motor road (highway=${hw})`;
+  if (String(p["footway"] ?? "") === "sidewalk") return "facility on footway=sidewalk";
+  return null;
+}
+
 /** Does this OSM way already carry any bike hint the router would see? */
 function hasBikeTag(p: Record<string, unknown>): boolean {
   for (const k of Object.keys(p)) {
@@ -116,6 +155,12 @@ function main(): void {
   }
   const gaps: Gap[] = [];
 
+  // Presence suggestions the 2D reconciliation snapped onto a way that can't
+  // carry the facility (car deck / freeway / sidewalk). Excluded from the
+  // backlog and logged for transparency (dropped-mismatches.csv).
+  interface Dropped { osm_way_id: string; name: string; pbot_class: PbotClass; highway: string; footway: string; reason: string; }
+  const dropped: Dropped[] = [];
+
   // ---- PRESENCE: PBOT facility ways with no OSM bike tag ----
   let presenceMissingGeom = 0;
   for (const [id, wt] of Object.entries(wayTags)) {
@@ -124,6 +169,14 @@ function main(): void {
     const p = f.properties ?? {};
     if (hasBikeTag(p)) continue; // already visible to the router
     const cls = wt.bicycle_network_class;
+    const mismatch = facilityMismatch(cls, p);
+    if (mismatch) {
+      dropped.push({
+        osm_way_id: id, name: wt.name ?? String(p["name"] ?? ""), pbot_class: cls,
+        highway: String(p["highway"] ?? ""), footway: String(p["footway"] ?? ""), reason: mismatch,
+      });
+      continue; // never bake a bike facility onto a way that can't carry it
+    }
     const coords = f.geometry.coordinates;
     const [lng, lat] = lineMidpoint(coords);
     gaps.push({
@@ -220,6 +273,12 @@ function main(): void {
   for (const g of gaps) csvRows.push([g.type, g.osm_way_id, `"${g.name}"`, g.pbot_class ?? "", `"${tagStr(g.suggested)}"`, g.length_m, g.lat.toFixed(6), g.lng.toFixed(6)].join(","));
   fs.writeFileSync(path.join(OUT, "osm-gaps.csv"), csvRows.join("\n"));
 
+  // Dropped-by-guard worklist: presence suggestions the 2D snap mislanded. Not
+  // baked into tiles; kept so the mismatches are auditable / fixable upstream.
+  const dropRows = ["osm_way_id,name,pbot_class,highway,footway,reason"];
+  for (const d of dropped) dropRows.push([d.osm_way_id, `"${d.name}"`, d.pbot_class, d.highway, d.footway, `"${d.reason}"`].join(","));
+  fs.writeFileSync(path.join(OUT, "dropped-mismatches.csv"), dropRows.join("\n"));
+
   // MapRoulette: newline-delimited GeoJSON, one task per line (cooperative tag-fix hint in properties).
   const mr = gaps.map((g) => JSON.stringify({
     type: "FeatureCollection",
@@ -239,11 +298,15 @@ function main(): void {
   const byClass: Record<string, number> = {};
   for (const g of presence) byClass[g.pbot_class ?? "?"] = (byClass[g.pbot_class ?? "?"] ?? 0) + 1;
   const se17 = gaps.filter((g) => /(^|\b)(SE |Southeast )?17th/i.test(g.name) && /17th/i.test(g.name));
+  const dropByReason: Record<string, number> = {};
+  for (const d of dropped) dropByReason[d.reason] = (dropByReason[d.reason] ?? 0) + 1;
   const summary = {
     generatedFrom: "data/reconciled/current",
     presence_gaps: presence.length,
     presence_by_class: byClass,
     contraflow_gaps: contraflow.length,
+    presence_dropped_mismatch: dropped.length,
+    presence_dropped_by_reason: dropByReason,
     presence_missing_geometry: presenceMissingGeom,
     se17th_gaps: se17.length,
     se17th_examples: se17.slice(0, 6).map((g) => ({ way: g.osm_way_id, gap: g.type, suggested: tagStr(g.suggested) })),
@@ -252,6 +315,7 @@ function main(): void {
   fs.writeFileSync(path.join(OUT, "summary.json"), JSON.stringify(summary, null, 2));
 
   console.log(`[backlog] PRESENCE gaps: ${presence.length}  ${JSON.stringify(byClass)}`);
+  console.log(`[backlog] DROPPED (2D-snap mismatch, not baked): ${dropped.length}  ${JSON.stringify(dropByReason)} -> data/backlog/dropped-mismatches.csv`);
   console.log(`[backlog] CONTRAFLOW gaps: ${contraflow.length}  streets: ${summary.contraflow_streets.slice(0, 8).join(", ")}`);
   console.log(`[backlog] SE 17th gaps: ${se17.length}`);
   console.log(`[backlog] wrote osm-gaps.geojson / .csv / maproulette.geojson / summary.json → data/backlog/`);

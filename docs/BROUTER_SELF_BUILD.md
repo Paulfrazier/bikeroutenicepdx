@@ -32,6 +32,24 @@ Pipeline (all under `data/brouter-build/`, gitignored):
 2. **Patch** — `patch-osm-tags.py` (pyosmium read-modify-write) applies the
    backlog's suggested presence + contraflow tags. **100% of 2,657 backlog ways
    matched** in the extract (way ids stable vs the Jun-19 reconciliation).
+
+   ⚠️ **2D-snap guard (added 2026-06-25).** The reconciliation matches PBOT
+   facility geometry to OSM ways by lon/lat proximity, which is blind to bridge
+   decks and sidewalk-vs-carriageway. On the **Steel Bridge** (a stacked
+   double-decker) the lower-deck bike *path* snapped to the UPPER car deck
+   (`highway=secondary`, 25 mph) and its `footway=sidewalk` ways; bridge/freeway
+   approaches snapped to the motor carriageway. Baking
+   `cycleway=track;bicycle=designated;lcn=yes` onto those made the self-build
+   router cross the **car deck** of the Steel Bridge and ride freeway/bridge
+   carriageways (I-5 Interstate, I-205 Glenn Jackson, Banfield, Hawthorne,
+   Morrison, Broadway). `scripts/build-osm-backlog.ts` now drops any presence
+   suggestion that lands on (a) a freeway carriageway — any class, (b) an
+   off-street/greenway facility on a motor through-road, or (c) a
+   `footway=sidewalk`. **263 rows dropped** (backlog 2,371 → 2,108 presence);
+   dropped rows are logged to `data/backlog/dropped-mismatches.csv` for upstream
+   fixing. Protected cycletracks on arterials (Better Naito, N Lombard, NE 102nd)
+   and on-street lanes are kept. Verified: post-rebuild, Big Pink → home crosses
+   on `highway=path bicycle=designated` (lower deck), matching prod.
 3. **Elevation** — AWS *skadi* 1-arcsec HGT (`N44-46 / W122-125`, no auth) →
    `ElevationRasterTileConverter` → `srtm_12_03.bef` (N45) + `srtm_12_04.bef`
    (N40). Portland metro sits almost entirely in HGT tile **N45W123**.

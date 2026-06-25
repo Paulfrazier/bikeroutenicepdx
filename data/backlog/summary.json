@@ -1,14 +1,29 @@
 {
   "generatedFrom": "data/reconciled/current",
-  "presence_gaps": 2371,
+  "presence_gaps": 2108,
   "presence_by_class": {
-    "off_street": 299,
-    "greenway": 516,
-    "protected": 440,
-    "buffered": 349,
-    "standard": 767
+    "off_street": 189,
+    "greenway": 491,
+    "protected": 419,
+    "buffered": 333,
+    "standard": 676
   },
   "contraflow_gaps": 1,
+  "presence_dropped_mismatch": 263,
+  "presence_dropped_by_reason": {
+    "freeway carriageway (highway=trunk_link)": 2,
+    "off_street facility on motor road (highway=primary)": 32,
+    "off_street facility on motor road (highway=secondary_link)": 5,
+    "freeway carriageway (highway=motorway_link)": 21,
+    "freeway carriageway (highway=trunk)": 3,
+    "off_street facility on motor road (highway=secondary)": 25,
+    "freeway carriageway (highway=motorway)": 22,
+    "greenway facility on motor road (highway=primary)": 1,
+    "off_street facility on motor road (highway=primary_link)": 8,
+    "greenway facility on motor road (highway=tertiary)": 10,
+    "facility on footway=sidewalk": 131,
+    "off_street facility on motor road (highway=tertiary)": 3
+  },
   "presence_missing_geometry": 0,
   "se17th_gaps": 0,
   "se17th_examples": [],

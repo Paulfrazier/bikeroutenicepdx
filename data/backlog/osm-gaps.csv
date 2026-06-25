@@ -1,21 +1,10 @@
 gap,osm_way_id,name,pbot_class,suggested_tags,length_m,lat,lng
 contraflow,418785123,"Southwest Naito Parkway",,"oneway:bicycle=no",0,45.521378,-122.670400
-presence,124811218,"North Greeley Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",973,45.549879,-122.687351
-presence,123889251,"Glenn L. Jackson Memorial Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",805,45.578088,-122.544194
-presence,30374523,"Interstate Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",645,45.615468,-122.676629
-presence,5528773,"North Lombard Street",off_street,"cycleway=track;bicycle=designated;lcn=yes",601,45.610770,-122.768137
 presence,285156477,"Tilikum Crossing",off_street,"cycleway=track;bicycle=designated;lcn=yes",525,45.505497,-122.666120
 presence,389738957,"Tilikum Crossing",off_street,"cycleway=track;bicycle=designated;lcn=yes",525,45.504626,-122.667508
-presence,23531292,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",397,45.607167,-122.681502
 presence,444985638,"South Waterfront Greenway",off_street,"cycleway=track;bicycle=designated;lcn=yes",387,45.497256,-122.667819
-presence,334633270,"Glenn L. Jackson Memorial Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",360,45.582958,-122.543616
-presence,124413054,"North Portland Road",off_street,"cycleway=track;bicycle=designated;lcn=yes",357,45.608601,-122.709466
-presence,123689397,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",352,45.611072,-122.679231
-presence,119646676,"Broadway Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",278,45.530133,-122.677227
 presence,124583983,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",277,45.574020,-122.547101
-presence,689031433,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",273,45.512497,-122.668347
 presence,113897354,"Old Cornell",off_street,"cycleway=track;bicycle=designated;lcn=yes",228,45.531350,-122.717006
-presence,689031435,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",217,45.513228,-122.670936
 presence,1290804614,"North Columbia Boulevard",off_street,"cycleway=track;bicycle=designated;lcn=yes",208,45.617235,-122.768930
 presence,447601284,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",204,45.581744,-122.641158
 presence,1373558716,"Willamette Greenway",off_street,"cycleway=track;bicycle=designated;lcn=yes",193,45.494955,-122.668473
@@ -23,124 +12,52 @@ presence,1092403541,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",19
 presence,286198900,"Southeast Tilikum Way",off_street,"cycleway=track;bicycle=designated;lcn=yes",189,45.504542,-122.656559
 presence,1018452227,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",187,45.536694,-122.694665
 presence,1317495942,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",185,45.499966,-122.660773
-presence,98945906,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",176,45.526206,-122.686656
 presence,5529863,"Southeast 64th Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",153,45.508014,-122.597789
-presence,584523534,"North Portland Road",off_street,"cycleway=track;bicycle=designated;lcn=yes",152,45.611525,-122.705949
-presence,23669243,"Glenn L. Jackson Memorial Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",150,45.573841,-122.546587
 presence,126855527,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",148,45.494406,-122.558904
-presence,422121260,"Broadway Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",148,45.532384,-122.673198
 presence,1036412979,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",142,45.498114,-122.552632
-presence,1437026306,"North Greeley Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",133,45.553427,-122.691434
-presence,174985371,"Ross Island Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",130,45.501552,-122.660367
-presence,122309859,"Northeast Airport Way",off_street,"cycleway=track;bicycle=designated;lcn=yes",123,45.586802,-122.592159
-presence,584335903,"North Portland Road",off_street,"cycleway=track;bicycle=designated;lcn=yes",123,45.610490,-122.707210
-presence,1231750559,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",113,45.578683,-122.573282
-presence,190679509,"Northwest Naito Parkway",off_street,"cycleway=track;bicycle=designated;lcn=yes",111,45.525465,-122.670209
-presence,189781370,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",105,45.518380,-122.672804
-presence,30288924,"Steel Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",102,45.527153,-122.669868
-presence,203423670,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",101,45.605684,-122.683406
-presence,344579863,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",96,45.609788,-122.679977
 presence,1317495941,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",96,45.498069,-122.660269
 presence,99134609,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",94,45.494951,-122.557742
 presence,34084149,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",93,45.461749,-122.617317
-presence,124811221,"North Greeley Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",93,45.554845,-122.692215
 presence,243208921,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",93,45.589413,-122.681170
-presence,153469294,"Steel Bridge (Upper Deck)",off_street,"cycleway=track;bicycle=designated;lcn=yes",92,45.527156,-122.669798
-presence,348027812,"Steel Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",92,45.528057,-122.667914
-presence,98830857,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",91,45.526069,-122.670550
 presence,161384481,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",91,45.507067,-122.671560
 presence,125664614,"Willamette Greenway",off_street,"cycleway=track;bicycle=designated;lcn=yes",89,45.556699,-122.706968
 presence,5533860,"Southeast 94th Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",84,45.513053,-122.566405
-presence,30255698,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",82,45.472249,-122.565703
-presence,114603092,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",82,45.473270,-122.565284
 presence,324630256,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",82,45.514902,-122.674630
 presence,204195961,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",79,45.588713,-122.757167
 presence,356882075,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",77,45.512373,-122.667977
-presence,681301894,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",77,45.513793,-122.673106
-presence,124413033,"North Portland Road",off_street,"cycleway=track;bicycle=designated;lcn=yes",76,45.612243,-122.705105
 presence,119409267,"South Bancroft Street",off_street,"cycleway=track;bicycle=designated;lcn=yes",75,45.493150,-122.670815
-presence,282174242,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",75,45.513472,-122.671873
 presence,747341395,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",74,45.505797,-122.597651
 presence,285156438,"Southeast Tilikum Way",off_street,"cycleway=track;bicycle=designated;lcn=yes",70,45.506580,-122.664292
-presence,118776211,"North Greeley Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",69,45.554025,-122.691806
 presence,334416504,"South Porter Street",off_street,"cycleway=track;bicycle=designated;lcn=yes",69,45.503160,-122.669937
 presence,334416502,"Southeast Tilikum Way",off_street,"cycleway=track;bicycle=designated;lcn=yes",67,45.506530,-122.664319
-presence,348027811,"Steel Bridge (Upper Deck)",off_street,"cycleway=track;bicycle=designated;lcn=yes",66,45.527453,-122.669142
-presence,348027813,"Steel Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",66,45.527473,-122.669162
 presence,42640297,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",65,45.558872,-122.709373
-presence,344579952,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",65,45.602196,-122.679555
-presence,40940382,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",63,45.524721,-122.669981
-presence,689032759,"Morrison Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",62,45.518061,-122.670491
 presence,58122664,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",60,45.511493,-122.673600
 presence,197608949,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",60,45.573634,-122.546331
-presence,681301899,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",56,45.513249,-122.671016
-presence,5519621,"Morrison Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",55,45.518448,-122.672232
-presence,892538227,"Steel Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",54,45.528312,-122.667421
-presence,5510504,"Morrison Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",53,45.518466,-122.671782
-presence,5531324,"Morrison Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",53,45.517673,-122.669037
-presence,681301886,"Morrison Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",53,45.517844,-122.669678
-presence,30260251,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",52,45.513866,-122.673998
 presence,337246770,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",52,45.454317,-122.717147
-presence,30474394,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",51,45.460631,-122.704358
-presence,30474396,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",51,45.460827,-122.703749
-presence,45701297,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",49,45.517885,-122.673248
-presence,5526283,"North Oregon Street",off_street,"cycleway=track;bicycle=designated;lcn=yes",47,45.528650,-122.666480
-presence,586090747,"Morrison Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",47,45.518373,-122.671832
-presence,462709765,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",44,45.525397,-122.670105
 presence,759022041,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",44,45.523617,-122.662389
-presence,842536093,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",44,45.522887,-122.565773
 presence,938598775,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",44,45.514804,-122.692081
 presence,1235782729,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",44,45.588271,-122.758092
 presence,1229555757,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",43,45.522757,-122.701478
 presence,203538965,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",42,45.619375,-122.771119
-presence,422121265,"Broadway Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",41,45.531890,-122.674083
-presence,52321842,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",40,45.516255,-122.666489
-presence,5539519,"North Marine Drive",off_street,"cycleway=track;bicycle=designated;lcn=yes",39,45.613612,-122.703964
-presence,418966750,"North Oregon Street",off_street,"cycleway=track;bicycle=designated;lcn=yes",39,45.528661,-122.665867
-presence,689031436,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",39,45.513971,-122.673795
-presence,118880271,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",37,45.517631,-122.672688
-presence,141246959,"North Lombard Street",off_street,"cycleway=track;bicycle=designated;lcn=yes",37,45.612427,-122.763855
-presence,681301891,"Morrison Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",37,45.518213,-122.671060
-presence,23531271,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",36,45.605794,-122.682437
-presence,1053619185,"Steel Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",36,45.528557,-122.666923
 presence,1410721704,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",36,45.512085,-122.675064
-presence,177859545,"Steel Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",35,45.526450,-122.670760
-presence,584523521,"North Portland Road",off_street,"cycleway=track;bicycle=designated;lcn=yes",35,45.612781,-122.704734
 presence,1108026931,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",35,45.491414,-122.671688
 presence,58122698,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",34,45.508931,-122.672306
 presence,72693284,"South Gibbs Street",off_street,"cycleway=track;bicycle=designated;lcn=yes",34,45.499321,-122.674740
-presence,94233468,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",32,45.513855,-122.673576
-presence,101455201,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",32,45.517013,-122.667500
 presence,171728521,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",31,45.499296,-122.672149
-presence,418972075,"Broadway Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",30,45.529943,-122.677496
 presence,1164553063,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",30,45.525984,-122.658724
-presence,584523520,"North Portland Road",off_street,"cycleway=track;bicycle=designated;lcn=yes",29,45.613010,-122.704621
 presence,864975053,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",29,45.526012,-122.658579
-presence,1060492173,"Steel Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",29,45.526716,-122.670670
-presence,30374106,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",28,45.603951,-122.681057
-presence,282174153,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",28,45.512561,-122.668102
-presence,322079536,"South Moody Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",28,45.505094,-122.673916
 presence,391849378,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",27,45.515497,-122.672555
 presence,1091260425,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",27,45.579555,-122.574976
 presence,152768902,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",26,45.509520,-122.672671
-presence,156121085,"Steel Bridge (Upper Deck)",off_street,"cycleway=track;bicycle=designated;lcn=yes",26,45.529637,-122.667363
 presence,92182647,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",25,45.481027,-122.566902
-presence,759022037,"Northwest Naito Parkway",off_street,"cycleway=track;bicycle=designated;lcn=yes",24,45.524101,-122.670218
 presence,144373670,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",23,45.518212,-122.672998
 presence,203538954,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",23,45.622402,-122.771271
 presence,203538957,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",23,45.620954,-122.771511
 presence,285156441,"South Porter Street",off_street,"cycleway=track;bicycle=designated;lcn=yes",23,45.502931,-122.670577
 presence,334029998,"South Porter Street",off_street,"cycleway=track;bicycle=designated;lcn=yes",23,45.502942,-122.670577
-presence,595202018,"Broadway Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",23,45.531637,-122.674537
-presence,1120065945,"Southwest Naito Parkway",off_street,"cycleway=track;bicycle=designated;lcn=yes",23,45.512259,-122.675499
-presence,23530213,"North Greeley Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",22,45.546319,-122.682499
 presence,156094685,"Northeast Glisan Street",off_street,"cycleway=track;bicycle=designated;lcn=yes",22,45.526447,-122.564361
 presence,259680632,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",22,45.523095,-122.701520
-presence,69334749,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",21,45.533110,-122.671978
-presence,153506700,"Broadway Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",21,45.533013,-122.672074
 presence,171728527,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",21,45.499272,-122.672437
-presence,282180697,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",21,45.514081,-122.674141
-presence,991613026,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",21,45.523626,-122.662299
 presence,169172894,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",20,45.502912,-122.567073
 presence,1426959131,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",19,45.461043,-122.704312
 presence,1499786292,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",19,45.528661,-122.665867
@@ -154,47 +71,34 @@ presence,144351748,"Southeast 73rd Avenue",off_street,"cycleway=track;bicycle=de
 presence,146993069,"I-205 Multi-Use Path",off_street,"cycleway=track;bicycle=designated;lcn=yes",17,45.510753,-122.566421
 presence,172864445,"South Gibbs Street",off_street,"cycleway=track;bicycle=designated;lcn=yes",17,45.499310,-122.674052
 presence,286198893,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",17,45.503626,-122.654944
-presence,422121263,"Broadway Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",17,45.531767,-122.674303
 presence,1075930076,"South Gibbs Street",off_street,"cycleway=track;bicycle=designated;lcn=yes",17,45.499312,-122.674196
 presence,153469321,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",16,45.526595,-122.670717
-presence,156099856,"Northeast Mount Hood Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",16,45.577512,-122.559754
 presence,169257082,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",16,45.488561,-122.672291
-presence,586109402,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",16,45.512520,-122.668205
-presence,919955469,"Broadway Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",16,45.532925,-122.672230
 presence,1012191008,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",16,45.459275,-122.656984
 presence,285940406,"Northeast 21st Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",15,45.582568,-122.643019
 presence,595317523,"Northeast 21st Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",15,45.582577,-122.642888
-presence,1434532291,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",15,45.577528,-122.559555
 presence,1455057285,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",15,45.464299,-122.661137
-presence,1456440809,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",15,45.455926,-122.598887
 presence,23629710,"Vera Katz Eastbank Esplanade",off_street,"cycleway=track;bicycle=designated;lcn=yes",14,45.528572,-122.665877
 presence,30260241,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",14,45.513691,-122.674309
 presence,53189253,"Willamette Greenway",off_street,"cycleway=track;bicycle=designated;lcn=yes",14,45.511775,-122.674562
-presence,124089668,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",14,45.512457,-122.668039
 presence,163980353,"Southeast Water Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",14,45.516174,-122.665951
 presence,483137688,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",14,45.491100,-122.670525
-presence,584523519,"North Portland Road",off_street,"cycleway=track;bicycle=designated;lcn=yes",14,45.612550,-122.704867
-presence,863442662,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",14,45.513687,-122.674387
 presence,1042391843,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",14,45.455866,-122.598822
 presence,1303371627,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",14,45.582461,-122.577579
-presence,282172530,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",13,45.512502,-122.668118
 presence,938598768,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",13,45.513806,-122.690282
 presence,1115393354,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",13,45.519949,-122.702026
 presence,1459498642,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",13,45.566976,-122.553894
 presence,127586077,"Morrison Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",12,45.517530,-122.667311
 presence,128346805,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",12,45.576169,-122.561900
 presence,171728546,"South Hood Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",12,45.499308,-122.673976
-presence,400045515,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",12,45.497087,-122.646021
 presence,501376156,"I 205 Corridor",off_street,"cycleway=track;bicycle=designated;lcn=yes",12,45.570590,-122.548144
 presence,1042391837,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",12,45.461798,-122.617136
-presence,1323089227,"Northeast Martin Luther King Junior Boulevard",off_street,"cycleway=track;bicycle=designated;lcn=yes",12,45.587189,-122.664462
 presence,122462484,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",11,45.514986,-122.674976
 presence,158262165,"Morrison Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",11,45.517431,-122.667355
 presence,286198885,"Southeast 7th Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",11,45.505644,-122.658722
 presence,584523529,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",11,45.596720,-122.714829
 presence,824460809,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",11,45.497025,-122.646040
 presence,912301860,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",11,45.522992,-122.669643
-presence,1436096831,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",11,45.509014,-122.673024
 presence,1459499132,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",11,45.458176,-122.703671
 presence,58122669,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",10,45.511549,-122.673813
 presence,117446013,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",10,45.513872,-122.673799
@@ -202,11 +106,8 @@ presence,202760895,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",10,
 presence,786103833,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",10,45.458712,-122.655106
 presence,938575190,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",10,45.493164,-122.671891
 presence,938575203,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",10,45.493150,-122.670858
-presence,1314250291,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",10,45.525178,-122.670028
-presence,5511841,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",9,45.517598,-122.672566
 presence,127586073,"Morrison Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",9,45.517517,-122.667382
 presence,172864444,"South Gibbs Street",off_street,"cycleway=track;bicycle=designated;lcn=yes",9,45.499343,-122.674957
-presence,344579839,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",9,45.608989,-122.680454
 presence,595317524,"Northeast 21st Avenue",off_street,"cycleway=track;bicycle=designated;lcn=yes",9,45.582591,-122.643091
 presence,786103820,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",9,45.459265,-122.656747
 presence,854322174,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",9,45.529469,-122.673415
@@ -222,16 +123,13 @@ presence,144373676,"Morrison Bridge",off_street,"cycleway=track;bicycle=designat
 presence,144929465,"Vera Katz Eastbank Esplanade",off_street,"cycleway=track;bicycle=designated;lcn=yes",8,45.528096,-122.666120
 presence,810115008,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",8,45.526192,-122.563535
 presence,912301863,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",8,45.522220,-122.669545
-presence,1076747043,"South Kelly Way",off_street,"cycleway=track;bicycle=designated;lcn=yes",8,45.499333,-122.674852
 presence,1235782730,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",8,45.588314,-122.758004
-presence,1484046551,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",8,45.525803,-122.686380
 presence,117446032,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",7,45.513963,-122.673301
 presence,150590782,"Hawthorne Bridge",off_street,"cycleway=track;bicycle=designated;lcn=yes",7,45.513872,-122.673948
 presence,154070496,"Eastbank Esplanade Access",off_street,"cycleway=track;bicycle=designated;lcn=yes",7,45.527996,-122.667190
 presence,444985629,"South Waterfront Greenway",off_street,"cycleway=track;bicycle=designated;lcn=yes",7,45.498504,-122.667716
 presence,743741842,"North Columbia Court",off_street,"cycleway=track;bicycle=designated;lcn=yes",7,45.594470,-122.718718
 presence,854322175,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",7,45.529523,-122.673469
-presence,1076747042,"South Kelly Way",off_street,"cycleway=track;bicycle=designated;lcn=yes",7,45.499390,-122.674821
 presence,1315996124,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",7,45.532065,-122.553078
 presence,1434528132,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",7,45.576104,-122.561997
 presence,58122700,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",6,45.509053,-122.672357
@@ -277,26 +175,18 @@ presence,854322177,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",3,4
 presence,918948860,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",3,45.499310,-122.671842
 presence,938577579,"South Waterfront Greenway",off_street,"cycleway=track;bicycle=designated;lcn=yes",3,45.498503,-122.667753
 presence,1293521084,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",3,45.579838,-122.575758
-presence,1391123483,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",3,45.556176,-122.692625
 presence,1422575668,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",3,45.533112,-122.620302
 presence,23624919,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",2,45.529523,-122.673469
 presence,173972560,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",2,45.499302,-122.672547
 presence,780081881,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",2,45.461020,-122.636854
 presence,780081886,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",2,45.461011,-122.636893
-presence,786103818,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",2,45.459262,-122.656799
-presence,966294007,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",2,45.503522,-122.654735
 presence,1041344823,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",2,45.556147,-122.692567
-presence,1041344826,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",2,45.556151,-122.692639
 presence,1092403540,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",2,45.476256,-122.728369
 presence,1293521083,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",2,45.579799,-122.575787
 presence,1422575667,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",2,45.533087,-122.620302
 presence,1422575669,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",2,45.533126,-122.620302
 presence,1422575670,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",2,45.533071,-122.620303
-presence,938575193,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",1,45.493110,-122.672120
-presence,938575204,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",1,45.493106,-122.670862
-presence,938598767,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",1,45.513863,-122.690251
 presence,1231553307,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",1,45.529733,-122.667375
-presence,1343836938,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",1,45.527448,-122.658522
 presence,1390882891,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",1,45.579664,-122.575329
 presence,1422575666,"",off_street,"cycleway=track;bicycle=designated;lcn=yes",1,45.533050,-122.620303
 presence,5534655,"North Burr Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",305,45.590378,-122.740277
@@ -305,23 +195,17 @@ presence,127684617,"Southeast Salmon Street",greenway,"cycleway=track;bicycle=de
 presence,901068463,"Northwest Overton Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",158,45.531892,-122.700728
 presence,895060516,"Northeast Wygant Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",136,45.557200,-122.545385
 presence,5529206,"Southeast Salmon Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",133,45.514051,-122.603632
-presence,938558046,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",132,45.505891,-122.659745
 presence,5526191,"Southeast 68th Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",102,45.463251,-122.593487
 presence,117043874,"Northeast Holman Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",95,45.568556,-122.620636
 presence,5538853,"Northeast 127th Place",greenway,"cycleway=track;bicycle=designated;lcn=yes",91,45.527677,-122.532035
-presence,1193857275,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",89,45.532939,-122.553480
-presence,172338888,"Northwest Davis Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",88,45.524584,-122.671218
 presence,186532778,"Northwest Marshall Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",82,45.530845,-122.682318
 presence,1255059350,"North Bank Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",82,45.598150,-122.741821
 presence,412563834,"North Bank Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",80,45.597893,-122.740734
 presence,895060515,"Northeast Wygant Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",80,45.557197,-122.546167
-presence,1093091767,"Northwest Davis Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",80,45.524580,-122.671514
 presence,1295044373,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",80,45.536528,-122.618576
-presence,1055630787,"Northwest Davis Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",79,45.524544,-122.673325
 presence,1193494461,"Northwest 11th Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",79,45.532315,-122.682477
 presence,412563835,"North Bank Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",78,45.598081,-122.741671
 presence,131617493,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",74,45.484723,-122.571963
-presence,1436106736,"South River Drive",greenway,"cycleway=track;bicycle=designated;lcn=yes",65,45.507458,-122.674278
 presence,5542942,"Northeast Oregon Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",64,45.528141,-122.532394
 presence,5524086,"Northeast Irving Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",40,45.527452,-122.531505
 presence,333229866,"North Fenwick Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",39,45.583109,-122.684749
@@ -330,7 +214,6 @@ presence,158897399,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",33,45
 presence,158925348,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",32,45.530418,-122.608787
 presence,143692322,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",31,45.540540,-122.615026
 presence,195676273,"North Wabash Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",31,45.573351,-122.702770
-presence,104683206,"Southeast 108th Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",30,45.518843,-122.552740
 presence,143692318,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",30,45.539009,-122.615026
 presence,143692326,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",30,45.532962,-122.608844
 presence,962338973,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",29,45.514384,-122.649603
@@ -453,7 +336,6 @@ presence,189588378,"Southeast Washington Street",greenway,"cycleway=track;bicycl
 presence,260870533,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",14,45.522141,-122.659057
 presence,374109211,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",14,45.506817,-122.647472
 presence,810341585,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",14,45.549596,-122.681201
-presence,856155898,"Southeast 13th Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",14,45.464928,-122.653006
 presence,929911912,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",14,45.569810,-122.676896
 presence,939188686,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",14,45.557820,-122.544157
 presence,967447263,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",14,45.518573,-122.635975
@@ -482,7 +364,6 @@ presence,161372322,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",13,45
 presence,178851904,"South Montgomery Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",13,45.508984,-122.673357
 presence,425879078,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",13,45.535012,-122.663763
 presence,450033784,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",13,45.537979,-122.589479
-presence,834360702,"Southeast 13th Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",13,45.465097,-122.653003
 presence,913618482,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",13,45.479852,-122.694524
 presence,1217444145,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",13,45.501405,-122.604164
 presence,1217444156,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",13,45.501403,-122.602990
@@ -495,7 +376,6 @@ presence,1436114895,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",13,4
 presence,1436505475,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",13,45.522203,-122.656562
 presence,1446125327,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",13,45.558344,-122.684858
 presence,1459500352,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",13,45.522783,-122.622909
-presence,27183287,"North Lombard Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",12,45.586498,-122.736543
 presence,202709051,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",12,45.522785,-122.623169
 presence,857050392,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",12,45.550733,-122.664666
 presence,857052201,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",12,45.550781,-122.676626
@@ -580,7 +460,6 @@ presence,1436146119,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",11,4
 presence,1456243426,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",11,45.525849,-122.680109
 presence,1459445049,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",11,45.545144,-122.658578
 presence,1459522635,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",11,45.526409,-122.608879
-presence,1482458585,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",11,45.525915,-122.673380
 presence,1484032933,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",11,45.525797,-122.683155
 presence,1484055629,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",11,45.525832,-122.681114
 presence,1484057293,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",11,45.525846,-122.680331
@@ -602,7 +481,6 @@ presence,967396679,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",10,45
 presence,967411830,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",10,45.512154,-122.636127
 presence,967421685,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",10,45.514318,-122.642621
 presence,967445677,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",10,45.514298,-122.637219
-presence,1097451755,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",10,45.508219,-122.634656
 presence,1195149712,"Northeast 119th Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",10,45.530376,-122.540216
 presence,1210881511,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",10,45.538058,-122.668640
 presence,1346058787,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",10,45.512106,-122.653538
@@ -653,7 +531,6 @@ presence,1496977033,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",9,45
 presence,118137305,"Southeast Division Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",8,45.504514,-122.574861
 presence,156266631,"Northwest 1st Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",8,45.523822,-122.671469
 presence,169150229,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",8,45.562753,-122.676982
-presence,169290284,"Southeast 20th Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",8,45.508488,-122.645082
 presence,186655541,"Northwest 1st Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",8,45.523872,-122.671285
 presence,189313280,"Southeast Lincoln Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",8,45.508046,-122.606181
 presence,369959188,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",8,45.540015,-122.605758
@@ -691,9 +568,6 @@ presence,1484048518,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",8,45
 presence,5536753,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.569871,-122.684299
 presence,120740388,"Southeast Clay Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.511496,-122.652907
 presence,124788593,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.569935,-122.684019
-presence,169290281,"Southeast 20th Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.508500,-122.645149
-presence,169290282,"Southeast 20th Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.508551,-122.645085
-presence,169290283,"Southeast 20th Avenue",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.508437,-122.645143
 presence,205147933,"North Houghton Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.586575,-122.721085
 presence,242767836,"Northeast Holman Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.568258,-122.630666
 presence,410089700,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.568542,-122.621772
@@ -705,7 +579,6 @@ presence,497519655,"Northwest 11th Avenue",greenway,"cycleway=track;bicycle=desi
 presence,859057450,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.554730,-122.684942
 presence,883090168,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.476295,-122.721022
 presence,925361132,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.533584,-122.553545
-presence,957207763,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.465040,-122.654908
 presence,967422098,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.508466,-122.642273
 presence,970898420,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.546879,-122.597272
 presence,990607281,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",7,45.526000,-122.672598
@@ -738,7 +611,6 @@ presence,486517225,"Southeast Umatilla Street",greenway,"cycleway=track;bicycle=
 presence,587064705,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45.544600,-122.666755
 presence,714817987,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45.538945,-122.664237
 presence,853592078,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45.501742,-122.551363
-presence,934312328,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45.508573,-122.636140
 presence,938563167,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45.501087,-122.650539
 presence,1012191341,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45.506513,-122.583663
 presence,1012191343,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45.507278,-122.581188
@@ -758,7 +630,6 @@ presence,1445628068,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45
 presence,1445804537,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45.483017,-122.584105
 presence,1446141999,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45.523887,-122.670458
 presence,1446142023,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45.532941,-122.685434
-presence,1463650092,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45.536544,-122.618728
 presence,1482458586,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45.525991,-122.673392
 presence,1523767030,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",6,45.493835,-122.586845
 presence,136634478,"Northeast Going Street",greenway,"cycleway=track;bicycle=designated;lcn=yes",5,45.556368,-122.649698
@@ -779,7 +650,6 @@ presence,1315996133,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",5,45
 presence,1430942444,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",5,45.583038,-122.684818
 presence,1432357309,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",5,45.533684,-122.585115
 presence,1446142022,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",5,45.532925,-122.685621
-presence,1456345789,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",5,45.525589,-122.700453
 presence,1496910152,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",5,45.537734,-122.630586
 presence,1500139002,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",5,45.561980,-122.682373
 presence,1518469370,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",5,45.562033,-122.684830
@@ -792,17 +662,14 @@ presence,1195140711,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",4,45
 presence,1264431592,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",4,45.528994,-122.557968
 presence,1306736130,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",4,45.588283,-122.737885
 presence,1432357305,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",4,45.533523,-122.584776
-presence,1436137541,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",4,45.528586,-122.683262
 presence,1500139001,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",4,45.561980,-122.682317
 presence,855657599,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",3,45.554704,-122.676589
-presence,1097451752,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",3,45.508420,-122.634853
 presence,1195140717,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",3,45.533435,-122.553471
 presence,1198406421,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",3,45.534241,-122.553465
 presence,1346058788,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",3,45.512079,-122.653624
 presence,1434531403,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",3,45.522210,-122.654853
 presence,1447204751,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",3,45.528087,-122.548530
 presence,160434981,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",2,45.540084,-122.609765
-presence,939130973,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",2,45.509721,-122.675346
 presence,1147417986,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",2,45.530853,-122.681508
 presence,1193859415,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",2,45.528960,-122.557968
 presence,1193859423,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",2,45.528940,-122.555561
@@ -811,25 +678,19 @@ presence,1198786444,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",2,45
 presence,1323672480,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",2,45.556377,-122.658657
 presence,1323672483,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",2,45.556394,-122.658493
 presence,1434531404,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",2,45.522233,-122.654833
-presence,1436129994,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",2,45.504190,-122.644699
 presence,1500139003,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",2,45.561980,-122.682345
 presence,1500165679,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",2,45.540077,-122.609795
-presence,1456345791,"",greenway,"cycleway=track;bicycle=designated;lcn=yes",1,45.525438,-122.700329
 presence,225110082,"Northwest Front Avenue",protected,"cycleway=track;bicycle=designated",901,45.572951,-122.750279
 presence,134952050,"North Lombard Street",protected,"cycleway=track;bicycle=designated",229,45.600081,-122.762517
 presence,117315120,"",protected,"cycleway=track;bicycle=designated",224,45.556384,-122.690729
 presence,1092400075,"",protected,"cycleway=track;bicycle=designated",199,45.556316,-122.690752
-presence,236942767,"Banfield Freeway",protected,"cycleway=track;bicycle=designated",190,45.529969,-122.643698
-presence,1483755849,"",protected,"cycleway=track;bicycle=designated",183,45.531768,-122.637028
 presence,1313153526,"North Columbia Boulevard",protected,"cycleway=track;bicycle=designated",179,45.613401,-122.762832
-presence,938577589,"",protected,"cycleway=track;bicycle=designated",174,45.504196,-122.673184
 presence,1200735430,"Southwest Capitol Highway",protected,"cycleway=track;bicycle=designated",139,45.466576,-122.716683
 presence,1436843353,"North Lombard Street",protected,"cycleway=track;bicycle=designated",135,45.598186,-122.761373
 presence,372147251,"Southeast Tilikum Way",protected,"cycleway=track;bicycle=designated",133,45.506559,-122.663221
 presence,463033284,"Southwest Naito Parkway",protected,"cycleway=track;bicycle=designated",115,45.509857,-122.676784
 presence,161385575,"South Porter Street",protected,"cycleway=track;bicycle=designated",110,45.502881,-122.670770
 presence,580023744,"Southeast 30th Avenue",protected,"cycleway=track;bicycle=designated",106,45.519219,-122.634838
-presence,918827819,"",protected,"cycleway=track;bicycle=designated",104,45.502715,-122.671516
 presence,1343669686,"Northeast 102nd Avenue",protected,"cycleway=track;bicycle=designated",104,45.545846,-122.557813
 presence,856063670,"Northeast 21st Avenue Bike Lane",protected,"cycleway=track;bicycle=designated",103,45.529800,-122.644806
 presence,189469329,"Southeast Washington Street",protected,"cycleway=track;bicycle=designated",100,45.518523,-122.585767
@@ -881,7 +742,6 @@ presence,833366779,"Southeast Washington Street",protected,"cycleway=track;bicyc
 presence,1042086782,"Northeast 28th Avenue",protected,"cycleway=track;bicycle=designated",44,45.532144,-122.637164
 presence,150590801,"",protected,"cycleway=track;bicycle=designated",43,45.514210,-122.674033
 presence,418707825,"Southwest Naito Parkway",protected,"cycleway=track;bicycle=designated",43,45.511355,-122.675917
-presence,939135602,"",protected,"cycleway=track;bicycle=designated",43,45.529654,-122.644699
 presence,925361156,"",protected,"cycleway=track;bicycle=designated",42,45.533440,-122.549091
 presence,418882233,"North Greeley Avenue",protected,"cycleway=track;bicycle=designated",41,45.560107,-122.694549
 presence,1306964734,"Southwest Capitol Highway",protected,"cycleway=track;bicycle=designated",40,45.460155,-122.719068
@@ -916,7 +776,6 @@ presence,126271059,"",protected,"cycleway=track;bicycle=designated",26,45.504477
 presence,930864699,"",protected,"cycleway=track;bicycle=designated",26,45.569943,-122.697678
 presence,930864701,"",protected,"cycleway=track;bicycle=designated",26,45.569955,-122.695451
 presence,1125614934,"Northwest 16th Avenue",protected,"cycleway=track;bicycle=designated",26,45.522955,-122.687171
-presence,1319772685,"",protected,"cycleway=track;bicycle=designated",26,45.512228,-122.662783
 presence,126289267,"",protected,"cycleway=track;bicycle=designated",25,45.503952,-122.523110
 presence,197462366,"",protected,"cycleway=track;bicycle=designated",25,45.526336,-122.506135
 presence,334029997,"South Porter Street",protected,"cycleway=track;bicycle=designated",25,45.502479,-122.672074
@@ -1016,8 +875,6 @@ presence,1456367236,"",protected,"cycleway=track;bicycle=designated",17,45.51218
 presence,1472817942,"",protected,"cycleway=track;bicycle=designated",17,45.522971,-122.689254
 presence,1482397224,"",protected,"cycleway=track;bicycle=designated",17,45.522816,-122.687535
 presence,1482449275,"",protected,"cycleway=track;bicycle=designated",17,45.525125,-122.677500
-presence,1483240636,"",protected,"cycleway=track;bicycle=designated",17,45.522900,-122.689802
-presence,1484200138,"",protected,"cycleway=track;bicycle=designated",17,45.524405,-122.677472
 presence,117996191,"West Burnside Street",protected,"cycleway=track;bicycle=designated",16,45.523281,-122.672356
 presence,127586074,"",protected,"cycleway=track;bicycle=designated",16,45.519448,-122.673715
 presence,938603037,"",protected,"cycleway=track;bicycle=designated",16,45.526510,-122.687374
@@ -1026,7 +883,6 @@ presence,1306964697,"Southwest Capitol Highway",protected,"cycleway=track;bicycl
 presence,1306964768,"",protected,"cycleway=track;bicycle=designated",16,45.466803,-122.716385
 presence,1383935615,"Northeast 102nd Avenue",protected,"cycleway=track;bicycle=designated",16,45.546851,-122.557790
 presence,1428873157,"",protected,"cycleway=track;bicycle=designated",16,45.513281,-122.682897
-presence,1484200137,"",protected,"cycleway=track;bicycle=designated",16,45.524547,-122.677478
 presence,1510170464,"",protected,"cycleway=track;bicycle=designated",16,45.522955,-122.687171
 presence,595610358,"Southwest Pennoyer Street",protected,"cycleway=track;bicycle=designated",15,45.497265,-122.678806
 presence,759022034,"",protected,"cycleway=track;bicycle=designated",15,45.534720,-122.682963
@@ -1075,7 +931,6 @@ presence,1428873156,"",protected,"cycleway=track;bicycle=designated",14,45.51340
 presence,1434526685,"",protected,"cycleway=track;bicycle=designated",14,45.517911,-122.692376
 presence,1436108237,"",protected,"cycleway=track;bicycle=designated",14,45.519385,-122.673808
 presence,1454807025,"",protected,"cycleway=track;bicycle=designated",14,45.504305,-122.507038
-presence,156122798,"",protected,"cycleway=track;bicycle=designated",13,45.530085,-122.664752
 presence,398448766,"",protected,"cycleway=track;bicycle=designated",13,45.519157,-122.557367
 presence,541442737,"",protected,"cycleway=track;bicycle=designated",13,45.449216,-122.724120
 presence,717792013,"",protected,"cycleway=track;bicycle=designated",13,45.479217,-122.700729
@@ -1137,7 +992,6 @@ presence,938577588,"",protected,"cycleway=track;bicycle=designated",10,45.504984
 presence,938577594,"South Moody Avenue",protected,"cycleway=track;bicycle=designated",10,45.503439,-122.672799
 presence,1019951968,"Southeast 145th Avenue",protected,"cycleway=track;bicycle=designated",10,45.504143,-122.513893
 presence,1040074110,"Northwest Savier Street",protected,"cycleway=track;bicycle=designated",10,45.534895,-122.692816
-presence,1040074118,"",protected,"cycleway=track;bicycle=designated",10,45.535664,-122.690849
 presence,1049866972,"Southeast 119th Avenue",protected,"cycleway=track;bicycle=designated",10,45.504189,-122.540905
 presence,1053793546,"",protected,"cycleway=track;bicycle=designated",10,45.516491,-122.677756
 presence,1095083718,"",protected,"cycleway=track;bicycle=designated",10,45.504501,-122.571891
@@ -1147,7 +1001,6 @@ presence,1207646154,"",protected,"cycleway=track;bicycle=designated",10,45.50411
 presence,1208127366,"",protected,"cycleway=track;bicycle=designated",10,45.504309,-122.554715
 presence,1208127374,"",protected,"cycleway=track;bicycle=designated",10,45.504112,-122.528593
 presence,1208128831,"",protected,"cycleway=track;bicycle=designated",10,45.504283,-122.551445
-presence,1312859282,"",protected,"cycleway=track;bicycle=designated",10,45.523569,-122.686760
 presence,1428873168,"",protected,"cycleway=track;bicycle=designated",10,45.510621,-122.684338
 presence,1436112941,"",protected,"cycleway=track;bicycle=designated",10,45.522821,-122.689762
 presence,1454807023,"",protected,"cycleway=track;bicycle=designated",10,45.504089,-122.517379
@@ -1208,14 +1061,12 @@ presence,142741813,"",protected,"cycleway=track;bicycle=designated",5,45.511591,
 presence,1042086777,"Northeast 28th Avenue",protected,"cycleway=track;bicycle=designated",5,45.530090,-122.637173
 presence,1366118500,"South Moody Avenue",protected,"cycleway=track;bicycle=designated",5,45.505036,-122.673814
 presence,1041344808,"North Greeley Avenue",protected,"cycleway=track;bicycle=designated",4,45.559866,-122.694439
-presence,1069812387,"",protected,"cycleway=track;bicycle=designated",4,45.520232,-122.671212
 presence,1126002120,"",protected,"cycleway=track;bicycle=designated",4,45.516188,-122.673206
 presence,1195151690,"",protected,"cycleway=track;bicycle=designated",4,45.533599,-122.556610
 presence,1195151693,"",protected,"cycleway=track;bicycle=designated",4,45.533601,-122.556425
 presence,1195156776,"",protected,"cycleway=track;bicycle=designated",4,45.533597,-122.555594
 presence,1201787231,"",protected,"cycleway=track;bicycle=designated",4,45.517733,-122.691280
 presence,1426959142,"",protected,"cycleway=track;bicycle=designated",4,45.461084,-122.704347
-presence,1436112925,"",protected,"cycleway=track;bicycle=designated",4,45.522933,-122.690076
 presence,1436112927,"",protected,"cycleway=track;bicycle=designated",4,45.522933,-122.690076
 presence,1484540140,"",protected,"cycleway=track;bicycle=designated",4,45.505055,-122.579869
 presence,1530677262,"",protected,"cycleway=track;bicycle=designated",4,45.511532,-122.540938
@@ -1223,16 +1074,13 @@ presence,881491381,"",protected,"cycleway=track;bicycle=designated",3,45.485592,
 presence,925365095,"",protected,"cycleway=track;bicycle=designated",3,45.533448,-122.549617
 presence,925423172,"",protected,"cycleway=track;bicycle=designated",3,45.534232,-122.556420
 presence,938558034,"",protected,"cycleway=track;bicycle=designated",3,45.506595,-122.662164
-presence,938577585,"",protected,"cycleway=track;bicycle=designated",3,45.506147,-122.671168
 presence,938594314,"Southwest Jackson Street",protected,"cycleway=track;bicycle=designated",3,45.508746,-122.683083
 presence,1018452253,"",protected,"cycleway=track;bicycle=designated",3,45.535423,-122.692671
 presence,1018452255,"",protected,"cycleway=track;bicycle=designated",3,45.535572,-122.692607
 presence,1195138270,"",protected,"cycleway=track;bicycle=designated",3,45.533442,-122.546987
-presence,1472817943,"",protected,"cycleway=track;bicycle=designated",3,45.522911,-122.689325
 presence,1484540144,"",protected,"cycleway=track;bicycle=designated",3,45.504604,-122.576489
 presence,5532172,"Kerr Parkway",protected,"cycleway=track;bicycle=designated",2,45.440345,-122.727073
 presence,925423169,"",protected,"cycleway=track;bicycle=designated",2,45.534230,-122.556671
-presence,938577590,"",protected,"cycleway=track;bicycle=designated",2,45.503509,-122.672827
 presence,938577595,"",protected,"cycleway=track;bicycle=designated",2,45.503364,-122.672759
 presence,1042086780,"Northeast 28th Avenue",protected,"cycleway=track;bicycle=designated",2,45.530107,-122.637196
 presence,1126002121,"",protected,"cycleway=track;bicycle=designated",2,45.516206,-122.673272
@@ -1250,13 +1098,8 @@ presence,1195151372,"",protected,"cycleway=track;bicycle=designated",2,45.534211
 presence,1195151373,"",protected,"cycleway=track;bicycle=designated",2,45.534219,-122.556419
 presence,1231551357,"",protected,"cycleway=track;bicycle=designated",2,45.530155,-122.667221
 presence,1434531394,"",protected,"cycleway=track;bicycle=designated",2,45.522083,-122.654798
-presence,1434564582,"",protected,"cycleway=track;bicycle=designated",2,45.534791,-122.682882
-presence,1472067636,"",protected,"cycleway=track;bicycle=designated",2,45.522908,-122.689388
-presence,1482397218,"",protected,"cycleway=track;bicycle=designated",2,45.522922,-122.689312
-presence,939135603,"",protected,"cycleway=track;bicycle=designated",1,45.529654,-122.644699
 presence,1042086775,"Northeast 21st Circle Bike Lane",protected,"cycleway=track;bicycle=designated",1,45.529723,-122.644795
 presence,1290804613,"North Columbia Boulevard",buffered,"cycleway=lane",497,45.616095,-122.764196
-presence,1271290746,"",buffered,"cycleway=lane",261,45.532278,-122.666061
 presence,31779669,"",buffered,"cycleway=lane",219,45.535356,-122.674041
 presence,320597576,"North Williams Avenue",buffered,"cycleway=lane",156,45.530016,-122.665729
 presence,34089106,"Hawthorne Bridge",buffered,"cycleway=lane",145,45.512839,-122.666468
@@ -1266,12 +1109,8 @@ presence,119655088,"North Williams Avenue",buffered,"cycleway=lane",107,45.54285
 presence,185885258,"North Williams Avenue",buffered,"cycleway=lane",87,45.530403,-122.665813
 presence,5512197,"",buffered,"cycleway=lane",76,45.536677,-122.674800
 presence,1436145568,"Southeast Madison Street",buffered,"cycleway=lane",74,45.512986,-122.665743
-presence,948870807,"",buffered,"cycleway=lane",69,45.594710,-122.727520
-presence,1436107559,"",buffered,"cycleway=lane",65,45.519636,-122.685887
 presence,517101248,"North Williams Avenue",buffered,"cycleway=lane",64,45.529607,-122.665813
 presence,918351034,"",buffered,"cycleway=lane",64,45.530037,-122.662584
-presence,30316205,"",buffered,"cycleway=lane",63,45.504707,-122.565143
-presence,30316210,"",buffered,"cycleway=lane",63,45.504145,-122.565461
 presence,44706405,"West Burnside Street",buffered,"cycleway=lane",57,45.522982,-122.681230
 presence,918451808,"",buffered,"cycleway=lane",50,45.522352,-122.511494
 presence,1035045147,"Hawthorne Bridge",buffered,"cycleway=lane",45,45.512509,-122.667669
@@ -1340,7 +1179,6 @@ presence,1231555600,"",buffered,"cycleway=lane",19,45.535100,-122.665630
 presence,125785920,"",buffered,"cycleway=lane",18,45.530116,-122.663818
 presence,159113718,"",buffered,"cycleway=lane",18,45.530080,-122.663608
 presence,159425307,"",buffered,"cycleway=lane",18,45.584660,-122.686865
-presence,204160340,"Southeast Martin Luther King Junior Boulevard",buffered,"cycleway=lane",18,45.512159,-122.661709
 presence,392596938,"Southeast Thorburn Street",buffered,"cycleway=lane",18,45.521995,-122.591749
 presence,521364831,"",buffered,"cycleway=lane",18,45.522928,-122.657786
 presence,1060856886,"",buffered,"cycleway=lane",18,45.577142,-122.697378
@@ -1351,7 +1189,6 @@ presence,1215455817,"Southwest Washington Street",buffered,"cycleway=lane",18,45
 presence,1453840780,"",buffered,"cycleway=lane",18,45.490292,-122.598311
 presence,1460628491,"",buffered,"cycleway=lane",18,45.489406,-122.648401
 presence,1483751137,"",buffered,"cycleway=lane",18,45.529059,-122.637168
-presence,141455587,"",buffered,"cycleway=lane",17,45.518730,-122.687425
 presence,204160345,"",buffered,"cycleway=lane",17,45.512206,-122.660923
 presence,692642740,"Southwest 10th Avenue",buffered,"cycleway=lane",17,45.521992,-122.680962
 presence,882640641,"",buffered,"cycleway=lane",17,45.476337,-122.724478
@@ -1458,7 +1295,6 @@ presence,1530861767,"",buffered,"cycleway=lane",13,45.537211,-122.537423
 presence,126854734,"",buffered,"cycleway=lane",12,45.480487,-122.570902
 presence,150570458,"West Burnside Street",buffered,"cycleway=lane",12,45.522925,-122.684057
 presence,189891730,"",buffered,"cycleway=lane",12,45.512936,-122.660921
-presence,421946338,"",buffered,"cycleway=lane",12,45.535207,-122.666767
 presence,857044154,"",buffered,"cycleway=lane",12,45.553378,-122.667957
 presence,857044159,"",buffered,"cycleway=lane",12,45.553242,-122.667956
 presence,857044169,"",buffered,"cycleway=lane",12,45.551986,-122.667957
@@ -1498,7 +1334,6 @@ presence,1390524290,"",buffered,"cycleway=lane",11,45.519069,-122.530109
 presence,1434527038,"",buffered,"cycleway=lane",11,45.535857,-122.658602
 presence,1436098133,"",buffered,"cycleway=lane",11,45.526466,-122.689382
 presence,1436098142,"",buffered,"cycleway=lane",11,45.526305,-122.690387
-presence,1436114885,"",buffered,"cycleway=lane",11,45.522495,-122.689984
 presence,1436129300,"",buffered,"cycleway=lane",11,45.529351,-122.687439
 presence,1436133259,"",buffered,"cycleway=lane",11,45.518227,-122.687766
 presence,1474390996,"",buffered,"cycleway=lane",11,45.562321,-122.667066
@@ -1531,7 +1366,6 @@ presence,1314227802,"",buffered,"cycleway=lane",9,45.576010,-122.729029
 presence,1421271995,"",buffered,"cycleway=lane",9,45.512787,-122.504775
 presence,1434516311,"",buffered,"cycleway=lane",9,45.515011,-122.675224
 presence,1436110302,"Southwest Yamhill Street",buffered,"cycleway=lane",9,45.520142,-122.685520
-presence,153506702,"Broadway Bridge",buffered,"cycleway=lane",8,45.533384,-122.671896
 presence,158070636,"Southwest 10th Avenue",buffered,"cycleway=lane",8,45.522761,-122.681004
 presence,206314081,"",buffered,"cycleway=lane",8,45.480364,-122.570795
 presence,397806331,"",buffered,"cycleway=lane",8,45.516169,-122.679149
@@ -1559,7 +1393,6 @@ presence,1069812393,"",buffered,"cycleway=lane",7,45.520315,-122.672107
 presence,1211216597,"North Russet Street",buffered,"cycleway=lane",7,45.578113,-122.686928
 presence,1216997514,"",buffered,"cycleway=lane",7,45.529133,-122.653618
 presence,1422964951,"",buffered,"cycleway=lane",7,45.463590,-122.615788
-presence,1430484325,"Broadway Bridge",buffered,"cycleway=lane",7,45.533280,-122.671959
 presence,1432357302,"",buffered,"cycleway=lane",7,45.533599,-122.585082
 presence,1432357308,"",buffered,"cycleway=lane",7,45.533600,-122.585038
 presence,1436112932,"",buffered,"cycleway=lane",7,45.522849,-122.690213
@@ -1581,7 +1414,6 @@ presence,1455935780,"",buffered,"cycleway=lane",6,45.522846,-122.690133
 presence,1434515991,"",buffered,"cycleway=lane",5,45.593275,-122.756783
 presence,1434515996,"",buffered,"cycleway=lane",5,45.593337,-122.756656
 presence,1434515999,"",buffered,"cycleway=lane",5,45.593401,-122.756723
-presence,857044170,"",buffered,"cycleway=lane",4,45.551984,-122.668072
 presence,1151020769,"Northeast Holladay Street",buffered,"cycleway=lane",4,45.530016,-122.665729
 presence,1289763623,"",buffered,"cycleway=lane",4,45.491253,-122.648444
 presence,1305140911,"",buffered,"cycleway=lane",4,45.535048,-122.655647
@@ -1591,7 +1423,6 @@ presence,1434516000,"",buffered,"cycleway=lane",4,45.593379,-122.756701
 presence,1434517509,"",buffered,"cycleway=lane",4,45.594885,-122.753620
 presence,1434517511,"",buffered,"cycleway=lane",4,45.594995,-122.753382
 presence,1434532270,"",buffered,"cycleway=lane",4,45.536582,-122.666690
-presence,1436114897,"",buffered,"cycleway=lane",4,45.522756,-122.689803
 presence,1484004464,"",buffered,"cycleway=lane",4,45.522866,-122.684060
 presence,1434525266,"",buffered,"cycleway=lane",3,45.516493,-122.660884
 presence,1434532273,"",buffered,"cycleway=lane",3,45.536448,-122.666651
@@ -1601,36 +1432,18 @@ presence,604743359,"",buffered,"cycleway=lane",2,45.594020,-122.755383
 presence,1196112618,"",buffered,"cycleway=lane",2,45.526345,-122.552325
 presence,1434515974,"",buffered,"cycleway=lane",2,45.593944,-122.755544
 presence,1436112917,"",buffered,"cycleway=lane",2,45.523132,-122.690281
-presence,1436129302,"",buffered,"cycleway=lane",2,45.529213,-122.687528
-presence,1453836330,"",buffered,"cycleway=lane",2,45.512893,-122.662717
-presence,1436129312,"",buffered,"cycleway=lane",1,45.529350,-122.687516
 presence,30409517,"Northeast Marine Drive",standard,"cycleway=lane",1046,45.565429,-122.523411
 presence,118831501,"Terwilliger Trail",standard,"cycleway=lane",466,45.479190,-122.685600
 presence,197608941,"Northeast Marine Drive",standard,"cycleway=lane",465,45.574157,-122.548163
 presence,171973742,"Terwilliger Trail",standard,"cycleway=lane",377,45.497813,-122.680643
-presence,5515524,"",standard,"cycleway=lane",263,45.561157,-122.562083
-presence,5520143,"Morrison Bridge",standard,"cycleway=lane",253,45.517235,-122.662691
-presence,909451824,"",standard,"cycleway=lane",244,45.575748,-122.565258
-presence,1459474896,"",standard,"cycleway=lane",244,45.588988,-122.728356
 presence,117295380,"",standard,"cycleway=lane",230,45.493154,-122.677015
-presence,948870810,"",standard,"cycleway=lane",183,45.591615,-122.728433
 presence,1312484269,"Northwest 10th Avenue",standard,"cycleway=lane",159,45.527257,-122.681274
-presence,1459474913,"",standard,"cycleway=lane",152,45.586520,-122.728342
-presence,1436130423,"",standard,"cycleway=lane",149,45.475414,-122.696131
 presence,117315163,"North River Street",standard,"cycleway=lane",145,45.538796,-122.679154
 presence,197608931,"Northeast Airport Way",standard,"cycleway=lane",143,45.570003,-122.548142
-presence,131906323,"Hawthorne Bridge",standard,"cycleway=lane",118,45.512192,-122.665490
-presence,30255887,"",standard,"cycleway=lane",111,45.464580,-122.568208
 presence,376483532,"",standard,"cycleway=lane",110,45.529958,-122.678399
 presence,44791492,"Northeast Martin Luther King Junior Boulevard",standard,"cycleway=lane",109,45.587009,-122.664355
-presence,30369706,"Columbia River Highway",standard,"cycleway=lane",107,45.546678,-122.538020
-presence,335806896,"Columbia River Highway",standard,"cycleway=lane",106,45.546302,-122.536740
-presence,179097673,"",standard,"cycleway=lane",105,45.546201,-122.536774
-presence,136211294,"",standard,"cycleway=lane",101,45.573074,-122.558841
 presence,125389531,"Northeast 122nd Avenue",standard,"cycleway=lane",91,45.555002,-122.537301
 presence,197464216,"Northeast 122nd Avenue",standard,"cycleway=lane",90,45.559819,-122.537646
-presence,1016926009,"",standard,"cycleway=lane",89,45.499185,-122.682717
-presence,1007283887,"Morrison Bridge",standard,"cycleway=lane",88,45.516525,-122.662587
 presence,1344740969,"Northeast Marine Drive",standard,"cycleway=lane",86,45.567418,-122.530980
 presence,918764211,"",standard,"cycleway=lane",83,45.583687,-122.685635
 presence,918764219,"",standard,"cycleway=lane",83,45.554934,-122.682294
@@ -1638,56 +1451,34 @@ presence,1393184106,"",standard,"cycleway=lane",83,45.523844,-122.687084
 presence,136373067,"Southwest Lesser Road",standard,"cycleway=lane",81,45.441123,-122.738007
 presence,585840448,"Morrison Bridge",standard,"cycleway=lane",80,45.517244,-122.665748
 presence,918351037,"",standard,"cycleway=lane",80,45.530380,-122.668106
-presence,136211299,"",standard,"cycleway=lane",77,45.572299,-122.557746
 presence,1281102004,"",standard,"cycleway=lane",77,45.516419,-122.661963
-presence,5512192,"",standard,"cycleway=lane",76,45.530364,-122.614766
 presence,5526992,"Northeast Halsey Street",standard,"cycleway=lane",76,45.533661,-122.497398
-presence,1016650712,"",standard,"cycleway=lane",75,45.496132,-122.670954
 presence,918764222,"",standard,"cycleway=lane",74,45.539715,-122.675816
-presence,23530064,"",standard,"cycleway=lane",73,45.545087,-122.678219
-presence,158303885,"",standard,"cycleway=lane",73,45.495362,-122.670986
 presence,918827820,"",standard,"cycleway=lane",73,45.507936,-122.680925
 presence,141272482,"Northeast 122nd Avenue",standard,"cycleway=lane",71,45.559132,-122.537888
-presence,1436107403,"",standard,"cycleway=lane",71,45.572693,-122.557875
 presence,171973743,"Terwilliger Trail",standard,"cycleway=lane",70,45.499216,-122.682403
 presence,725213540,"Northeast Halsey Street",standard,"cycleway=lane",69,45.533666,-122.496624
-presence,30254290,"",standard,"cycleway=lane",66,45.497646,-122.565244
 presence,31826899,"Hawthorne Bridge",standard,"cycleway=lane",66,45.512351,-122.667559
 presence,117295344,"South Barbur Boulevard",standard,"cycleway=lane",66,45.492865,-122.676912
-presence,30254292,"",standard,"cycleway=lane",65,45.497072,-122.565556
-presence,909397438,"",standard,"cycleway=lane",65,45.508995,-122.735895
 presence,1425699429,"",standard,"cycleway=lane",65,45.591598,-122.728093
-presence,1459472965,"",standard,"cycleway=lane",64,45.591518,-122.727807
-presence,1086831545,"Southwest 3rd Avenue",standard,"cycleway=lane",63,45.512850,-122.678453
-presence,1530492120,"",standard,"cycleway=lane",61,45.443193,-122.742733
 presence,68867662,"",standard,"cycleway=lane",60,45.499049,-122.681525
 presence,155097964,"Northeast Martin Luther King Junior Boulevard",standard,"cycleway=lane",60,45.585894,-122.663706
-presence,436799849,"",standard,"cycleway=lane",58,45.505185,-122.704889
-presence,1525090802,"",standard,"cycleway=lane",58,45.465201,-122.698681
 presence,120880394,"Southeast Belmont Street",standard,"cycleway=lane",57,45.516489,-122.640238
-presence,158303887,"South Bond Avenue",standard,"cycleway=lane",57,45.499091,-122.670833
-presence,1527721760,"",standard,"cycleway=lane",55,45.516529,-122.663721
 presence,180527497,"",standard,"cycleway=lane",54,45.499339,-122.684842
 presence,189966941,"Southwest 5th Avenue",standard,"cycleway=lane",53,45.511624,-122.681445
 presence,124281555,"",standard,"cycleway=lane",52,45.502992,-122.683825
 presence,68867661,"",standard,"cycleway=lane",51,45.495454,-122.681779
 presence,134825417,"Northeast Martin Luther King Junior Boulevard",standard,"cycleway=lane",51,45.581259,-122.661421
-presence,5509601,"",standard,"cycleway=lane",50,45.516401,-122.661976
 presence,119000622,"",standard,"cycleway=lane",48,45.502776,-122.687465
 presence,118834849,"Southwest 5th Avenue",standard,"cycleway=lane",47,45.512754,-122.680947
 presence,1375972923,"",standard,"cycleway=lane",47,45.556872,-122.535866
-presence,40602088,"",standard,"cycleway=lane",46,45.482944,-122.565812
 presence,129991149,"",standard,"cycleway=lane",46,45.572198,-122.556533
 presence,740028251,"Northwest 14th Avenue",standard,"cycleway=lane",43,45.524519,-122.685163
-presence,1341462909,"",standard,"cycleway=lane",42,45.497301,-122.564912
-presence,40602087,"",standard,"cycleway=lane",41,45.482537,-122.566119
 presence,129036716,"Northeast Cascades Parkway",standard,"cycleway=lane",41,45.576614,-122.566947
-presence,5513302,"",standard,"cycleway=lane",40,45.468410,-122.685943
 presence,117032395,"North Lombard Street",standard,"cycleway=lane",40,45.577113,-122.684643
 presence,129036717,"Northeast Cascades Parkway",standard,"cycleway=lane",40,45.576341,-122.567043
 presence,156366644,"",standard,"cycleway=lane",40,45.510286,-122.715920
 presence,401677907,"",standard,"cycleway=lane",40,45.510225,-122.677719
-presence,939185462,"",standard,"cycleway=lane",40,45.557141,-122.537952
 presence,60428959,"Northeast Mount Saint Helens Avenue",standard,"cycleway=lane",38,45.572431,-122.558550
 presence,127455624,"",standard,"cycleway=lane",38,45.479921,-122.570611
 presence,129036722,"Northeast Cascades Parkway",standard,"cycleway=lane",37,45.576361,-122.566918
@@ -1699,7 +1490,6 @@ presence,1453839162,"",standard,"cycleway=lane",36,45.459801,-122.707870
 presence,136211295,"",standard,"cycleway=lane",34,45.574905,-122.563185
 presence,161264278,"South Service Drive",standard,"cycleway=lane",34,45.446840,-122.669755
 presence,682134127,"Northeast Airport Way Frontage Road",standard,"cycleway=lane",34,45.577856,-122.559902
-presence,1306964772,"",standard,"cycleway=lane",34,45.467065,-122.715881
 presence,52560730,"Southwest Zoo Road",standard,"cycleway=lane",33,45.509086,-122.716566
 presence,60428965,"Northeast Mount Saint Helens Avenue",standard,"cycleway=lane",33,45.572007,-122.557354
 presence,418838964,"Southwest 30th Avenue",standard,"cycleway=lane",33,45.459709,-122.707762
@@ -1707,14 +1497,11 @@ presence,114189769,"Southwest 53rd Avenue",standard,"cycleway=lane",32,45.445940
 presence,118828720,"",standard,"cycleway=lane",32,45.474175,-122.638833
 presence,205284347,"",standard,"cycleway=lane",32,45.543197,-122.677188
 presence,205288380,"North Tillamook Street",standard,"cycleway=lane",32,45.537858,-122.674696
-presence,1237410862,"",standard,"cycleway=lane",31,45.498590,-122.683618
 presence,203415061,"Northeast Martin Luther King Junior Boulevard",standard,"cycleway=lane",30,45.581662,-122.661485
 presence,919212931,"",standard,"cycleway=lane",30,45.530688,-122.658625
 presence,948870813,"",standard,"cycleway=lane",30,45.592786,-122.732480
 presence,125389537,"",standard,"cycleway=lane",29,45.539697,-122.537373
 presence,418644242,"Northeast Martin Luther King Junior Boulevard",standard,"cycleway=lane",29,45.581889,-122.661568
-presence,939234508,"",standard,"cycleway=lane",29,45.574339,-122.633352
-presence,939234509,"",standard,"cycleway=lane",29,45.574139,-122.633442
 presence,1470393368,"",standard,"cycleway=lane",29,45.505438,-122.684160
 presence,60428954,"Northeast Mount Saint Helens Avenue",standard,"cycleway=lane",28,45.572033,-122.557414
 presence,123403126,"",standard,"cycleway=lane",28,45.464416,-122.637630
@@ -1738,14 +1525,10 @@ presence,1430942447,"",standard,"cycleway=lane",25,45.583438,-122.684856
 presence,1500636967,"",standard,"cycleway=lane",25,45.558618,-122.551846
 presence,1530861766,"",standard,"cycleway=lane",25,45.537158,-122.537603
 presence,118879376,"Marquam Trail",standard,"cycleway=lane",24,45.502703,-122.712993
-presence,125834103,"",standard,"cycleway=lane",24,45.572586,-122.558483
-presence,126854732,"",standard,"cycleway=lane",24,45.480353,-122.570493
 presence,257209970,"",standard,"cycleway=lane",24,45.518059,-122.658824
-presence,938594308,"Southwest 5th Avenue",standard,"cycleway=lane",24,45.508699,-122.683122
 presence,1022428257,"",standard,"cycleway=lane",24,45.505228,-122.581001
 presence,1060587227,"",standard,"cycleway=lane",24,45.558867,-122.554628
 presence,1210848319,"",standard,"cycleway=lane",24,45.528495,-122.656332
-presence,122302582,"",standard,"cycleway=lane",23,45.572108,-122.557288
 presence,123619361,"",standard,"cycleway=lane",23,45.518113,-122.692851
 presence,150590784,"Hawthorne Bridge",standard,"cycleway=lane",23,45.514281,-122.674352
 presence,184234131,"",standard,"cycleway=lane",23,45.479406,-122.570501
@@ -1756,7 +1539,6 @@ presence,1463666856,"",standard,"cycleway=lane",23,45.520001,-122.657252
 presence,1497622233,"",standard,"cycleway=lane",23,45.467500,-122.717872
 presence,115811862,"Morrison Bridge",standard,"cycleway=lane",22,45.518444,-122.672646
 presence,126306261,"Broadway Bridge",standard,"cycleway=lane",22,45.533005,-122.671897
-presence,126306262,"Broadway Bridge",standard,"cycleway=lane",22,45.532975,-122.671925
 presence,162992821,"",standard,"cycleway=lane",22,45.455138,-122.717413
 presence,740028250,"Northwest 14th Avenue",standard,"cycleway=lane",22,45.524443,-122.685201
 presence,938558059,"",standard,"cycleway=lane",22,45.506512,-122.658747
@@ -1769,11 +1551,8 @@ presence,1210848038,"",standard,"cycleway=lane",22,45.529101,-122.654166
 presence,1262397415,"",standard,"cycleway=lane",22,45.591689,-122.728458
 presence,1436111188,"",standard,"cycleway=lane",22,45.467156,-122.712947
 presence,124810300,"",standard,"cycleway=lane",21,45.548828,-122.681069
-presence,125820528,"",standard,"cycleway=lane",21,45.576557,-122.567121
-presence,141455556,"",standard,"cycleway=lane",21,45.514859,-122.688528
 presence,202488518,"Northeast 12th Avenue",standard,"cycleway=lane",21,45.522904,-122.653464
 presence,205281981,"",standard,"cycleway=lane",21,45.584471,-122.686770
-presence,379238593,"",standard,"cycleway=lane",21,45.573041,-122.558755
 presence,461180596,"North Interstate Place",standard,"cycleway=lane",21,45.582682,-122.682692
 presence,938591427,"",standard,"cycleway=lane",21,45.507964,-122.678513
 presence,1049499277,"",standard,"cycleway=lane",21,45.513399,-122.680515
@@ -1786,7 +1565,6 @@ presence,1482146570,"",standard,"cycleway=lane",21,45.527862,-122.653589
 presence,1488050521,"",standard,"cycleway=lane",21,45.542124,-122.604571
 presence,33502863,"",standard,"cycleway=lane",20,45.453020,-122.722509
 presence,119000633,"Southwest Terwilliger Boulevard",standard,"cycleway=lane",20,45.502478,-122.687303
-presence,158087491,"",standard,"cycleway=lane",20,45.528896,-122.682402
 presence,159112019,"",standard,"cycleway=lane",20,45.530122,-122.680252
 presence,190534275,"Northwest 14th Avenue",standard,"cycleway=lane",20,45.524601,-122.685281
 presence,418970243,"",standard,"cycleway=lane",20,45.534692,-122.669135
@@ -1882,14 +1660,12 @@ presence,172076208,"",standard,"cycleway=lane",16,45.476026,-122.690397
 presence,185161599,"",standard,"cycleway=lane",16,45.534371,-122.669186
 presence,203426047,"",standard,"cycleway=lane",16,45.627321,-122.739850
 presence,287980577,"",standard,"cycleway=lane",16,45.462726,-122.684962
-presence,379238592,"",standard,"cycleway=lane",16,45.574828,-122.563892
 presence,425879073,"",standard,"cycleway=lane",16,45.535097,-122.663595
 presence,658557668,"North Albina Avenue",standard,"cycleway=lane",16,45.539311,-122.674971
 presence,696826034,"",standard,"cycleway=lane",16,45.526464,-122.685406
 presence,909397436,"",standard,"cycleway=lane",16,45.507128,-122.737720
 presence,918469375,"",standard,"cycleway=lane",16,45.514768,-122.679648
 presence,918469377,"",standard,"cycleway=lane",16,45.514831,-122.679878
-presence,938594305,"Southwest 5th Avenue",standard,"cycleway=lane",16,45.507073,-122.683846
 presence,938594311,"",standard,"cycleway=lane",16,45.508477,-122.683274
 presence,938603009,"",standard,"cycleway=lane",16,45.516185,-122.687754
 presence,939185436,"",standard,"cycleway=lane",16,45.556970,-122.536111
@@ -1950,7 +1726,6 @@ presence,1078717606,"",standard,"cycleway=lane",15,45.485756,-122.586989
 presence,1210834766,"",standard,"cycleway=lane",15,45.534335,-122.651436
 presence,1210838907,"",standard,"cycleway=lane",15,45.523574,-122.658761
 presence,1231274818,"",standard,"cycleway=lane",15,45.534276,-122.658590
-presence,1341462905,"",standard,"cycleway=lane",15,45.497291,-122.564585
 presence,1396513922,"Southwest Taylors Ferry Road",standard,"cycleway=lane",15,45.456632,-122.713281
 presence,1433094291,"",standard,"cycleway=lane",15,45.485749,-122.620589
 presence,1433094331,"",standard,"cycleway=lane",15,45.486607,-122.620589
@@ -2062,12 +1837,10 @@ presence,766061894,"",standard,"cycleway=lane",12,45.459980,-122.707569
 presence,913618491,"",standard,"cycleway=lane",12,45.477940,-122.697135
 presence,938575189,"",standard,"cycleway=lane",12,45.493259,-122.672006
 presence,966076662,"",standard,"cycleway=lane",12,45.516489,-122.640238
-presence,983101881,"",standard,"cycleway=lane",12,45.534987,-122.668872
 presence,1016926011,"",standard,"cycleway=lane",12,45.498669,-122.683549
 presence,1016926014,"",standard,"cycleway=lane",12,45.498800,-122.685197
 presence,1231555408,"",standard,"cycleway=lane",12,45.534412,-122.665619
 presence,1268453877,"",standard,"cycleway=lane",12,45.590226,-122.728360
-presence,1290823908,"",standard,"cycleway=lane",12,45.508470,-122.736423
 presence,1292167704,"",standard,"cycleway=lane",12,45.577668,-122.761890
 presence,1308991087,"",standard,"cycleway=lane",12,45.577044,-122.568066
 presence,1312859279,"",standard,"cycleway=lane",12,45.524928,-122.687208
@@ -2093,7 +1866,6 @@ presence,1436117654,"",standard,"cycleway=lane",12,45.516522,-122.659649
 presence,1436131351,"",standard,"cycleway=lane",12,45.586679,-122.737336
 presence,1436136908,"",standard,"cycleway=lane",12,45.463516,-122.692928
 presence,1436144031,"",standard,"cycleway=lane",12,45.513618,-122.665843
-presence,1436509676,"",standard,"cycleway=lane",12,45.526464,-122.643427
 presence,1444035001,"",standard,"cycleway=lane",12,45.554640,-122.681124
 presence,1453834256,"",standard,"cycleway=lane",12,45.461613,-122.707746
 presence,1453834260,"",standard,"cycleway=lane",12,45.460844,-122.707743
@@ -2113,11 +1885,9 @@ presence,1527721755,"Southeast Morrison Bridge",standard,"cycleway=lane",12,45.5
 presence,35917346,"",standard,"cycleway=lane",11,45.509490,-122.718102
 presence,120106277,"",standard,"cycleway=lane",11,45.501069,-122.707103
 presence,122302589,"",standard,"cycleway=lane",11,45.576732,-122.567172
-presence,141455510,"",standard,"cycleway=lane",11,45.515541,-122.688161
 presence,169163654,"",standard,"cycleway=lane",11,45.560502,-122.516054
 presence,182950814,"",standard,"cycleway=lane",11,45.505748,-122.682019
 presence,186656694,"",standard,"cycleway=lane",11,45.497795,-122.671837
-presence,379238588,"",standard,"cycleway=lane",11,45.574688,-122.563819
 presence,474073272,"",standard,"cycleway=lane",11,45.463491,-122.698151
 presence,835603903,"",standard,"cycleway=lane",11,45.496132,-122.670954
 presence,857044151,"",standard,"cycleway=lane",11,45.550857,-122.666711
@@ -2176,7 +1946,6 @@ presence,1434524528,"",standard,"cycleway=lane",10,45.535719,-122.686044
 presence,1434535132,"",standard,"cycleway=lane",10,45.506899,-122.683699
 presence,1436103198,"",standard,"cycleway=lane",10,45.526468,-122.637115
 presence,1436136902,"",standard,"cycleway=lane",10,45.463515,-122.693083
-presence,1436144018,"",standard,"cycleway=lane",10,45.512216,-122.665985
 presence,1446142026,"",standard,"cycleway=lane",10,45.532953,-122.685551
 presence,1446341370,"",standard,"cycleway=lane",10,45.479462,-122.578863
 presence,1456345788,"",standard,"cycleway=lane",10,45.525402,-122.700380
@@ -2262,7 +2031,6 @@ presence,857044142,"",standard,"cycleway=lane",7,45.552116,-122.666723
 presence,1016926007,"",standard,"cycleway=lane",7,45.499256,-122.682727
 presence,1079120001,"",standard,"cycleway=lane",7,45.496846,-122.671807
 presence,1393945183,"",standard,"cycleway=lane",7,45.482544,-122.559697
-presence,1434517859,"",standard,"cycleway=lane",7,45.572589,-122.557591
 presence,1434528277,"",standard,"cycleway=lane",7,45.539723,-122.675904
 presence,1436116395,"",standard,"cycleway=lane",7,45.521920,-122.689243
 presence,1436129499,"",standard,"cycleway=lane",7,45.535098,-122.685616
@@ -2305,7 +2073,6 @@ presence,1201234133,"",standard,"cycleway=lane",5,45.464232,-122.659978
 presence,1231551981,"",standard,"cycleway=lane",5,45.530048,-122.667358
 presence,1312859280,"",standard,"cycleway=lane",5,45.523689,-122.685258
 presence,1434516143,"",standard,"cycleway=lane",5,45.572059,-122.557267
-presence,1434517866,"",standard,"cycleway=lane",5,45.572652,-122.557754
 presence,1436132871,"",standard,"cycleway=lane",5,45.510461,-122.665913
 presence,1455959956,"",standard,"cycleway=lane",5,45.512869,-122.678518
 presence,1456345792,"",standard,"cycleway=lane",5,45.525356,-122.700436
@@ -2315,59 +2082,29 @@ presence,152282277,"",standard,"cycleway=lane",4,45.534596,-122.669305
 presence,194437353,"",standard,"cycleway=lane",4,45.510636,-122.717616
 presence,919212930,"",standard,"cycleway=lane",4,45.533516,-122.658600
 presence,939130979,"",standard,"cycleway=lane",4,45.507154,-122.674196
-presence,1016926010,"",standard,"cycleway=lane",4,45.498695,-122.683514
 presence,1430098173,"",standard,"cycleway=lane",4,45.523803,-122.700027
-presence,1434517853,"",standard,"cycleway=lane",4,45.572702,-122.557785
-presence,1434517858,"",standard,"cycleway=lane",4,45.572618,-122.557570
 presence,1434536008,"",standard,"cycleway=lane",4,45.539353,-122.675112
-presence,1444035000,"",standard,"cycleway=lane",4,45.554699,-122.681131
-presence,1458845086,"",standard,"cycleway=lane",4,45.476036,-122.702396
 presence,163869023,"",standard,"cycleway=lane",3,45.500099,-122.684296
 presence,197608942,"Northeast Mount Saint Helens Avenue",standard,"cycleway=lane",3,45.572062,-122.557225
 presence,919274072,"",standard,"cycleway=lane",3,45.507143,-122.674160
-presence,1016650737,"",standard,"cycleway=lane",3,45.498628,-122.670847
 presence,1218755408,"",standard,"cycleway=lane",3,45.510473,-122.715900
 presence,1225301287,"Southeast 7th Avenue",standard,"cycleway=lane",3,45.519350,-122.658684
 presence,1407607000,"",standard,"cycleway=lane",3,45.477918,-122.697835
-presence,1434128826,"",standard,"cycleway=lane",3,45.534987,-122.668872
-presence,1434516138,"",standard,"cycleway=lane",3,45.571779,-122.556452
-presence,1434516140,"",standard,"cycleway=lane",3,45.571901,-122.556758
-presence,1434516145,"",standard,"cycleway=lane",3,45.572161,-122.557326
-presence,1434518131,"",standard,"cycleway=lane",3,45.534591,-122.669299
 presence,1434528278,"",standard,"cycleway=lane",3,45.539747,-122.675878
 presence,1434531375,"",standard,"cycleway=lane",3,45.520722,-122.656612
 presence,1434532903,"",standard,"cycleway=lane",3,45.452956,-122.722636
 presence,1434537584,"",standard,"cycleway=lane",3,45.503852,-122.678716
-presence,1436129500,"",standard,"cycleway=lane",3,45.535098,-122.685540
-presence,1446142025,"",standard,"cycleway=lane",3,45.532953,-122.685590
 presence,1453839159,"",standard,"cycleway=lane",3,45.460718,-122.706282
-presence,1459472977,"",standard,"cycleway=lane",3,45.591199,-122.723238
-presence,1482163424,"",standard,"cycleway=lane",3,45.524073,-122.701382
 presence,1482813285,"",standard,"cycleway=lane",3,45.526469,-122.641519
 presence,1482813287,"",standard,"cycleway=lane",3,45.526467,-122.641325
 presence,1482820600,"",standard,"cycleway=lane",3,45.526454,-122.634607
 presence,1482820602,"",standard,"cycleway=lane",3,45.526479,-122.634406
 presence,158087489,"",standard,"cycleway=lane",2,45.528901,-122.682402
-presence,857044150,"",standard,"cycleway=lane",2,45.550857,-122.666782
-presence,909451813,"",standard,"cycleway=lane",2,45.572035,-122.557259
-presence,939210622,"",standard,"cycleway=lane",2,45.562867,-122.573188
-presence,1434516150,"",standard,"cycleway=lane",2,45.571616,-122.556168
-presence,1434517862,"",standard,"cycleway=lane",2,45.572423,-122.558005
-presence,1434517863,"",standard,"cycleway=lane",2,45.572337,-122.557790
-presence,1434526688,"",standard,"cycleway=lane",2,45.518129,-122.693108
 presence,1434531302,"",standard,"cycleway=lane",2,45.526931,-122.664548
 presence,1434531399,"",standard,"cycleway=lane",2,45.522305,-122.654378
 presence,1436132873,"",standard,"cycleway=lane",2,45.510460,-122.665867
-presence,1456345793,"",standard,"cycleway=lane",2,45.525378,-122.700433
-presence,1459472970,"",standard,"cycleway=lane",2,45.591448,-122.727384
 presence,938603011,"",standard,"cycleway=lane",1,45.516247,-122.687705
 presence,938603013,"",standard,"cycleway=lane",1,45.516110,-122.687785
-presence,939210611,"",standard,"cycleway=lane",1,45.564381,-122.575472
-presence,1408489914,"Southwest 5th Avenue",standard,"cycleway=lane",1,45.507166,-122.683857
 presence,1430484328,"Broadway Bridge",standard,"cycleway=lane",1,45.533132,-122.671866
 presence,1430484330,"Broadway Bridge",standard,"cycleway=lane",1,45.533132,-122.671848
 presence,1434516144,"",standard,"cycleway=lane",1,45.572042,-122.557260
-presence,1436116368,"",standard,"cycleway=lane",1,45.583684,-122.740243
-presence,1436116371,"",standard,"cycleway=lane",1,45.583680,-122.740233
-presence,1453834259,"",standard,"cycleway=lane",1,45.460844,-122.707682
-presence,1459474923,"",standard,"cycleway=lane",1,45.586507,-122.728329
