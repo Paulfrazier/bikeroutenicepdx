@@ -84,6 +84,11 @@ actor BikeFriendliness {
     /// Contiguous tier runs shorter than this (meters) are merged into the
     /// preceding run to kill single-segment color flicker.
     private static let minRunMeters = 25.0
+    /// A no-facility segment on an arterial the CITY posts at or below this speed
+    /// is NOT down-rated to `.busy` — OSM's highway class (often `tertiary` on
+    /// calm collectors) can't override the city's posted speed. Hazard streets
+    /// (≥30 mph or bicycle high-crash) still win. KEEP IN SYNC WITH web.
+    private static let calmMaxMph = 25
 
     // MARK: - Index storage
 
@@ -105,12 +110,18 @@ actor BikeFriendliness {
         let b: CLLocationCoordinate2D
         let bearing: Double
         let name: String?
+        /// Max city-posted speed (mph) baked onto this arterial, or nil when the
+        /// speed join found no match. Drives the calm-street veto. nil for
+        /// hazard-index segments.
+        let mph: Int?
     }
 
     /// A matched arterial: present means "on a busy road"; `name` (if any) lets a
-    /// personal rating override the default `.busy`.
+    /// personal rating override the default `.busy`; `mph` (if any) lets a
+    /// city-posted-calm street veto the `.busy` down-rate.
     private struct ArtHit {
         let name: String?
+        let mph: Int?
     }
 
     private struct CellKey: Hashable {
@@ -330,15 +341,18 @@ actor BikeFriendliness {
             return bestClass
         }
 
-        // No bike facility — busy arterial OR hazard street nearby → danger, else
-        // quiet street. A personal rating on a named arterial wins.
-        if let hit = matchArterial(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy) {
-            if let name = hit.name, let o = ov[name] { return o }
-            return .busy
-        }
+        // No bike facility. Precedence: a personal rating on the named arterial
+        // wins; then a genuine hazard (≥30 mph or bicycle high-crash) → busy; then
+        // a street the CITY posts as calm (≤calmMaxMph) → quiet, even if OSM
+        // classes it an arterial (`tertiary` over-warns on calm collectors); then
+        // an arterial of unknown/fast posted speed → busy; otherwise quiet.
+        let hit = matchArterial(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy)
+        if let name = hit?.name, let o = ov[name] { return o }
         if isOnHazard(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy) {
             return .busy
         }
+        if let mph = hit?.mph, mph <= Self.calmMaxMph { return .quiet }
+        if hit != nil { return .busy }
         return .quiet
     }
 
@@ -431,7 +445,7 @@ actor BikeFriendliness {
                     )
                     if d <= bestDist {
                         bestDist = d
-                        best = ArtHit(name: seg.name)
+                        best = ArtHit(name: seg.name, mph: seg.mph)
                     }
                 }
             }
@@ -618,7 +632,7 @@ actor BikeFriendliness {
             guard pair.count >= 2 else { prev = nil; continue }
             let c = CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0])
             if let a = prev {
-                let seg = ArtSeg(a: a, b: c, bearing: Self.bearing(a, c), name: nil)
+                let seg = ArtSeg(a: a, b: c, bearing: Self.bearing(a, c), name: nil, mph: nil)
                 let idx = hazardSegs.count
                 hazardSegs.append(seg)
                 let x0 = Int(floor(min(a.longitude, c.longitude) / Self.cell))
@@ -656,17 +670,18 @@ actor BikeFriendliness {
                 let type = geometry["type"] as? String
             else { continue }
 
-            let name = ((feature["properties"] as? [String: Any])?["name"] as? String)
-                .map(StreetRatings.normalize)
+            let props = feature["properties"] as? [String: Any]
+            let name = (props?["name"] as? String).map(StreetRatings.normalize)
+            let mph = (props?["mph"] as? NSNumber)?.intValue
 
             switch type {
             case "LineString":
                 if let line = geometry["coordinates"] as? [[Double]] {
-                    addArterialLine(line, name: name)
+                    addArterialLine(line, name: name, mph: mph)
                 }
             case "MultiLineString":
                 if let lines = geometry["coordinates"] as? [[[Double]]] {
-                    for line in lines { addArterialLine(line, name: name) }
+                    for line in lines { addArterialLine(line, name: name, mph: mph) }
                 }
             default:
                 continue
@@ -675,14 +690,14 @@ actor BikeFriendliness {
     }
 
     /// Split one [[lng, lat], ...] arterial line into straight segments + index.
-    private func addArterialLine(_ line: [[Double]], name: String?) {
+    private func addArterialLine(_ line: [[Double]], name: String?, mph: Int?) {
         guard line.count >= 2 else { return }
         var prev: CLLocationCoordinate2D?
         for pair in line {
             guard pair.count >= 2 else { prev = nil; continue }
             let c = CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0])
             if let a = prev {
-                indexArterial(ArtSeg(a: a, b: c, bearing: Self.bearing(a, c), name: name))
+                indexArterial(ArtSeg(a: a, b: c, bearing: Self.bearing(a, c), name: name, mph: mph))
             }
             prev = c
         }

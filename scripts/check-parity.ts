@@ -51,6 +51,7 @@ const CONSTANT_PAIRS: Array<[web: string, ios: string]> = [
   ["ARTERIAL_THRESHOLD_M", "arterialThresholdMeters"],
   ["ARTERIAL_BEARING_TOL_DEG", "arterialBearingToleranceDeg"],
   ["MIN_RUN_M", "minRunMeters"],
+  ["CALM_MAX_MPH", "calmMaxMph"],
 ];
 
 const errors: string[] = [];

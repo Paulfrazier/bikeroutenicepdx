@@ -44,6 +44,11 @@ const ARTERIAL_THRESHOLD_M = 18;
 const ARTERIAL_BEARING_TOL_DEG = 30;
 /** Contiguous runs shorter than this (m) merge into the preceding run's tier. */
 const MIN_RUN_M = 25;
+/** A no-facility segment on an arterial the CITY posts at or below this speed is
+ * NOT down-rated to "busy" — OSM's highway class (often `tertiary` on calm
+ * collectors) can't override the city's posted speed. Hazard streets (≥30 mph or
+ * bicycle high-crash) still win. (KEEP IN SYNC WITH iOS.) */
+const CALM_MAX_MPH = 25;
 
 const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
@@ -446,6 +451,10 @@ interface ArtSegment {
   bearing: number;
   /** Normalized street name (for personal-rating override), or null. */
   name: string | null;
+  /** Max city-posted speed (mph) baked onto this arterial, or null when the
+   * speed join found no match. Drives the calm-street veto. Unused (null) for
+   * hazard-index segments. */
+  mph: number | null;
 }
 
 type ArtGrid = Map<string, ArtSegment[]>;
@@ -468,12 +477,13 @@ function addArtToGrid(grid: ArtGrid, seg: ArtSegment): void {
 function indexArtLineString(
   grid: ArtGrid,
   coords: LngLat[],
-  name: string | null
+  name: string | null,
+  mph: number | null = null
 ): void {
   for (let i = 0; i < coords.length - 1; i++) {
     const a = coords[i];
     const b = coords[i + 1];
-    addArtToGrid(grid, { a, b, bearing: bearing(a, b), name });
+    addArtToGrid(grid, { a, b, bearing: bearing(a, b), name, mph });
   }
 }
 
@@ -487,10 +497,12 @@ async function buildArterialIndex(url: string): Promise<ArtGrid> {
     if (!geom) continue;
     const rawName = feat.properties?.name as string | undefined;
     const name = rawName ? normalizeStreetName(rawName) : null;
+    const rawMph = feat.properties?.mph;
+    const mph = typeof rawMph === "number" ? rawMph : null;
     if (geom.type === "LineString") {
-      indexArtLineString(grid, geom.coordinates as LngLat[], name);
+      indexArtLineString(grid, geom.coordinates as LngLat[], name, mph);
     } else if (geom.type === "MultiLineString") {
-      for (const line of geom.coordinates) indexArtLineString(grid, line as LngLat[], name);
+      for (const line of geom.coordinates) indexArtLineString(grid, line as LngLat[], name, mph);
     }
   }
   return grid;
@@ -566,10 +578,10 @@ function matchArterial(
   M: LngLat,
   routeBearing: number,
   artGrid: ArtGrid
-): { name: string | null } | null {
+): { name: string | null; mph: number | null } | null {
   const cellLat = Math.floor(M[1] / CELL);
   const cellLng = Math.floor(M[0] / CELL);
-  let best: { name: string | null } | null = null;
+  let best: { name: string | null; mph: number | null } | null = null;
   let bestDist = ARTERIAL_THRESHOLD_M;
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
@@ -580,7 +592,7 @@ function matchArterial(
         const d = perpDistanceM(M, seg.a, seg.b);
         if (d <= bestDist) {
           bestDist = d;
-          best = { name: seg.name };
+          best = { name: seg.name, mph: seg.mph };
         }
       }
     }
@@ -740,13 +752,20 @@ function rawClasses(
         classes[i] = bestClass;
       }
     } else {
-      // No bike facility — busy arterial OR hazard street nearby → danger, else
-      // quiet street. A personal rating on a named arterial wins.
+      // No bike facility. Precedence: a personal rating on the named arterial
+      // wins; then a genuine hazard (≥30 mph or bicycle high-crash) → busy; then
+      // a street the CITY posts as calm (≤CALM_MAX_MPH) → quiet, even if OSM
+      // classes it an arterial (`tertiary` over-warns on calm collectors); then
+      // an arterial of unknown/fast posted speed → busy; otherwise quiet.
       const art = matchArterial(M, routeBearing, artGrid);
       const o = art?.name ? ov.get(art.name) : undefined;
       if (o) {
         classes[i] = o;
-      } else if (art || isOnHazard(M, routeBearing, hazardGrid)) {
+      } else if (isOnHazard(M, routeBearing, hazardGrid)) {
+        classes[i] = "busy";
+      } else if (art && art.mph !== null && art.mph <= CALM_MAX_MPH) {
+        classes[i] = "quiet";
+      } else if (art) {
         classes[i] = "busy";
       } else {
         classes[i] = "quiet";
