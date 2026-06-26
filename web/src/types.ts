@@ -58,6 +58,28 @@ export interface CorridorResponse {
   geometry: RouteGeometry;
 }
 
+// ─── /match ───────────────────────────────────────────────────────────────────
+
+export interface MatchRequest {
+  /** The freehand-drawn polyline to snap onto the bike network ([lng,lat][]). */
+  trace: LngLat[];
+  /** Optional anchors so the snap starts/ends exactly where intended. */
+  start?: LngLat;
+  end?: LngLat;
+  /**
+   * When true, hug the drawn path onto whatever road is nearest (including
+   * non-bike streets) instead of pulling toward a parallel greenway. Draw mode
+   * sends `true` so a stroke follows the street the user traced.
+   */
+  follow?: boolean;
+}
+
+export interface MatchResponse {
+  geometry: RouteGeometry;
+  distance_m: number;
+  duration_s: number;
+}
+
 /**
  * A hand-drawn stretch kept VERBATIM and spliced into the auto-route — for
  * forcing a path the router can't take (data gaps: a cycle track tagged as

@@ -123,6 +123,22 @@ enum GeoMath {
         return coords.last
     }
 
+    /// Assemble a fully hand-drawn route (Draw mode): start pin → each snapped
+    /// stroke in draw order → end pin. Consecutive strokes and the gaps to the pins
+    /// are joined by STRAIGHT bridges (the implicit segments between consecutive
+    /// points) — nothing is auto-routed. The drawn strokes ARE the route. Mirrors
+    /// the web `assembleDrawnRoute` in geo.ts.
+    static func assembleDrawnRoute(
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D,
+        strokes: [[CLLocationCoordinate2D]]
+    ) -> [CLLocationCoordinate2D] {
+        var out: [CLLocationCoordinate2D] = [from]
+        for stroke in strokes { out.append(contentsOf: stroke) }
+        out.append(to)
+        return out
+    }
+
     /// Index of the vertex in `coords` closest to `target` (great-circle).
     /// Used to order drag-to-reshape via points: since the current route passes
     /// through existing vias in order, a new via's nearest-vertex index tells us

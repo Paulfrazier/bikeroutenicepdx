@@ -7,13 +7,10 @@ final class GreenwayPolyline: MKPolyline {}
 final class RoutePolyline: MKPolyline {}
 final class DraftPolyline: MKPolyline {}
 
-/// A hand-drawn (manual) stretch, overlaid in a distinct dashed violet so it's
-/// clear which part of the route is forced verbatim vs. routed.
+/// A hand-drawn (manual) stretch. Legacy overlay type — Draw strokes now render
+/// as the colored route line, so this is no longer drawn; kept for the renderer's
+/// exhaustive type switch.
 final class ManualPolyline: MKPolyline {}
-
-/// A pure freehand SKETCH stroke (Build + Snap off) — a visual-only annotation
-/// drawn in slate ink. Not routed, not spliced; nothing downstream reads it.
-final class SketchPolyline: MKPolyline {}
 
 /// Wide, low-alpha underlay drawn beneath the casing to fake a soft outer glow
 /// (MKPolylineRenderer has no real blur), lifting the route off the basemap so

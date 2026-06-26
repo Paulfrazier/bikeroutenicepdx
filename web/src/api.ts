@@ -10,6 +10,8 @@ import type {
   RouteResponse,
   CorridorRequest,
   CorridorResponse,
+  MatchRequest,
+  MatchResponse,
   SearchResult,
   HealthResponse,
   LngLat,
@@ -46,6 +48,17 @@ export async function fetchCorridor(
   req: CorridorRequest
 ): Promise<CorridorResponse> {
   return request<CorridorResponse>("/corridor", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+/**
+ * POST /match — snap a freehand-drawn trace onto the bike network.
+ * Powers Draw mode: each stroke is map-matched to real streets (follow: true).
+ */
+export async function fetchMatch(req: MatchRequest): Promise<MatchResponse> {
+  return request<MatchResponse>("/match", {
     method: "POST",
     body: JSON.stringify(req),
   });

@@ -29,10 +29,11 @@ struct Via: Identifiable {
     }
 }
 
-/// A hand-drawn stretch kept VERBATIM and spliced into the auto-route — for
-/// forcing a path the router can't take (data gaps: a cycle track tagged as
-/// sharrows, a median/crosswalk crossing not in the graph). The auto route
-/// handles everything before/after; only this stretch is overridden.
+/// A finished Draw-mode stroke. In the from-scratch Draw canvas the strokes ARE
+/// the route: each stroke is snapped to roads via `/match`, then the strokes and
+/// the gaps to the start/end pins are joined by STRAIGHT bridges (see
+/// `GeoMath.assembleDrawnRoute`). When any strokes exist they override the
+/// BRouter auto-route for display / distance / coverage / nav.
 struct ManualSegment: Identifiable {
     let id: UUID
     var coords: [CLLocationCoordinate2D]
@@ -135,9 +136,21 @@ final class RouteStore {
     /// Cap on drag-to-reshape waypoints. Generous — complex routes need many.
     static let maxVias = 40
 
-    /// Hand-drawn stretches spliced into the auto route (manual mode). Persist
-    /// across endpoint/waypoint edits; cleared only on an explicit reset.
+    /// Finished Draw-mode strokes. The strokes ARE the route (assembled with
+    /// straight bridges to the pins — see `GeoMath.assembleDrawnRoute`), overriding
+    /// the auto route whenever any exist. Persist across endpoint tweaks; cleared
+    /// on an explicit reset OR when entering Build/Draw (the from-scratch wipe).
     var manualSegments: [ManualSegment] = []
+
+    /// Build & Draw are "from scratch" canvases: entering either WIPES every
+    /// customization except the start/end pins. We snapshot the wiped state here so
+    /// the mode's Undo can restore it once (the "didn't mean to clear" escape
+    /// hatch). Mirrors the web `preResetSnapshot`.
+    private var preResetSnapshot: (vias: [Via], strokes: [ManualSegment])?
+
+    /// True when entering Build/Draw wiped a route that the mode's Undo can still
+    /// restore (drives enabling Undo when the mode's own list is empty).
+    var canRestoreSnapshot: Bool { preResetSnapshot != nil }
 
     /// The raw auto route from the server, BEFORE manual segments are spliced in.
     /// `snapped` is the display geometry = `applyManualSegments(autoRoute, …)`.
@@ -172,17 +185,6 @@ final class RouteStore {
     /// line itself stays locked (no drag). Mutually exclusive with the other
     /// reshape modes. Mirrors the web `buildMode`.
     var isBuildMode = false
-
-    /// "Snap to roads" toggle inside Build. ON (default) = tap to place routed
-    /// waypoints. OFF = the gesture flips to freehand finger-drag and each stroke
-    /// is kept VERBATIM as a pure visual sketch (no router, no distance, no nav,
-    /// not spliced). Mirrors the web `snapToRoads`.
-    var snapToRoads = true
-
-    /// Standalone freehand sketch strokes (Build + Snap off). Pure map overlay —
-    /// nothing downstream reads them. Persist across endpoint tweaks; cleared only
-    /// on an explicit reset (like `manualSegments`).
-    var sketchStrokes: [[CLLocationCoordinate2D]] = []
 
     // ── "Route through a section" (corridor) ───────────────────────────────
     // Tap point A then point B on a street; the server resolves the street
@@ -308,6 +310,10 @@ final class RouteStore {
         snapped = nil
         isEditMode = false
         isBuildMode = false
+        isDrawMode = false
+        // Leaving Build/Draw on an endpoint change drops the undo-the-wipe escape
+        // hatch (the snapshot is anchored to the old route).
+        preResetSnapshot = nil
         // An in-progress corridor pick is anchored to the old route — abandon it.
         isCorridorMode = false
         clearCorridorPick()
@@ -468,32 +474,73 @@ final class RouteStore {
         return out
     }
 
-    /// Rebuild the display route from the auto route + manual segments +
-    /// qualifying connectors, classify it, and publish to `snapped`. No server call.
+    /// Rebuild the display route, classify it, and publish to `snapped`. No server
+    /// call. Two cases (web parity with `activeCoords`):
+    ///   1. Draw-mode strokes present → the strokes ARE the route: snap-joined by
+    ///      straight bridges to the pins (`assembleDrawnRoute`), overriding auto.
+    ///   2. Otherwise → the auto route with qualifying connectors spliced in.
     private func recomputeDisplay() async {
+        // A fully hand-drawn route (Draw strokes) overrides everything.
+        if !manualSegments.isEmpty, let startC = start?.coordinate, let endC = end?.coordinate {
+            let coords = GeoMath.assembleDrawnRoute(
+                from: startC, to: endC, strokes: manualSegments.map(\.coords)
+            )
+            guard coords.count >= 2 else { snapped = nil; return }
+            var base = SnappedRoute(coordinates: coords, distanceMeters: GeoMath.length(coords))
+            // A hand-drawn route has no engine time estimate or turn-by-turn steps.
+            base.durationSeconds = autoRoute?.durationSeconds ?? 0
+            base.steps = []
+            snapped = await classified(base)
+            return
+        }
         guard let auto = autoRoute else { snapped = nil; return }
-        // Fold in connectors that pass near both ends of the auto route alongside
-        // the hand-drawn manual segments (web parity: applyManualSegments(auto,
-        // [...manualSegments, ...connectorSegmentsForRoute(auto)])).
+        // Fold in connectors that pass near both ends of the auto route (web parity:
+        // applyManualSegments(auto, connectorSegmentsForRoute(auto))).
         let connectors = Self.connectorSegmentsForRoute(auto.coordinates)
-        let coords = Self.applyManualSegments(auto.coordinates, manualSegments + connectors)
+        let coords = Self.applyManualSegments(auto.coordinates, connectors)
         var base = SnappedRoute(coordinates: coords, distanceMeters: GeoMath.length(coords))
-        // Carry the server's time estimate + turn-by-turn steps from the auto
-        // route so the duration label and Directions button survive the rebuild.
-        // (Exact when there are no manual splices; a close approximation when there are.)
+        // Carry the server's time estimate + turn-by-turn steps from the auto route
+        // so the duration label and Directions button survive the rebuild.
         base.durationSeconds = auto.durationSeconds
         base.steps = auto.steps
         snapped = await classified(base)
     }
 
+    /// Re-route start → vias → end WITHOUT flipping into the `.snapping` spinner
+    /// (keeps the routed UI + edit panel visible). Used when entering Build/Draw
+    /// (after the wipe) and when restoring a snapshot. Re-splices via recomputeDisplay.
+    private func rerouteKeepingPhase() async {
+        guard let startC = start?.coordinate, let endC = end?.coordinate else {
+            await recomputeDisplay()
+            return
+        }
+        do {
+            let routed = try await router.route(
+                from: startC, to: endC, vias: vias.map(\.coordinate),
+                preference: routePreference.rawValue, engine: routingEngine.rawValue
+            )
+            guard routed.coordinates.count >= 2 else { return }
+            autoRoute = routed
+            await recomputeDisplay()
+        } catch {
+            // Keep the previous route on failure.
+        }
+    }
+
     // MARK: - Draw mode
 
-    /// Enter manual-draw mode: a stroke drawn now becomes a ManualSegment spliced
-    /// into the current auto route (forcing that stretch). Requires an existing
-    /// route to splice into; KEEPS the route visible under the draft.
+    /// Enter Draw mode — a "from scratch" hand-route canvas. Wipes every
+    /// customization except the start/end pins (snapshotting it first so Undo can
+    /// restore once), then each stroke drawn is snapped to roads and joined by
+    /// straight bridges: the strokes ARE the route. Resumable — stays in Draw mode
+    /// after each stroke. Mirrors the web `selectEditTool("draw")`.
     func enterDrawMode() {
         autoRouteTask?.cancel()
-        guard bothPinsSet, autoRoute != nil else { return }
+        guard bothPinsSet else { return }
+        let hadCustom = !vias.isEmpty || !manualSegments.isEmpty
+        if hadCustom { preResetSnapshot = (vias, manualSegments) }
+        vias = []
+        manualSegments = []
         isEditMode = false
         isBuildMode = false
         isCorridorMode = false
@@ -501,7 +548,9 @@ final class RouteStore {
         isDrawMode = true
         drawnTrace = []
         errorMessage = nil
-        phase = .drawing
+        isManuallyEdited = false
+        phase = .routed
+        if hadCustom { Task { await rerouteKeepingPhase() } }
     }
 
     /// Enter CONNECTOR-build mode: TAP nodes onto the map to trace a fix, which is
@@ -616,8 +665,7 @@ final class RouteStore {
         isManuallyEdited = false
         isEditMode = false
         isBuildMode = false
-        snapToRoads = true
-        sketchStrokes = []
+        preResetSnapshot = nil
         vias = []
         searchResults = []
         errorMessage = nil
@@ -742,6 +790,8 @@ final class RouteStore {
         guard vias.count < Self.maxVias,
               let startC = start?.coordinate, let endC = end?.coordinate else { return }
 
+        // Committing to the new canvas — the wipe is no longer undoable.
+        preResetSnapshot = nil
         let previousVias = vias
         let previousSnapped = snapped
         let previousAuto = autoRoute
@@ -767,10 +817,15 @@ final class RouteStore {
         }
     }
 
-    /// Build mode: drop the most-recently-added waypoint (undo) and re-route.
+    /// Build mode Undo: drop the most-recently-added waypoint and re-route; once the
+    /// canvas is empty, restore the snapshot taken when Build was entered (undo the
+    /// wipe). Mirrors the web `handleUndoWaypoint`.
     func undoWaypoint() async {
-        guard !vias.isEmpty else { return }
-        await deleteVia(at: vias.count - 1)
+        if !vias.isEmpty {
+            await deleteVia(at: vias.count - 1)
+            return
+        }
+        await restoreSnapshot()
     }
 
     /// Build mode: remove every waypoint at once and re-route start → end.
@@ -844,20 +899,62 @@ final class RouteStore {
         vias[index].precise.toggle()
     }
 
-    /// Finish a manual draw: the stroke becomes a ManualSegment kept VERBATIM and
-    /// spliced into the auto route (no /match, no server). Editing/endpoint
-    /// changes re-splice it. Too short a stroke is dropped.
-    func finishDrawing() async {
-        isDrawMode = false
-        let stroke = drawnTrace
-        drawnTrace = []
-        guard stroke.count >= 2 else {
-            if autoRoute != nil { phase = .routed } else { recomputeIdlePhase() }
-            return
+    /// Finished a freehand Draw stroke: snap it to roads (`/match`, follow=true) and
+    /// append it to the drawn route. Stays in Draw mode so drawing is resumable (the
+    /// next stroke picks up from the pen). On a snap failure the verbatim trace is
+    /// kept so a stroke is never lost. Mirrors the web `handleDrawStroke`.
+    func addDrawnStroke(_ coords: [CLLocationCoordinate2D]) async {
+        guard coords.count >= 2 else { return }
+        // Committing to the new canvas — the wipe is no longer undoable.
+        preResetSnapshot = nil
+        var snappedCoords = coords
+        do {
+            let res = try await match.snap(
+                trace: coords, start: coords.first, end: coords.last, follow: true
+            )
+            if res.coordinates.count >= 2 { snappedCoords = res.coordinates }
+        } catch {
+            // Network / match failure — fall back to the raw trace (kept verbatim).
         }
-        manualSegments.append(ManualSegment(coords: stroke))
+        manualSegments.append(ManualSegment(coords: snappedCoords))
+        isManuallyEdited = false
         await recomputeDisplay()
         phase = .routed
+    }
+
+    /// Draw mode Undo: drop the last stroke; once empty, restore the snapshot taken
+    /// when Draw was entered (undo the wipe). Mirrors the web `handleUndoStroke`.
+    func undoDrawnStroke() async {
+        if !manualSegments.isEmpty {
+            manualSegments.removeLast()
+            await recomputeDisplay()
+            return
+        }
+        await restoreSnapshot()
+    }
+
+    /// Draw mode: remove every stroke at once (the wipe stays restorable via Undo).
+    func clearDrawnStrokes() async {
+        guard !manualSegments.isEmpty else { return }
+        manualSegments = []
+        await recomputeDisplay()
+    }
+
+    /// Undo the from-scratch wipe: restore the snapshot captured when Build/Draw was
+    /// entered, then drop into Drag so the restored route shows normally for
+    /// fine-tuning. Mirrors the web `restoreSnapshot`.
+    func restoreSnapshot() async {
+        guard let snap = preResetSnapshot else { return }
+        preResetSnapshot = nil
+        vias = snap.vias
+        manualSegments = snap.strokes
+        isEditMode = true
+        isDrawMode = false
+        isBuildMode = false
+        isCorridorMode = false
+        clearCorridorPick()
+        isManuallyEdited = !vias.isEmpty
+        await rerouteKeepingPhase()
     }
 
     // MARK: - Route through a section (corridor)
@@ -886,46 +983,36 @@ final class RouteStore {
         isEditMode = true
     }
 
-    /// Enter guided-draw ("Build") mode: tap the map to append waypoints one at a
-    /// time. Needs an existing route to extend (mirrors the web panel only showing
-    /// once routed). Turns off the other reshape modes.
+    /// Enter guided-draw ("Build") mode — a "from scratch" canvas. Wipes every
+    /// customization except the start/end pins (snapshotting it first so Undo can
+    /// restore once), then tap the map to append pass-through waypoints one at a
+    /// time. Mirrors the web `selectEditTool("build")`.
     func enterBuildMode() {
         autoRouteTask?.cancel()
-        guard bothPinsSet, autoRoute != nil else { return }
+        guard bothPinsSet else { return }
+        let hadCustom = !vias.isEmpty || !manualSegments.isEmpty
+        if hadCustom { preResetSnapshot = (vias, manualSegments) }
+        vias = []
+        manualSegments = []
         isDrawMode = false
         isEditMode = false
         isCorridorMode = false
         clearCorridorPick()
         isBuildMode = true
+        isManuallyEdited = false
+        if hadCustom { Task { await rerouteKeepingPhase() } }
     }
 
     /// Leave all reshape modes (drag/draw/corridor/build) — backs the grouped
-    /// "Done editing" toggle.
+    /// "Done editing" toggle. The drawn route / waypoints persist (only an explicit
+    /// reset or re-entering Build/Draw clears them); the undo-the-wipe snapshot drops.
     func exitReshapeModes() {
         isEditMode = false
         isBuildMode = false
-        snapToRoads = true
         isDrawMode = false
         isCorridorMode = false
+        preResetSnapshot = nil
         clearCorridorPick()
-    }
-
-    // MARK: - Freehand sketch (Build + Snap off)
-
-    /// A freehand sketch stroke finished — keep it VERBATIM as a pure visual-only
-    /// line (no router, no splice, no distance/nav). Mirrors web `handleSketchStroke`.
-    func addSketchStroke(_ coords: [CLLocationCoordinate2D]) {
-        guard coords.count >= 2 else { return }
-        sketchStrokes.append(coords)
-    }
-
-    /// Sketch: drop the most-recent stroke (undo) / clear all strokes.
-    func undoSketch() {
-        guard !sketchStrokes.isEmpty else { return }
-        sketchStrokes.removeLast()
-    }
-    func clearSketch() {
-        sketchStrokes = []
     }
 
     /// Clear an in-progress corridor pick (both endpoints, the preview, and any

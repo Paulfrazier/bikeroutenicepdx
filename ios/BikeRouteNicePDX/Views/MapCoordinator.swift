@@ -30,10 +30,13 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     /// The displayed route, one overlay per contiguous bike-friendliness tier
     /// run (replaces the old single blue line).
     private var routeOverlays: [MKOverlay] = []
-    /// Dashed-violet overlays marking the hand-drawn (manual) stretches.
+    /// Dashed-violet overlays marking the hand-drawn (manual) stretches. Unused now
+    /// that Draw strokes ARE the route (rendered as the colored line); kept so
+    /// `removeRouteOverlays` stays a safe no-op.
     private var manualOverlays: [ManualPolyline] = []
-    /// Slate-ink overlays for pure freehand sketch strokes (Build + Snap off).
-    private var sketchOverlays: [SketchPolyline] = []
+    /// The violet "pen" marker at the resume point (last vertex of the last Draw
+    /// stroke), shown only in Draw mode so the rider sees where drawing continues.
+    private var penAnnotation: DrawPenAnnotation?
     /// Teal highlight (line + white casing) of the picked "route through a
     /// section" street, shown only while in corridor mode.
     private var corridorOverlays: [MKOverlay] = []
@@ -71,6 +74,13 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     private var editingManualSegID: UUID?
     private var editingManualVertex: Int?
     private var isEditing = false
+
+    // Live Draw-mode vertex-nudge state: when a draw-stroke begins on an existing
+    // stroke vertex we nudge that vertex (raw, no re-snap) instead of starting a
+    // fresh stroke. Mirrors the web `startVertexNudge` branch of `onDown`.
+    private var drawNudgeSegID: UUID?
+    private var drawNudgeVertex: Int?
+    private var drawNudgeCoords: [CLLocationCoordinate2D] = []
 
     private static let vertexGrabPx: CGFloat = 22 // tap radius to grab a vertex
     private static let lineGrabPx: CGFloat = 16   // tap radius to grab a segment
@@ -125,11 +135,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             return
         }
 
-        // Lock map interaction while drawing OR freehand-sketching (Build + Snap
-        // off) so our pan gesture owns the touch. Sketching uses the same freehand
-        // pan as draw; taps are disabled so a drag isn't read as a waypoint tap.
-        let sketching = store.isBuildMode && !store.snapToRoads
-        let freehand = store.isDrawMode || sketching
+        // Lock map interaction while drawing (Draw mode) so our pan gesture owns the
+        // touch. Draw is the only freehand mode now (the old Build+Snap-off sketch
+        // is retired); taps are disabled so a drag isn't read as a waypoint tap.
+        let freehand = store.isDrawMode
         map.isScrollEnabled = !freehand
         map.isZoomEnabled = !freehand
         map.isRotateEnabled = !freehand
@@ -137,18 +146,19 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         panGesture?.isEnabled = freehand
         tapGesture?.isEnabled = !freehand
 
-        // Hand-edit pan is live only when a finished route is on screen, we're not
-        // drawing, AND the user has explicitly entered edit mode. Outside edit mode
-        // the route is non-interactive so the map pans freely over it (no accidental
-        // grabs). It's also off in corridor mode so taps pick the section instead of
-        // being swallowed. shouldBegin further gates it to touches on the line.
-        editPanGesture?.isEnabled = (store.snapped != nil && !freehand && store.isEditMode && !store.isCorridorMode)
+        // Hand-edit pan is live when a finished route is on screen, we're not
+        // drawing, AND we're in Drag (reshape the line) OR Build (drag a pin to move
+        // it). Off in corridor mode so taps pick the section. shouldBegin further
+        // gates it: in Drag to touches on the line, in Build to touches on a pin.
+        editPanGesture?.isEnabled = (
+            store.snapped != nil && !freehand
+            && (store.isEditMode || store.isBuildMode) && !store.isCorridorMode
+        )
 
         syncAnnotation(&startAnnotation, waypoint: store.start, title: "Start", map: map)
         syncAnnotation(&endAnnotation, waypoint: store.end, title: "End", map: map)
         syncViaAnnotations(map)
-        syncManualOverlays(map)
-        syncSketchOverlays(map)
+        syncDrawPen(map)
         syncCorridorPreview(map)
         syncConnectorBuild(map)
 
@@ -301,33 +311,25 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         return rect
     }
 
-    /// Rebuild the dashed-violet manual overlays from `store.manualSegments` so
-    /// the forced (hand-drawn) stretches are visually distinct from routed ones.
-    private func syncManualOverlays(_ map: MKMapView) {
-        if !manualOverlays.isEmpty {
-            map.removeOverlays(manualOverlays)
-            manualOverlays = []
-        }
-        // Hide while a hand-edit drag owns the overlay (avoids a stale duplicate).
-        guard !isEditing else { return }
-        for seg in store.manualSegments where seg.coords.count >= 2 {
-            let overlay = ManualPolyline(coordinates: seg.coords, count: seg.coords.count)
-            manualOverlays.append(overlay)
-            map.addOverlay(overlay, level: .aboveLabels)
-        }
-    }
-
-    /// Rebuild the slate-ink freehand sketch overlays from `store.sketchStrokes` —
-    /// a pure visual annotation (Build + Snap off), not part of any route.
-    private func syncSketchOverlays(_ map: MKMapView) {
-        if !sketchOverlays.isEmpty {
-            map.removeOverlays(sketchOverlays)
-            sketchOverlays = []
-        }
-        for stroke in store.sketchStrokes where stroke.count >= 2 {
-            let overlay = SketchPolyline(coordinates: stroke, count: stroke.count)
-            sketchOverlays.append(overlay)
-            map.addOverlay(overlay, level: .aboveLabels)
+    /// Reconcile the violet "pen" marker — the resume point (last vertex of the last
+    /// Draw stroke), shown only in Draw mode so the rider sees where the next stroke
+    /// continues from. Mirrors the web `draw-pen` layer.
+    private func syncDrawPen(_ map: MKMapView) {
+        let penCoord: CLLocationCoordinate2D? = store.isDrawMode
+            ? store.manualSegments.last(where: { !$0.coords.isEmpty })?.coords.last
+            : nil
+        if let penCoord {
+            if let existing = penAnnotation {
+                existing.coordinate = penCoord
+            } else {
+                let annotation = DrawPenAnnotation()
+                annotation.coordinate = penCoord
+                map.addAnnotation(annotation)
+                penAnnotation = annotation
+            }
+        } else if let existing = penAnnotation {
+            map.removeAnnotation(existing)
+            penAnnotation = nil
         }
     }
 
@@ -381,14 +383,16 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         }
     }
 
-    /// Rebuild the waypoint handle pins from `store.vias`. Shown only in edit
-    /// mode (mirrors the web app). Rebuilt wholesale — the list is tiny (≤ maxVias).
+    /// Rebuild the waypoint handle pins from `store.vias`. Shown in Drag, Build, and
+    /// Through (so the rider can see picked sections and tap one to remove it) —
+    /// mirrors the web `editing || buildMode || corridorMode` visibility. Rebuilt
+    /// wholesale — the list is tiny (≤ maxVias).
     private func syncViaAnnotations(_ map: MKMapView) {
         if !viaAnnotations.isEmpty {
             map.removeAnnotations(viaAnnotations)
             viaAnnotations = []
         }
-        guard store.isEditMode || store.isBuildMode else { return }
+        guard store.isEditMode || store.isBuildMode || store.isCorridorMode else { return }
         for via in store.vias {
             let annotation = ViaAnnotation()
             annotation.coordinate = via.coordinate
@@ -439,9 +443,8 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         }
         // Build (guided-draw) mode owns the tap: hit a waypoint pin → remove it;
         // tap anywhere else → append a new waypoint (tap order). The from/to pin
-        // cycle is bypassed while building. Skipped when Snap is off — then the
-        // freehand sketch pan owns the gesture, not taps.
-        if store.isBuildMode && store.snapToRoads {
+        // cycle is bypassed while building. (A drag on a pin moves it via editPan.)
+        if store.isBuildMode {
             if let viaIndex = nearestViaIndex(point, map: map) {
                 if viaIndex < viaAnnotations.count {
                     map.removeAnnotation(viaAnnotations[viaIndex])
@@ -461,6 +464,13 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
                 map.removeAnnotation(viaAnnotations[viaIndex])
                 viaAnnotations.remove(at: viaIndex)
             }
+            Task { await store.deleteVia(at: viaIndex) }
+            return
+        }
+        // Through (corridor) mode: tapping an existing section's pin removes that
+        // whole section (deleteVia drops the entire corridorId group); otherwise the
+        // tap falls through to handleMapTap's two-tap A→B pick. Mirrors the web.
+        if store.isCorridorMode, let viaIndex = nearestViaIndex(point, map: map) {
             Task { await store.deleteVia(at: viaIndex) }
             return
         }
@@ -500,35 +510,84 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
     // MARK: - Finger draw
 
+    /// Draw mode pan. Two behaviours, branched at `.began` (mirrors the web `onDown`
+    /// Draw branch): grabbing on an existing stroke vertex NUDGES it (raw, no
+    /// re-snap, via `nudgeManualPoint`); anywhere else starts a fresh (resumable)
+    /// stroke that's snapped to roads and appended on lift.
     @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
-        // The freehand pan serves two modes: draw (splice a ManualSegment) and
-        // sketch (Build + Snap off → a pure visual-only line).
-        let sketching = store.isBuildMode && !store.snapToRoads
-        guard store.isDrawMode || sketching, let map = mapView else { return }
+        guard store.isDrawMode, let map = mapView else { return }
         let point = gesture.location(in: map)
 
         switch gesture.state {
         case .began:
-            draftCoords = []
-            lastScreenPoint = nil
-            appendIfFarEnough(point, map)
-        case .changed:
-            appendIfFarEnough(point, map)
-            redrawDraft(map)
-        case .ended:
-            let coords = draftCoords
-            removeDraft(map)
-            if sketching {
-                store.addSketchStroke(coords)
+            // Grab a stroke vertex to nudge it; else start a new stroke.
+            if let manual = manualHit(point, map: map),
+               let seg = store.manualSegments.first(where: { $0.id == manual.segID }) {
+                drawNudgeSegID = manual.segID
+                drawNudgeVertex = manual.vertex
+                drawNudgeCoords = seg.coords
+                isEditing = true // freeze sync() so the route isn't rebuilt mid-nudge
+                redrawDrawNudge(map)
             } else {
-                store.commitTrace(coords)
-                Task { await store.finishDrawing() }
+                drawNudgeSegID = nil
+                draftCoords = []
+                lastScreenPoint = nil
+                appendIfFarEnough(point, map)
+            }
+        case .changed:
+            if drawNudgeSegID != nil, let vi = drawNudgeVertex, drawNudgeCoords.indices.contains(vi) {
+                drawNudgeCoords[vi] = map.convert(point, toCoordinateFrom: map)
+                redrawDrawNudge(map)
+            } else {
+                appendIfFarEnough(point, map)
+                redrawDraft(map)
+            }
+        case .ended:
+            if let segID = drawNudgeSegID, let vi = drawNudgeVertex, drawNudgeCoords.indices.contains(vi) {
+                let to = drawNudgeCoords[vi]
+                drawNudgeSegID = nil
+                drawNudgeVertex = nil
+                drawNudgeCoords = []
+                isEditing = false
+                if let preview = editPreviewOverlay {
+                    map.removeOverlay(preview)
+                    editPreviewOverlay = nil
+                }
+                Task { await store.nudgeManualPoint(segmentID: segID, vertexIndex: vi, to: to) }
+            } else {
+                let coords = draftCoords
+                removeDraft(map)
+                Task { await store.addDrawnStroke(coords) }
             }
         case .cancelled, .failed:
-            removeDraft(map)
+            if drawNudgeSegID != nil {
+                drawNudgeSegID = nil
+                drawNudgeVertex = nil
+                drawNudgeCoords = []
+                isEditing = false
+                if let preview = editPreviewOverlay {
+                    map.removeOverlay(preview)
+                    editPreviewOverlay = nil
+                }
+            } else {
+                removeDraft(map)
+            }
         default:
             break
         }
+    }
+
+    /// Live preview of the single stroke being nudged in Draw mode — a plain blue
+    /// line over the (frozen) colored route, replaced once the re-splice lands.
+    private func redrawDrawNudge(_ map: MKMapView) {
+        if let existing = editPreviewOverlay {
+            map.removeOverlay(existing)
+            editPreviewOverlay = nil
+        }
+        guard drawNudgeCoords.count >= 2 else { return }
+        let overlay = RoutePolyline(coordinates: drawNudgeCoords, count: drawNudgeCoords.count)
+        editPreviewOverlay = overlay
+        map.addOverlay(overlay, level: .aboveLabels)
     }
 
     private func appendIfFarEnough(_ point: CGPoint, _ map: MKMapView) {
@@ -576,6 +635,25 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             editingViaIndex = nearestViaIndex(point, map: map)
             // Did the touch grab a point on a hand-drawn (manual) segment?
             let manual = manualHit(point, map: map)
+
+            // Build mode only MOVES an existing pin (taps add/remove waypoints); a
+            // bare-line drag must not insert a new via.
+            if store.isBuildMode && editingViaIndex == nil {
+                editingIndex = nil
+                editingViaIndex = nil
+                editingManualSegID = nil
+                editingManualVertex = nil
+                return
+            }
+            // Drag mode over a hand-drawn route: only stroke-vertex nudges edit it
+            // (a bare-line drag is inert, mirroring the web `drawnStrokes` branch).
+            if store.isEditMode && manual == nil && !store.manualSegments.isEmpty {
+                editingIndex = nil
+                editingViaIndex = nil
+                editingManualSegID = nil
+                editingManualVertex = nil
+                return
+            }
 
             guard let hit = hitTest(point, coords: coords, map: map) else {
                 // shouldBegin should have prevented this; bail safely.
@@ -906,14 +984,6 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             renderer.lineJoin = .round
             renderer.lineDashPattern = [2, 8]
             return renderer
-        case let polyline as SketchPolyline:
-            // Pure freehand sketch (Build + Snap off): solid slate ink, visual only.
-            let renderer = MKPolylineRenderer(polyline: polyline)
-            renderer.strokeColor = UIColor(red: 0.200, green: 0.255, blue: 0.333, alpha: 0.9) // #334155
-            renderer.lineWidth = 4
-            renderer.lineCap = .round
-            renderer.lineJoin = .round
-            return renderer
         case let polyline as CorridorCasingPolyline:
             // White casing under the teal corridor highlight (mirrors the web).
             let renderer = MKPolylineRenderer(polyline: polyline)
@@ -1039,6 +1109,25 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             return view
         }
 
+        // Draw "pen": a larger violet dot marking the resume point (where the next
+        // Draw stroke continues from). Non-interactive so the draw pan owns touches.
+        if annotation is DrawPenAnnotation {
+            let id = "drawPen"
+            let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
+                ?? MKAnnotationView(annotation: annotation, reuseIdentifier: id)
+            view.annotation = annotation
+            let size: CGFloat = 18
+            view.frame = CGRect(x: 0, y: 0, width: size, height: size)
+            view.backgroundColor = .clear
+            view.layer.cornerRadius = size / 2
+            view.layer.backgroundColor = UIColor(red: 0.486, green: 0.227, blue: 0.929, alpha: 1).cgColor // #7c3aed
+            view.layer.borderColor = UIColor.white.cgColor
+            view.layer.borderWidth = 3
+            view.canShowCallout = false
+            view.isUserInteractionEnabled = false
+            return view
+        }
+
         // Connector-build node: a teal dot the rider tapped to trace a fix. The
         // link ends (first/last) are larger with a heavier ring; intermediate
         // nodes are smaller. Non-interactive so the next tap reaches the map's tap
@@ -1119,6 +1208,11 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             return false
         }
         let point = gestureRecognizer.location(in: map)
+        // Build mode: only begin to MOVE a pin (taps own add/remove); a drag off any
+        // pin must fall through to the map so it pans normally.
+        if store.isBuildMode {
+            return nearestViaIndex(point, map: map) != nil
+        }
         let grab = max(Self.vertexGrabPx, Self.lineGrabPx)
         return nearestLineDistance(point, coords: coords, map: map) <= grab
     }
@@ -1137,6 +1231,10 @@ final class ViaAnnotation: MKPointAnnotation {
 /// A tapped endpoint (A or B) of a "route through a section" pick. Subclass so
 /// `viewFor` can render it as a distinct teal dot while the section is chosen.
 final class CorridorEndpointAnnotation: MKPointAnnotation {}
+
+/// The Draw-mode "pen" marker — the resume point (last vertex of the last drawn
+/// stroke). Subclass so `viewFor` renders it as a distinct violet dot.
+final class DrawPenAnnotation: MKPointAnnotation {}
 
 /// A tapped node of the connector being built (connector-build mode). `isEnd`
 /// marks the first/last node — the link ends — so `viewFor` draws them larger.

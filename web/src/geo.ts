@@ -160,6 +160,25 @@ export function applyManualSegments(
   return result;
 }
 
+/**
+ * Assemble a fully hand-drawn route (Draw mode): start pin → each snapped stroke
+ * in draw order → end pin. Consecutive strokes and the gaps to the pins are
+ * joined by STRAIGHT bridges (the implicit segments between consecutive points) —
+ * nothing is auto-routed. The drawn strokes ARE the route.
+ */
+export function assembleDrawnRoute(
+  from: LngLat,
+  to: LngLat,
+  strokes: { coords: LngLat[] }[]
+): LngLat[] {
+  const out: LngLat[] = [from];
+  for (const s of strokes) {
+    for (const c of s.coords) out.push(c);
+  }
+  out.push(to);
+  return out;
+}
+
 // ── Screen-pixel geometry ──────────────────────────────────────────────────
 
 export interface Px {

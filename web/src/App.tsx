@@ -42,8 +42,14 @@ import {
   nearestStreetName,
   connectorSegmentsForRoute,
 } from "./friendliness";
-import { arcLengthAt, haversineLength, applyManualSegments, MAX_VIAS } from "./geo";
-import { fetchCorridor } from "./api";
+import {
+  arcLengthAt,
+  haversineLength,
+  applyManualSegments,
+  assembleDrawnRoute,
+  MAX_VIAS,
+} from "./geo";
+import { fetchCorridor, fetchMatch } from "./api";
 import type {
   LngLat,
   Via,
@@ -78,22 +84,23 @@ export default function App() {
   // careful edit isn't wiped when you nudge start/end.
   const [vias, setVias] = useState<Via[]>([]);
   const [editing, setEditing] = useState(false);
-  // Hand-drawn stretches spliced into the auto route (manual mode). Persist
-  // across edits; cleared only on an explicit reset.
-  const [manualSegments, setManualSegments] = useState<ManualSegment[]>([]);
+  // Draw mode: a fully hand-drawn route. Each stroke is snapped to roads (via
+  // /match) and kept; strokes + the start/end pins are joined by STRAIGHT bridges
+  // (see assembleDrawnRoute). When non-empty, the drawn path IS the route —
+  // it overrides the BRouter auto-route. Persists across endpoint tweaks.
+  const [drawnStrokes, setDrawnStrokes] = useState<ManualSegment[]>([]);
   const [drawMode, setDrawMode] = useState(false);
   // Guided-draw ("Build") mode: tap the map to append pass-through waypoints one
   // at a time (router auto-snaps the path between them), tap a pin to remove it.
   // Unlike drag mode (arc-length insertion), Build APPENDS in tap order.
   const [buildMode, setBuildMode] = useState(false);
-  // "Snap to roads" toggle inside Build. ON (default) = routed waypoints. OFF =
-  // the gesture flips to freehand finger-drag and each stroke is kept VERBATIM as
-  // a pure visual sketch (no router, no distance, no nav, not spliced).
-  const [snapToRoads, setSnapToRoads] = useState(true);
-  // Standalone freehand sketch strokes (Build + Snap OFF). Pure map overlay —
-  // nothing downstream reads them. Persist across endpoint tweaks; cleared only
-  // on an explicit reset (like manualSegments).
-  const [sketchStrokes, setSketchStrokes] = useState<LngLat[][]>([]);
+  // Build & Draw are "from scratch" canvases — entering either wipes all
+  // customization except the start/end pins. We snapshot the wiped state here so
+  // the mode's Undo can restore it once (the "didn't mean to clear" escape hatch).
+  const [preResetSnapshot, setPreResetSnapshot] = useState<{
+    vias: Via[];
+    drawnStrokes: ManualSegment[];
+  } | null>(null);
 
   // ── "Route through this section" (corridor) ────────────────────────────────
   // Tap point A then point B on a street; the server resolves the street between
@@ -153,8 +160,18 @@ export default function App() {
           : null;
   // Select a reshape mode — turns exactly one on, the others off, and abandons
   // any half-finished corridor pick (mirrors handleToggleCorridorMode).
+  // Build & Draw are "from scratch" canvases: entering either wipes every
+  // customization except the start/end pins, snapshotting it first so Undo can
+  // restore. Through & Drag edit the existing route and leave state intact.
   const selectEditTool = useCallback(
     (tool: Exclude<EditTool, null>) => {
+      if (tool === "build" || tool === "draw") {
+        setPreResetSnapshot((prev) =>
+          vias.length || drawnStrokes.length ? { vias, drawnStrokes } : prev
+        );
+        setVias([]);
+        setDrawnStrokes([]);
+      }
       setEditing(tool === "drag");
       setDrawMode(tool === "draw");
       setCorridorMode(tool === "through");
@@ -162,8 +179,24 @@ export default function App() {
       setConnectorDrawMode(false);
       clearCorridorPick();
     },
-    [clearCorridorPick]
+    [clearCorridorPick, vias, drawnStrokes]
   );
+
+  // Undo the wipe: restore the snapshot captured when Build/Draw was entered,
+  // then drop into Drag so the restored route shows normally for fine-tuning.
+  const restoreSnapshot = useCallback(() => {
+    setPreResetSnapshot((snap) => {
+      if (snap) {
+        setVias(snap.vias);
+        setDrawnStrokes(snap.drawnStrokes);
+        setEditing(true);
+        setDrawMode(false);
+        setCorridorMode(false);
+        setBuildMode(false);
+      }
+      return null;
+    });
+  }, []);
   // "Edit route" opens the panel and defaults to drag (preserves the old
   // one-tap-to-drag behavior); "Done editing" closes it and clears every mode.
   const toggleEditPanel = useCallback(() => {
@@ -173,7 +206,7 @@ export default function App() {
         setDrawMode(false);
         setCorridorMode(false);
         setBuildMode(false);
-        setSnapToRoads(true);
+        setPreResetSnapshot(null);
         clearCorridorPick();
         return false;
       }
@@ -253,7 +286,7 @@ export default function App() {
     setDrawMode(false);
     setCorridorMode(false);
     setBuildMode(false);
-    setSnapToRoads(true);
+    setPreResetSnapshot(null);
     setConnectorDrawMode(false);
     clearCorridorPick();
   }, [from, to, clearCorridorPick]);
@@ -276,8 +309,6 @@ export default function App() {
     preference
   );
   const reshaped = vias.length > 0;
-  // Freehand-sketch active = Build with snap turned off.
-  const sketchMode = buildMode && !snapToRoads;
 
   // ── Live turn-by-turn navigation (foreground; iOS has the native version) ──
   const nav = useNavigation();
@@ -293,15 +324,20 @@ export default function App() {
   // re-splice whenever the store version changes, so a freshly drawn/deleted fix
   // updates the line at once.
   const activeCoords = useMemo<LngLat[] | null>(() => {
+    // A fully hand-drawn route (Draw mode) overrides everything: the snapped
+    // strokes joined by straight bridges to the pins ARE the route.
+    if (!nav.navigating && drawnStrokes.length > 0 && from && to) {
+      return assembleDrawnRoute(from, to, drawnStrokes);
+    }
     const auto = displayRoute?.geometry.coordinates ?? null;
     if (!auto) return null;
     // No splices while navigating — the nav route is authoritative.
     if (nav.navigating) return auto;
-    const splices = [...manualSegments, ...connectorSegmentsForRoute(auto)];
+    const splices = connectorSegmentsForRoute(auto);
     return splices.length ? applyManualSegments(auto, splices) : auto;
     // connectorsVersion gates re-splicing on store changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayRoute, manualSegments, nav.navigating, connectorsVersion]);
+  }, [displayRoute, drawnStrokes, from, to, nav.navigating, connectorsVersion]);
 
   // Once anything is spliced (a hand-drawn stretch or a connector) the server
   // distance no longer matches — measure the displayed geometry instead. When no
@@ -400,6 +436,8 @@ export default function App() {
   // point snaps to the nearest bike-network edge (unless that collapses onto an
   // existing waypoint) and is capped at MAX_VIAS.
   const handleAddWaypoint = useCallback((rawAt: LngLat) => {
+    // Committing to the new canvas — the wipe is no longer undoable.
+    setPreResetSnapshot(null);
     setVias((prev) => {
       if (prev.length >= MAX_VIAS) return prev;
       const snapped = snapToNetwork(rawAt);
@@ -412,47 +450,62 @@ export default function App() {
     });
   }, []);
 
-  // Build mode: drop the most-recently-added waypoint (undo).
+  // Build mode Undo: drop the most-recently-added waypoint; once the canvas is
+  // empty, restore the snapshot taken when Build was entered (undo the wipe).
   const handleUndoWaypoint = useCallback(() => {
-    setVias((prev) => prev.slice(0, -1));
-  }, []);
+    if (vias.length > 0) {
+      setVias((prev) => prev.slice(0, -1));
+      return;
+    }
+    restoreSnapshot();
+  }, [vias.length, restoreSnapshot]);
 
   // Build mode: remove every waypoint at once.
   const handleClearWaypoints = useCallback(() => {
     setVias([]);
   }, []);
 
-  // Build + Snap OFF: a freehand stroke finished — keep it VERBATIM as a pure
-  // visual sketch line (no router, no splice, no distance/nav).
-  const handleSketchStroke = useCallback((coords: LngLat[]) => {
+  // Finished a freehand draw stroke: snap it to roads (/match, follow=true) and
+  // append it to the drawn route. Stay in draw mode so drawing is resumable —
+  // the next stroke picks up from the pen. On a snap failure keep the verbatim
+  // trace so a stroke is never lost.
+  const handleDrawStroke = useCallback(async (coords: LngLat[]) => {
     if (coords.length < 2) return;
-    setSketchStrokes((prev) => [...prev, coords]);
+    setPreResetSnapshot(null);
+    let snapped = coords;
+    try {
+      const res = await fetchMatch({
+        trace: coords,
+        start: coords[0],
+        end: coords[coords.length - 1],
+        follow: true,
+      });
+      if (res.geometry.coordinates.length >= 2) {
+        snapped = res.geometry.coordinates;
+      }
+    } catch {
+      // Network/match failure — fall back to the raw trace (kept verbatim).
+    }
+    setDrawnStrokes((prev) => [...prev, { id: nextSegId(), coords: snapped }]);
   }, []);
 
-  // Sketch: drop the most-recent stroke (undo) / clear all strokes.
-  const handleUndoSketch = useCallback(() => {
-    setSketchStrokes((prev) => prev.slice(0, -1));
-  }, []);
-  const handleClearSketch = useCallback(() => {
-    setSketchStrokes([]);
+  // Draw mode Undo: drop the last stroke; once empty, restore the snapshot.
+  const handleUndoStroke = useCallback(() => {
+    if (drawnStrokes.length > 0) {
+      setDrawnStrokes((prev) => prev.slice(0, -1));
+      return;
+    }
+    restoreSnapshot();
+  }, [drawnStrokes.length, restoreSnapshot]);
+
+  const handleClearStrokes = useCallback(() => {
+    setDrawnStrokes([]);
   }, []);
 
-  const handleToggleSnap = useCallback(() => {
-    setSnapToRoads((v) => !v);
-  }, []);
-
-  // Finished a freehand draw: keep it VERBATIM as a manual segment spliced into
-  // the route (forces that stretch). Exit draw mode after one stroke.
-  const handleDrawSegment = useCallback((coords: LngLat[]) => {
-    if (coords.length < 2) return;
-    setManualSegments((prev) => [...prev, { id: nextSegId(), coords }]);
-    setDrawMode(false);
-  }, []);
-
-  // Raw-nudge a point on a manual segment (drag) — verbatim, no re-route.
-  const handleManualNudge = useCallback(
+  // Raw-nudge a vertex on a drawn stroke (drag) — verbatim, no re-snap.
+  const handleStrokeNudge = useCallback(
     (segId: string, vertexIndex: number, at: LngLat) => {
-      setManualSegments((prev) =>
+      setDrawnStrokes((prev) =>
         prev.map((s) =>
           s.id === segId
             ? { ...s, coords: s.coords.map((c, i) => (i === vertexIndex ? at : c)) }
@@ -598,8 +651,8 @@ export default function App() {
         setTo(null);
         setToLabel("");
         setVias([]);
-        setManualSegments([]);
-        setSketchStrokes([]);
+        setDrawnStrokes([]);
+        setPreResetSnapshot(null);
         setDrawMode(false);
         setBuildMode(false);
         setConnectorDrawMode(false);
@@ -638,10 +691,26 @@ export default function App() {
 
   const hasRoute = !!route;
 
-  // Launch live turn-by-turn for the planned route.
+  // Launch live turn-by-turn for the planned route. A fully hand-drawn route
+  // has no BRouter geometry/steps, so synthesize a RouteResponse from the drawn
+  // coords (nav follows them; an off-route reroute falls back to BRouter).
   const handleStartNav = useCallback(() => {
-    if (route && to) nav.start(route, to);
-  }, [route, to, nav]);
+    if (!to) return;
+    if (drawnStrokes.length > 0 && activeCoords && activeCoords.length >= 2) {
+      nav.start(
+        {
+          geometry: { type: "LineString", coordinates: activeCoords },
+          steps: [],
+          distance_m: displayDistanceM,
+          duration_s: route?.duration_s ?? 0,
+          greenway_coverage: friendliness?.coverage ?? 0,
+        },
+        to
+      );
+      return;
+    }
+    if (route) nav.start(route, to);
+  }, [route, to, nav, drawnStrokes, activeCoords, displayDistanceM, friendliness]);
 
   return (
     <div className={`app-layout ${nav.navigating ? "app-layout--navigating" : ""}`}>
@@ -695,7 +764,7 @@ export default function App() {
               duration_s={route.duration_s}
               coverage={friendliness?.coverage}
               personalized={personalized}
-              reshaped={reshaped || manualSegments.length > 0}
+              reshaped={reshaped || drawnStrokes.length > 0}
               onStartNav={handleStartNav}
               editOpen={editOpen}
               onToggleEdit={toggleEditPanel}
@@ -704,12 +773,11 @@ export default function App() {
               onUndoWaypoint={handleUndoWaypoint}
               onClearWaypoints={handleClearWaypoints}
               waypointCount={vias.length}
-              snapToRoads={snapToRoads}
-              onToggleSnap={handleToggleSnap}
-              sketchCount={sketchStrokes.length}
-              onUndoSketch={handleUndoSketch}
-              onClearSketch={handleClearSketch}
-              steps={route.steps}
+              onUndoStroke={handleUndoStroke}
+              onClearStrokes={handleClearStrokes}
+              strokeCount={drawnStrokes.length}
+              canRestore={!!preResetSnapshot}
+              steps={drawnStrokes.length > 0 ? [] : route.steps}
               onStepClick={handleStepClick}
               showDirections
             />
@@ -744,9 +812,6 @@ export default function App() {
           editing={editing}
           buildMode={buildMode}
           onAddWaypoint={handleAddWaypoint}
-          sketchMode={sketchMode}
-          onSketchStroke={handleSketchStroke}
-          sketchStrokes={sketchStrokes}
           vias={vias}
           onReshape={handleReshape}
           onDeleteVia={handleDeleteVia}
@@ -754,9 +819,10 @@ export default function App() {
           onToggleVia={handleToggleVia}
           onMoveEndpoint={handleMoveEndpoint}
           drawMode={drawMode}
-          manualSegments={manualSegments}
-          onDrawSegment={handleDrawSegment}
-          onManualNudge={handleManualNudge}
+          drawnStrokes={drawnStrokes}
+          onDrawStroke={handleDrawStroke}
+          onStrokeNudge={handleStrokeNudge}
+          corridorMode={corridorMode}
           connectorDrawMode={connectorDrawMode}
           onDrawConnector={handleDrawConnector}
           connectors={connectors}
@@ -872,7 +938,7 @@ export default function App() {
                 duration_s={route.duration_s}
                 coverage={friendliness?.coverage}
                 personalized={personalized}
-                reshaped={reshaped || manualSegments.length > 0}
+                reshaped={reshaped || drawnStrokes.length > 0}
                 onStartNav={handleStartNav}
                 editOpen={editOpen}
                 onToggleEdit={toggleEditPanel}
@@ -881,12 +947,11 @@ export default function App() {
                 onUndoWaypoint={handleUndoWaypoint}
                 onClearWaypoints={handleClearWaypoints}
                 waypointCount={vias.length}
-                snapToRoads={snapToRoads}
-                onToggleSnap={handleToggleSnap}
-                sketchCount={sketchStrokes.length}
-                onUndoSketch={handleUndoSketch}
-                onClearSketch={handleClearSketch}
-                steps={route.steps}
+                onUndoStroke={handleUndoStroke}
+                onClearStrokes={handleClearStrokes}
+                strokeCount={drawnStrokes.length}
+                canRestore={!!preResetSnapshot}
+                steps={drawnStrokes.length > 0 ? [] : route.steps}
                 onStepClick={handleStepClick}
                 showDirections={drawerExpanded}
               />

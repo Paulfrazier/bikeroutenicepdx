@@ -192,6 +192,9 @@ struct ControlsBar: View {
                     if store.isBuildMode {
                         buildControlsRow
                     }
+                    if store.isDrawMode {
+                        drawControlsRow
+                    }
                 }
             }
         case .failed(let message):
@@ -346,21 +349,21 @@ struct ControlsBar: View {
     /// through a tapped section.
     private var editToolsRow: some View {
         HStack(spacing: 6) {
-            editToolButton("Build", icon: "mappin.and.ellipse", active: store.isBuildMode) {
-                store.enterBuildMode()
-            }
-            editToolButton("Drag", icon: "hand.point.up.left.fill", active: store.isEditMode) {
-                store.enterEditMode()
-            }
-            editToolButton("Draw", icon: "hand.draw.fill", active: store.isDrawMode) {
-                store.enterDrawMode()
-            }
             editToolButton(
                 "Through",
                 icon: "point.topleft.down.to.point.bottomright.curvepath",
                 active: store.isCorridorMode
             ) {
                 if !store.isCorridorMode { store.toggleCorridorMode() }
+            }
+            editToolButton("Drag", icon: "hand.point.up.left.fill", active: store.isEditMode) {
+                store.enterEditMode()
+            }
+            editToolButton("Build", icon: "mappin.and.ellipse", active: store.isBuildMode) {
+                store.enterBuildMode()
+            }
+            editToolButton("Draw", icon: "hand.draw.fill", active: store.isDrawMode) {
+                store.enterDrawMode()
             }
         }
     }
@@ -393,50 +396,52 @@ struct ControlsBar: View {
     /// phase) hint, so it isn't covered here.
     private var activeReshapeHint: String? {
         if store.isBuildMode {
-            return store.snapToRoads
-                ? "Tap the map to add waypoints one at a time; tap a waypoint to remove it."
-                : "Drag on the map to sketch a freehand line (not routed)."
+            return "Starts fresh from your start & end. Tap the map to add waypoints; drag a pin to move it, tap a pin to remove it."
+        }
+        if store.isDrawMode {
+            return "Starts fresh from your start & end. Draw the route in strokes (they snap to roads) — lift and continue where you left off. Drag a point to adjust."
         }
         if store.isEditMode {
             return "Drag the route on the map to reshape it — it re-snaps to roads."
         }
         if store.isCorridorMode {
-            return "Tap the start then the end of a section on the map."
+            return "Tap the start then the end of a section on the map. Tap a section's pin to remove it."
         }
         return nil
     }
 
-    /// Build-mode controls: a "Snap to roads" toggle, then either waypoint
-    /// controls (snap on) or freehand-sketch controls (snap off).
+    /// Build-mode controls: waypoint count + Undo (drop last, or undo the wipe when
+    /// empty) + Clear. Build always routes through tapped waypoints (the old
+    /// "Snap to roads" toggle / sketch mode is retired).
     private var buildControlsRow: some View {
-        VStack(spacing: 8) {
-            Toggle("Snap to roads", isOn: Binding(
-                get: { store.snapToRoads },
-                set: { store.snapToRoads = $0 }
-            ))
-            .font(.caption.weight(.semibold))
-            if store.snapToRoads {
-                countControls(
-                    count: store.vias.count,
-                    noun: "waypoint",
-                    undo: { Task { await store.undoWaypoint() } },
-                    clear: { Task { await store.clearWaypoints() } }
-                )
-            } else {
-                countControls(
-                    count: store.sketchStrokes.count,
-                    noun: "sketch",
-                    undo: { store.undoSketch() },
-                    clear: { store.clearSketch() }
-                )
-            }
-        }
+        countControls(
+            count: store.vias.count,
+            noun: "waypoint",
+            canRestore: store.canRestoreSnapshot,
+            undo: { Task { await store.undoWaypoint() } },
+            clear: { Task { await store.clearWaypoints() } }
+        )
     }
 
-    /// Shared count + Undo (drop last) + Clear (drop all) row for Build/Sketch.
+    /// Draw-mode controls: stroke count + Undo (drop last stroke, or undo the wipe
+    /// when empty) + Clear.
+    private var drawControlsRow: some View {
+        countControls(
+            count: store.manualSegments.count,
+            noun: "stroke",
+            canRestore: store.canRestoreSnapshot,
+            undo: { Task { await store.undoDrawnStroke() } },
+            clear: { Task { await store.clearDrawnStrokes() } }
+        )
+    }
+
+    /// Shared count + Undo (drop last) + Clear (drop all) row for Build/Draw.
+    /// Undo stays enabled while a wipe is still restorable (`canRestore`), even
+    /// when the current list is empty.
     private func countControls(
         count: Int,
         noun: String,
+        canRestore: Bool,
         undo: @escaping () -> Void,
         clear: @escaping () -> Void
     ) -> some View {
@@ -450,7 +455,7 @@ struct ControlsBar: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(count == 0)
+            .disabled(count == 0 && !canRestore)
             Button(role: .destructive, action: clear) {
                 Label("Clear", systemImage: "xmark")
             }

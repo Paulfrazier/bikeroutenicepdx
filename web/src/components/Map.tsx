@@ -28,7 +28,7 @@ import maplibregl, {
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { LngLat, RouteResponse, RouteGeometry, Via, ManualSegment } from "../types";
-import { hitTestRoute, VERTEX_HIT_PX, MAX_VIAS, type Px } from "../geo";
+import { hitTestRoute, nearestVertexIndex, VERTEX_HIT_PX, MAX_VIAS, type Px } from "../geo";
 import { ROUTE_CLASS_COLORS, ROUTE_CLASS_DASHED } from "../friendliness";
 import type { Connector } from "../connectors";
 
@@ -168,31 +168,27 @@ function lineFeature(coords: LngLat[]): GeoJSON.Feature {
   };
 }
 
-/** One LineString per manual (hand-drawn) segment, for the dashed-violet layer. */
-function manualFeatures(segments: ManualSegment[]): GeoJSON.FeatureCollection {
+/** One Point per drawn-stroke vertex — the draggable handles shown in Draw mode. */
+function strokeVertexFeatures(strokes: ManualSegment[]): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
-    features: segments
-      .filter((s) => s.coords.length >= 2)
-      .map((s) => ({
-        type: "Feature",
-        geometry: { type: "LineString", coordinates: s.coords },
-        properties: { id: s.id },
-      })),
+    features: strokes.flatMap((s) =>
+      s.coords.map((c) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: c },
+        properties: {},
+      }))
+    ),
   };
 }
 
-/** One LineString per freehand sketch stroke (the "route-sketch" overlay). */
-function sketchFeatures(strokes: LngLat[][]): GeoJSON.FeatureCollection {
+/** The "pen" marker — the last vertex of the last drawn stroke (resume point). */
+function penFeature(strokes: ManualSegment[]): GeoJSON.FeatureCollection {
+  const last = [...strokes].reverse().find((s) => s.coords.length >= 1);
+  if (!last) return { type: "FeatureCollection", features: [] };
   return {
     type: "FeatureCollection",
-    features: strokes
-      .filter((s) => s.length >= 2)
-      .map((s, i) => ({
-        type: "Feature",
-        geometry: { type: "LineString", coordinates: s },
-        properties: { i },
-      })),
+    features: [pointFeature(last.coords[last.coords.length - 1])],
   };
 }
 
@@ -334,17 +330,11 @@ interface MapProps {
    * pans freely over it (prevents accidental moves). */
   editing: boolean;
   /** Guided-draw ("Build") mode: a bare map tap appends a waypoint, a tap on a
-   * waypoint pin removes it. The route line itself stays locked (no drag). */
+   * waypoint pin removes it, a drag on a pin moves it. The route line stays
+   * locked (bare-line drags don't insert). */
   buildMode: boolean;
   /** Build mode: a bare map tap dropped a new waypoint here (append, tap order). */
   onAddWaypoint: (at: LngLat) => void;
-  /** Build + Snap OFF: freehand-sketch mode. A finger-drag draws a verbatim line
-   * kept as a pure visual overlay (no router, no splice). */
-  sketchMode: boolean;
-  /** A freehand sketch stroke finished — kept verbatim as a visual-only line. */
-  onSketchStroke: (coords: LngLat[]) => void;
-  /** Standalone freehand sketch strokes (rendered as the slate "route-sketch" layer). */
-  sketchStrokes: LngLat[][];
   /** Ordered drag-to-reshape waypoints (owned by App). */
   vias: Via[];
   /** A drag finished: `dragged` is the released point; `movingViaIndex` is the
@@ -359,14 +349,19 @@ interface MapProps {
   onToggleVia: (index: number) => void;
   /** Dragged the start/end marker to a new spot (e.g. the real driveway). */
   onMoveEndpoint: (kind: "from" | "to", lngLat: LngLat) => void;
-  /** When true, a freehand stroke on the map becomes a manual segment. */
+  /** Draw mode: a finger/mouse stroke on the map becomes a snapped route
+   * segment. Resumable — lift and the next stroke picks up from the pen. */
   drawMode: boolean;
-  /** Hand-drawn stretches spliced into the route (rendered dashed violet). */
-  manualSegments: ManualSegment[];
-  /** A freehand draw finished — its coords become a kept-verbatim segment. */
-  onDrawSegment: (coords: LngLat[]) => void;
-  /** Raw-nudge a point on a manual segment (drag, no re-route). */
-  onManualNudge: (segId: string, vertexIndex: number, at: LngLat) => void;
+  /** Hand-drawn strokes that make up the drawn route (App snaps each via /match).
+   * Their vertices are draggable; the last vertex is the resume "pen". */
+  drawnStrokes: ManualSegment[];
+  /** A freehand draw stroke finished — App snaps it and appends to the route. */
+  onDrawStroke: (coords: LngLat[]) => void;
+  /** Raw-nudge a vertex on a drawn stroke (drag, no re-snap). */
+  onStrokeNudge: (segId: string, vertexIndex: number, at: LngLat) => void;
+  /** Through ("route through a section") mode is active: waypoint pins are shown
+   * and tapping a section pin deletes that section. */
+  corridorMode: boolean;
   /** When true, a freehand stroke on the map becomes a saved connector (a fix).
    * Shares the manual-draw gesture; the stroke is routed to onDrawConnector. */
   connectorDrawMode: boolean;
@@ -399,9 +394,6 @@ export function Map({
   editing,
   buildMode,
   onAddWaypoint,
-  sketchMode,
-  onSketchStroke,
-  sketchStrokes,
   vias,
   onReshape,
   onDeleteVia,
@@ -409,9 +401,10 @@ export function Map({
   onToggleVia,
   onMoveEndpoint,
   drawMode,
-  manualSegments,
-  onDrawSegment,
-  onManualNudge,
+  drawnStrokes,
+  onDrawStroke,
+  onStrokeNudge,
+  corridorMode,
   connectorDrawMode,
   onDrawConnector,
   connectors,
@@ -455,50 +448,45 @@ export function Map({
   const onReshapeRef = useRef(onReshape);
   const onDeleteViaRef = useRef(onDeleteVia);
   const onAddWaypointRef = useRef(onAddWaypoint);
-  const onSketchStrokeRef = useRef(onSketchStroke);
   const onInsertPreciseRef = useRef(onInsertPrecise);
   const onToggleViaRef = useRef(onToggleVia);
   const onMoveEndpointRef = useRef(onMoveEndpoint);
-  const onDrawSegmentRef = useRef(onDrawSegment);
-  const onManualNudgeRef = useRef(onManualNudge);
+  const onDrawStrokeRef = useRef(onDrawStroke);
+  const onStrokeNudgeRef = useRef(onStrokeNudge);
   const onDrawConnectorRef = useRef(onDrawConnector);
   const editingRef = useRef(editing);
   const buildModeRef = useRef(buildMode);
-  const sketchModeRef = useRef(sketchMode);
   const drawModeRef = useRef(drawMode);
+  const corridorModeRef = useRef(corridorMode);
   const connectorDrawModeRef = useRef(connectorDrawMode);
   const viasRef = useRef(vias);
-  const manualSegmentsRef = useRef(manualSegments);
-  const sketchStrokesRef = useRef(sketchStrokes);
+  const drawnStrokesRef = useRef(drawnStrokes);
   const connectorsRef = useRef(connectors);
   const routeFeaturesRef = useRef(routeFeatures);
-  // Active manual-segment drag (raw nudge): which segment + vertex is moving.
+  // Active stroke-vertex drag (raw nudge): which stroke + vertex is moving.
   const manualEditRef = useRef<{ segId: string; vertex: number } | null>(null);
   // Freehand-draw stroke in progress (lng/lat points).
   const drawStrokeRef = useRef<LngLat[] | null>(null);
   // Which mode armed the in-progress stroke — captured at down-time so onDrawEnd
-  // routes it: a saved connector fix, a per-route manual segment, or a pure
-  // visual sketch (Build + Snap off).
-  const drawStrokeKindRef = useRef<"segment" | "connector" | "sketch">("segment");
+  // routes it: a saved connector fix, or a drawn route segment.
+  const drawStrokeKindRef = useRef<"segment" | "connector">("segment");
   useEffect(() => {
     onReshapeRef.current = onReshape;
     onDeleteViaRef.current = onDeleteVia;
     onAddWaypointRef.current = onAddWaypoint;
-    onSketchStrokeRef.current = onSketchStroke;
     onInsertPreciseRef.current = onInsertPrecise;
     onToggleViaRef.current = onToggleVia;
     onMoveEndpointRef.current = onMoveEndpoint;
-    onDrawSegmentRef.current = onDrawSegment;
-    onManualNudgeRef.current = onManualNudge;
+    onDrawStrokeRef.current = onDrawStroke;
+    onStrokeNudgeRef.current = onStrokeNudge;
     onDrawConnectorRef.current = onDrawConnector;
     editingRef.current = editing;
     buildModeRef.current = buildMode;
-    sketchModeRef.current = sketchMode;
     drawModeRef.current = drawMode;
+    corridorModeRef.current = corridorMode;
     connectorDrawModeRef.current = connectorDrawMode;
     viasRef.current = vias;
-    manualSegmentsRef.current = manualSegments;
-    sketchStrokesRef.current = sketchStrokes;
+    drawnStrokesRef.current = drawnStrokes;
     connectorsRef.current = connectors;
     routeFeaturesRef.current = routeFeatures;
   });
@@ -751,40 +739,42 @@ export function Map({
         },
       });
 
-      // ── Manual (hand-drawn) segments — dashed violet over the tier route ──
-      // Marks the stretches forced verbatim, distinct from the routed line.
-      map.addSource("route-manual", {
+      // ── Drawn-route vertices (Draw mode) — small grab handles ────────────
+      // The drawn strokes are part of the main route line; these violet dots mark
+      // each vertex so the user can grab one to nudge it. Shown only in Draw mode.
+      map.addSource("draw-vertices", {
         type: "geojson",
         data: emptyGeojson(),
       });
       map.addLayer({
-        id: "route-manual-line",
-        type: "line",
-        source: "route-manual",
-        layout: { "line-cap": "round", "line-join": "round" },
+        id: "draw-vertices",
+        type: "circle",
+        source: "draw-vertices",
+        layout: { visibility: "none" },
         paint: {
-          "line-color": "#8B5CF6",
-          "line-width": 5,
-          "line-dasharray": [1.5, 1.5],
+          "circle-radius": 4,
+          "circle-color": "#8B5CF6",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5,
         },
       });
 
-      // ── Freehand sketch strokes (Build + Snap off) — slate ink overlay ──
-      // Pure visual annotation: not routed, not spliced, nothing downstream reads
-      // it. Distinct from the violet manual segments and teal connectors.
-      map.addSource("route-sketch", {
+      // ── Draw "pen" marker — the resume point (last drawn vertex) ──────────
+      // A larger violet dot showing where the next stroke will continue from.
+      map.addSource("draw-pen", {
         type: "geojson",
         data: emptyGeojson(),
       });
       map.addLayer({
-        id: "route-sketch-line",
-        type: "line",
-        source: "route-sketch",
-        layout: { "line-cap": "round", "line-join": "round" },
+        id: "draw-pen",
+        type: "circle",
+        source: "draw-pen",
+        layout: { visibility: "none" },
         paint: {
-          "line-color": "#334155",
-          "line-width": 4,
-          "line-opacity": 0.9,
+          "circle-radius": 8,
+          "circle-color": "#7c3aed",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 3,
         },
       });
 
@@ -978,8 +968,8 @@ export function Map({
       // Suppress the click that fires right after a drag-release.
       suppressClickRef.current = true;
       if (manualEdit) {
-        // Raw-nudge a point on a hand-drawn segment — verbatim, no re-route.
-        onManualNudgeRef.current(manualEdit.segId, manualEdit.vertex, coords[idx]);
+        // Raw-nudge a vertex on a drawn stroke — verbatim, no re-snap.
+        onStrokeNudgeRef.current(manualEdit.segId, manualEdit.vertex, coords[idx]);
       } else {
         // Hand the released point up to App, which updates vias + re-routes.
         // Keep the drag preview on screen until the new routeFeatures arrive.
@@ -1045,18 +1035,17 @@ export function Map({
       if (stroke && stroke.length >= 2) {
         // The same gesture feeds a different store, by which mode armed the stroke.
         if (kind === "connector") onDrawConnectorRef.current(stroke);
-        else if (kind === "sketch") onSketchStrokeRef.current(stroke);
-        else onDrawSegmentRef.current(stroke);
+        else onDrawStrokeRef.current(stroke);
       }
     };
 
-    // The manual-segment vertex within grab range of `p`, else null.
+    // The drawn-stroke vertex within grab range of `p`, else null.
     const manualHitPx = (
       p: Px
     ): { segId: string; vertex: number } | null => {
       let best = VERTEX_HIT_PX;
       let result: { segId: string; vertex: number } | null = null;
-      for (const seg of manualSegmentsRef.current) {
+      for (const seg of drawnStrokesRef.current) {
         seg.coords.forEach((c, vi) => {
           const pt = map.project(c as LngLatLike);
           const d = Math.hypot(p.x - pt.x, p.y - pt.y);
@@ -1069,66 +1058,67 @@ export function Map({
       return result;
     };
 
-    const onDown = (
+    // Start capturing a freehand stroke (Draw mode → drawn route; connector mode
+    // → saved fix). onDrawEnd routes it to the right store by `kind`.
+    const startDrawStroke = (
+      kind: "segment" | "connector",
       e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
     ) => {
-      // Draw mode (manual segment OR connector OR freehand sketch): capture a
-      // freehand stroke. onDrawEnd routes it to the right store by this kind.
-      if (drawModeRef.current || connectorDrawModeRef.current || sketchModeRef.current) {
-        e.preventDefault();
-        map.dragPan.disable();
-        drawStrokeKindRef.current = connectorDrawModeRef.current
-          ? "connector"
-          : sketchModeRef.current
-            ? "sketch"
-            : "segment";
-        drawStrokeRef.current = [[e.lngLat.lng, e.lngLat.lat]];
-        (
-          map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
-        )?.setData(lineFeature(drawStrokeRef.current));
-        map.on("mousemove", onDrawMove);
-        map.on("touchmove", onDrawMove);
-        map.on("mouseup", onDrawEnd);
-        map.on("touchend", onDrawEnd);
-        return;
-      }
-
-      // Route is locked unless the user is in edit mode → no accidental grabs.
-      if (!editingRef.current) return;
-      if (displayCoordsRef.current.length < 2) return;
-      const hit = hitTestRoute(
-        { x: e.point.x, y: e.point.y },
-        getDisplayPixels()
-      );
-      if (!hit) return; // not on the line — let MapLibre pan normally
-
-      // Grabbed a point on a hand-drawn segment? → raw nudge (no via, no cap).
-      const manual = manualHitPx({ x: e.point.x, y: e.point.y });
-      manualEditRef.current = manual;
-      // Did the press grab an existing via? (Skipped for a manual grab.)
-      const movingVia = manual
-        ? null
-        : nearestViaIndexPx({ x: e.point.x, y: e.point.y });
-      // Inserting a new waypoint? Refuse once we're at the cap so the route can't
-      // get cluttered — let the map pan normally instead. Moving an existing pin
-      // (or a manual point) is always allowed.
-      if (!manual && movingVia === null && viasRef.current.length >= MAX_VIAS) {
-        manualEditRef.current = null;
-        return;
-      }
-
       e.preventDefault();
       map.dragPan.disable();
+      drawStrokeKindRef.current = kind;
+      drawStrokeRef.current = [[e.lngLat.lng, e.lngLat.lat]];
+      (
+        map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
+      )?.setData(lineFeature(drawStrokeRef.current));
+      map.on("mousemove", onDrawMove);
+      map.on("touchmove", onDrawMove);
+      map.on("mouseup", onDrawEnd);
+      map.on("touchend", onDrawEnd);
+    };
 
+    // Start a raw nudge of one drawn-stroke vertex. Only that stroke is shown in
+    // the drag overlay; on release App rewrites the vertex (no re-snap).
+    const startVertexNudge = (
+      manual: { segId: string; vertex: number },
+      e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
+    ) => {
+      const seg = drawnStrokesRef.current.find((s) => s.id === manual.segId);
+      if (!seg) return;
+      e.preventDefault();
+      map.dragPan.disable();
+      manualEditRef.current = manual;
+      movingViaIndexRef.current = null;
+      dragStartPxRef.current = { x: e.point.x, y: e.point.y };
+      draggedFarRef.current = false;
+      const coords = seg.coords.map((c) => [c[0], c[1]] as LngLat);
+      dragCoordsRef.current = coords;
+      dragIndexRef.current = manual.vertex;
+      (
+        map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
+      )?.setData(lineFeature(coords));
+      map.on("mousemove", onMove);
+      map.on("touchmove", onMove);
+      map.on("mouseup", onEnd);
+      map.on("touchend", onEnd);
+    };
+
+    // Start a drag of the whole displayed line at vertex/segment `hit`, either
+    // moving an existing via (`movingVia`) or inserting a fresh one.
+    const beginLineDrag = (
+      hit: { type: "vertex"; index: number } | { type: "segment"; index: number; point: Px },
+      movingVia: number | null,
+      e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
+    ) => {
+      e.preventDefault();
+      map.dragPan.disable();
+      manualEditRef.current = null;
       movingViaIndexRef.current = movingVia;
       dragStartPxRef.current = { x: e.point.x, y: e.point.y };
       draggedFarRef.current = false;
 
-      const coords = displayCoordsRef.current.map(
-        (c) => [c[0], c[1]] as LngLat
-      );
+      const coords = displayCoordsRef.current.map((c) => [c[0], c[1]] as LngLat);
       if (hit.type === "segment") {
-        // Insert a fresh vertex at the pointer and start dragging it.
         const ll = map.unproject([hit.point.x, hit.point.y]);
         coords.splice(hit.index + 1, 0, [ll.lng, ll.lat]);
         dragIndexRef.current = hit.index + 1;
@@ -1137,8 +1127,8 @@ export function Map({
       }
       dragCoordsRef.current = coords;
 
-      // Hand off rendering to the transient drag source: clear the tier line
-      // (its geometry is now stale) and seed the drag line at the start coords.
+      // Hand rendering to the transient drag source: clear the (now stale) tier
+      // line and seed the drag line at the start coords.
       (map.getSource("route") as maplibregl.GeoJSONSource | undefined)?.setData(
         emptyGeojson()
       );
@@ -1146,19 +1136,66 @@ export function Map({
         map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
       )?.setData(lineFeature(coords));
 
-      // Arm the long-press (via interactions only — a manual nudge has no
-      // toggle/insert): held in place it toggles a grabbed pin or drops a
-      // precise anchor; a drag or early release cancels it.
-      if (!manualEditRef.current) {
-        pressLngLatRef.current = [e.lngLat.lng, e.lngLat.lat];
-        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
-        longPressTimerRef.current = setTimeout(fireLongPress, LONG_PRESS_MS);
-      }
+      // Held in place, a press toggles a grabbed pin or drops a precise anchor.
+      pressLngLatRef.current = [e.lngLat.lng, e.lngLat.lat];
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = setTimeout(fireLongPress, LONG_PRESS_MS);
 
       map.on("mousemove", onMove);
       map.on("touchmove", onMove);
       map.on("mouseup", onEnd);
       map.on("touchend", onEnd);
+    };
+
+    const onDown = (
+      e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
+    ) => {
+      const point: Px = { x: e.point.x, y: e.point.y };
+
+      // Connector draw: a freehand stroke becomes a saved fix.
+      if (connectorDrawModeRef.current) {
+        startDrawStroke("connector", e);
+        return;
+      }
+
+      // Draw mode: grab a stroke vertex to nudge it, else start a (resumable)
+      // stroke — the pen continues from where the last stroke ended.
+      if (drawModeRef.current) {
+        const manual = manualHitPx(point);
+        if (manual) startVertexNudge(manual, e);
+        else startDrawStroke("segment", e);
+        return;
+      }
+
+      // Build mode: drag an existing waypoint pin to move it. A bare-map press is
+      // left to the click handler (which appends a waypoint).
+      if (buildModeRef.current) {
+        const mv = nearestViaIndexPx(point);
+        if (mv === null) return;
+        const coords = displayCoordsRef.current;
+        if (coords.length < 2) return;
+        beginLineDrag({ type: "vertex", index: nearestVertexIndex(viasRef.current[mv].at, coords) }, mv, e);
+        return;
+      }
+
+      // Drag (edit) mode.
+      if (editingRef.current) {
+        if (displayCoordsRef.current.length < 2) return;
+        // A drawn route is edited only by nudging its stroke vertices.
+        const manual = manualHitPx(point);
+        if (manual) {
+          startVertexNudge(manual, e);
+          return;
+        }
+        if (drawnStrokesRef.current.length > 0) return;
+        const hit = hitTestRoute(point, getDisplayPixels());
+        if (!hit) return; // not on the line — let MapLibre pan normally
+        const movingVia = nearestViaIndexPx(point);
+        // Refuse a NEW via once at the cap (moving an existing pin is fine).
+        if (movingVia === null && viasRef.current.length >= MAX_VIAS) return;
+        beginLineDrag(hit, movingVia, e);
+        return;
+      }
     };
 
     map.on("mousedown", onDown);
@@ -1174,11 +1211,20 @@ export function Map({
       // Guided-draw ("Build") mode owns the tap: hit an existing waypoint pin →
       // remove it; tap anywhere else → append a new waypoint (tap order). The
       // App-level from/to cycle is bypassed while building.
-      if (buildModeRef.current && !sketchModeRef.current) {
+      if (buildModeRef.current) {
         const hitVia = nearestViaIndexPx({ x: e.point.x, y: e.point.y });
         if (hitVia !== null) onDeleteViaRef.current(hitVia);
         else onAddWaypointRef.current([e.lngLat.lng, e.lngLat.lat]);
         return;
+      }
+      // Through mode: tapping an existing section's pin removes that section;
+      // otherwise the tap falls through to App's two-tap A→B pick.
+      if (corridorModeRef.current) {
+        const hitVia = nearestViaIndexPx({ x: e.point.x, y: e.point.y });
+        if (hitVia !== null) {
+          onDeleteViaRef.current(hitVia);
+          return;
+        }
       }
       onMapClickRef.current([e.lngLat.lng, e.lngLat.lat]);
     });
@@ -1258,23 +1304,17 @@ export function Map({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route]);
 
-  // ── Manual segments: repaint the dashed-violet layer when they change ──
+  // ── Drawn strokes: repaint the vertex handles + pen marker when they change ──
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
     (
-      map.getSource("route-manual") as maplibregl.GeoJSONSource | undefined
-    )?.setData(manualFeatures(manualSegments));
-  }, [manualSegments]);
-
-  // ── Freehand sketch strokes: repaint the slate overlay when they change ──
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
+      map.getSource("draw-vertices") as maplibregl.GeoJSONSource | undefined
+    )?.setData(strokeVertexFeatures(drawnStrokes));
     (
-      map.getSource("route-sketch") as maplibregl.GeoJSONSource | undefined
-    )?.setData(sketchFeatures(sketchStrokes));
-  }, [sketchStrokes]);
+      map.getSource("draw-pen") as maplibregl.GeoJSONSource | undefined
+    )?.setData(penFeature(drawnStrokes));
+  }, [drawnStrokes]);
 
   // ── Personal connectors: repaint the teal "your fix" overlay on change ──
   // (community connectors are static — loaded once from the source data url).
@@ -1296,7 +1336,9 @@ export function Map({
     )?.setData(waypointFeatures(vias));
   }, [vias]);
 
-  // ── Toggle the waypoint handles' visibility with edit mode ──
+  // ── Toggle the waypoint handles' visibility with the editing modes ──
+  // Pins show in Drag (reshape), Build (tap to add/remove), and Through (so the
+  // user can see picked sections and tap one to remove it).
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
@@ -1304,10 +1346,21 @@ export function Map({
       map.setLayoutProperty(
         "route-waypoints",
         "visibility",
-        editing ? "visible" : "none"
+        editing || buildMode || corridorMode ? "visible" : "none"
       );
     }
-  }, [editing]);
+  }, [editing, buildMode, corridorMode]);
+
+  // ── Toggle the drawn-stroke handles + pen with Draw mode ──
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    for (const id of ["draw-vertices", "draw-pen"]) {
+      if (map.getLayer(id)) {
+        map.setLayoutProperty(id, "visibility", drawMode ? "visible" : "none");
+      }
+    }
+  }, [drawMode]);
 
   // ── Corridor preview: highlight the picked section + its tapped endpoints ──
   useEffect(() => {
