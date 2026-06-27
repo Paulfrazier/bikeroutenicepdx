@@ -86,6 +86,11 @@ const RESULTS_DIR = resolve(REPO_ROOT, "tests/results");
 // ---------------------------------------------------------------------------
 
 const API_URL = (process.env["API_URL"] ?? "http://localhost:3000").replace(/\/$/, "");
+// Optional overrides so the suite can exercise a specific engine/preference
+// (e.g. ENGINE=selfbuild to validate the self-build BRouter profiles). Omitted
+// from the body when unset → server defaults (engine "prod", preference "comfort").
+const ENGINE = process.env["ENGINE"];
+const PREFERENCE = process.env["PREFERENCE"];
 
 function fmt_km(m: number): string {
   return (m / 1000).toFixed(1) + "km";
@@ -252,6 +257,7 @@ async function main(): Promise<void> {
 
   console.log(`\nBikeRouteNicePDX — canonical route quality harness`);
   console.log(`API: ${API_URL}`);
+  console.log(`Engine: ${ENGINE ?? "prod (default)"} · Preference: ${PREFERENCE ?? "comfort (default)"}`);
   console.log(`Routes: ${canonical.length}`);
   console.log(`Global thresholds: coverage ≥ ${pct(min_greenway_coverage)}, forbidden ≤ ${max_forbidden_meters}m`);
 
@@ -268,6 +274,8 @@ async function main(): Promise<void> {
         body: JSON.stringify({
           from: [route.from.lng, route.from.lat],
           to: [route.to.lng, route.to.lat],
+          ...(ENGINE ? { engine: ENGINE } : {}),
+          ...(PREFERENCE ? { preference: PREFERENCE } : {}),
         }),
       });
 
