@@ -49,6 +49,13 @@ const MIN_RUN_M = 25;
  * collectors) can't override the city's posted speed. Hazard streets (≥30 mph or
  * bicycle high-crash) still win. (KEEP IN SYNC WITH iOS.) */
 const CALM_MAX_MPH = 25;
+/** Widened facility-match radius (m) used ONLY to rescue a would-be-"busy"
+ * segment when a bike facility ON THE SAME STREET sits just past THRESHOLD_M
+ * (PBOT facility geometry is often offset ~20–25 m from the road centerline, so a
+ * real buffered/protected lane gets missed and the street is wrongly painted red).
+ * Name-gated, so it can never adopt a different street's facility. (KEEP IN SYNC
+ * WITH iOS.) */
+const FACILITY_RESCUE_M = 25;
 
 const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
@@ -670,6 +677,51 @@ const STRONG_FACILITY: ReadonlySet<RouteClass> = new Set<RouteClass>([
   "path",
 ]);
 
+/**
+ * Rescue a would-be-"busy" segment: find a bike facility ON THE SAME STREET
+ * (matched arterial name) within FACILITY_RESCUE_M — wider than THRESHOLD_M — and
+ * return its class to adopt. PBOT facility geometry is often offset ~20–25 m from
+ * the road centerline, so a real buffered/protected lane is missed by the normal
+ * match and the street is wrongly reddened; this recovers it. Name-gated +
+ * bearing-aligned, so it can never adopt a *different* street's facility. Returns
+ * null when no same-named facility is close. KEEP IN SYNC WITH iOS.
+ */
+function rescueFacility(
+  M: LngLat,
+  routeBearing: number,
+  grid: Grid,
+  name: string
+): RouteClass | null {
+  const cellLat = Math.floor(M[1] / CELL);
+  const cellLng = Math.floor(M[0] / CELL);
+  let bestDist = FACILITY_RESCUE_M;
+  let bestClass: RouteClass | null = null;
+  let strongDist = FACILITY_RESCUE_M;
+  let strongClass: RouteClass | null = null;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const bucket = grid.get(`${cellLat + dy},${cellLng + dx}`);
+      if (!bucket) continue;
+      for (const seg of bucket) {
+        if (seg.name !== name) continue;
+        if (bearingDiff(routeBearing, seg.bearing) > BEARING_TOL_DEG) continue;
+        const d = perpDistanceM(M, seg.a, seg.b);
+        if (d < bestDist) {
+          bestDist = d;
+          bestClass = seg.cls;
+        }
+        if (STRONG_FACILITY.has(seg.cls) && d < strongDist) {
+          strongDist = d;
+          strongClass = seg.cls;
+        }
+      }
+    }
+  }
+  // Prefer a separated facility on the corridor (mirrors the main adopt rule).
+  if (strongClass && strongDist <= bestDist + 2) return strongClass;
+  return bestClass;
+}
+
 // ── Classification ──────────────────────────────────────────────────────────
 
 /**
@@ -759,8 +811,13 @@ function rawClasses(
       // an arterial of unknown/fast posted speed → busy; otherwise quiet.
       const art = matchArterial(M, routeBearing, artGrid);
       const o = art?.name ? ov.get(art.name) : undefined;
+      const rescued = art?.name ? rescueFacility(M, routeBearing, grid, art.name) : null;
       if (o) {
         classes[i] = o;
+      } else if (rescued) {
+        // A bike facility on THIS street sits just past THRESHOLD_M (offset PBOT
+        // geometry) — adopt it instead of reddening a street that has a lane.
+        classes[i] = rescued;
       } else if (isOnHazard(M, routeBearing, hazardGrid)) {
         classes[i] = "busy";
       } else if (art && art.mph !== null && art.mph <= CALM_MAX_MPH) {

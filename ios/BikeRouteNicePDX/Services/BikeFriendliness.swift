@@ -89,6 +89,13 @@ actor BikeFriendliness {
     /// calm collectors) can't override the city's posted speed. Hazard streets
     /// (≥30 mph or bicycle high-crash) still win. KEEP IN SYNC WITH web.
     private static let calmMaxMph = 25
+    /// Widened facility-match radius (m) used ONLY to rescue a would-be-`.busy`
+    /// segment when a bike facility ON THE SAME STREET sits just past
+    /// `thresholdMeters` (PBOT facility geometry is often offset ~20–25 m from the
+    /// road centerline, so a real lane is missed and the street is wrongly
+    /// reddened). Name-gated, so it can never adopt a different street's facility.
+    /// KEEP IN SYNC WITH web.
+    private static let facilityRescueMeters = 25.0
 
     // MARK: - Index storage
 
@@ -348,12 +355,65 @@ actor BikeFriendliness {
         // an arterial of unknown/fast posted speed → busy; otherwise quiet.
         let hit = matchArterial(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy)
         if let name = hit?.name, let o = ov[name] { return o }
+        // A bike facility on THIS street sits just past thresholdMeters (offset PBOT
+        // geometry) — adopt it instead of reddening a street that has a lane.
+        if let name = hit?.name,
+           let rescued = rescueFacility(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy, name: name) {
+            return rescued
+        }
         if isOnHazard(mid, routeBearing: routeBearing, cosLat: cosLat, cx: cx, cy: cy) {
             return .busy
         }
         if let mph = hit?.mph, mph <= Self.calmMaxMph { return .quiet }
         if hit != nil { return .busy }
         return .quiet
+    }
+
+    /// Rescue a would-be-`.busy` segment: find a bike facility ON THE SAME STREET
+    /// (matched arterial `name`) within `facilityRescueMeters` — wider than
+    /// `thresholdMeters` — and return its class. PBOT facility geometry is often
+    /// offset ~20–25 m from the road centerline, so a real buffered/protected lane
+    /// is missed by the normal match and the street is wrongly reddened; this
+    /// recovers it. Name-gated + bearing-aligned, so it can never adopt a
+    /// *different* street's facility. KEEP IN SYNC WITH web (rescueFacility).
+    private func rescueFacility(
+        _ mid: CLLocationCoordinate2D,
+        routeBearing: Double,
+        cosLat: Double,
+        cx: Int,
+        cy: Int,
+        name: String
+    ) -> RouteClass? {
+        var bestDist = Self.facilityRescueMeters
+        var bestClass: RouteClass?
+        var strongDist = Self.facilityRescueMeters
+        var strongClass: RouteClass?
+        var seen = Set<Int>()
+        for gx in (cx - 1)...(cx + 1) {
+            for gy in (cy - 1)...(cy + 1) {
+                guard let bucket = grid[CellKey(x: gx, y: gy)] else { continue }
+                for idx in bucket {
+                    if !seen.insert(idx).inserted { continue }
+                    let seg = segs[idx]
+                    if seg.name != name { continue }
+                    if Self.angularDelta(routeBearing, seg.bearing) > Self.bearingToleranceDeg {
+                        continue
+                    }
+                    let d = perpDistanceMeters(mid: mid, a: seg.a, b: seg.b, cosLat: cosLat)
+                    if d < bestDist {
+                        bestDist = d
+                        bestClass = seg.cls
+                    }
+                    if Self.isStrongFacility(seg.cls) && d < strongDist {
+                        strongDist = d
+                        strongClass = seg.cls
+                    }
+                }
+            }
+        }
+        // Prefer a separated facility on the corridor (mirrors the main adopt rule).
+        if let strongClass, strongDist <= bestDist + 2 { return strongClass }
+        return bestClass
     }
 
     /// Facility classes with physical separation/calming — a hazard street does
