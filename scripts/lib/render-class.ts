@@ -8,10 +8,10 @@
  * down-rate it to "busy" (red) — the SAME signal the route classifier applies —
  * so the static overlay and the route never disagree, and Lombard/MLK read red
  * on the map before you even route on them. A milder context — a painted lane on
- * a slower arterial or a multi-lane stroad — down-rates only to "caution"
- * (orange): still a lane, just a stressful street, distinct from the red danger
- * signal (see bakeRenderClass). Physically separated facilities (protected /
- * greenway / path) are NEVER down-rated.
+ * a slower arterial — down-rates only to "caution2/3/4" (an orange gradient that
+ * darkens with the arterial's lane count): still a lane, just a stressful street,
+ * distinct from the red danger signal (see bakeRenderClass). Physically separated
+ * facilities (protected / greenway / path) are NEVER down-rated.
  *
  * The downgrade keys off POSTED SPEED only (not the bicycle high-crash layer) so
  * it lines up with the BRouter `safety-ultra` maxspeed penalty, which can only
@@ -72,6 +72,9 @@ interface Seg {
   a: LngLat;
   b: LngLat;
   bearing: number;
+  /** OSM `lanes` count for the source way (0 when untagged). Only populated for
+   * the arterial-lane grid; the fast-speed grid leaves it 0. */
+  lanes: number;
 }
 export type FastGrid = Map<string, Seg[]>;
 
@@ -109,8 +112,8 @@ function perpDistanceM(M: LngLat, a: LngLat, b: LngLat): number {
   return Math.hypot(ax + t * dx, ay + t * dy);
 }
 
-function addSeg(grid: FastGrid, a: LngLat, b: LngLat): void {
-  const seg: Seg = { a, b, bearing: bearing(a, b) };
+function addSeg(grid: FastGrid, a: LngLat, b: LngLat, lanes = 0): void {
+  const seg: Seg = { a, b, bearing: bearing(a, b), lanes };
   const lat0 = Math.floor(Math.min(a[1], b[1]) / CELL);
   const lat1 = Math.floor(Math.max(a[1], b[1]) / CELL);
   const lng0 = Math.floor(Math.min(a[0], b[0]) / CELL);
@@ -163,33 +166,17 @@ export function isOnFast(M: LngLat, brg: number, grid: FastGrid): boolean {
 }
 
 /** Index every arterial feature (arterials.geojson is already filtered to
- * tertiary/secondary/primary/trunk/motorway) into a spatial grid. Reuses the
- * same Seg grid + tolerances as the fast-speed join. */
-export function buildArterialGrid(arterials: FCLike): FastGrid {
+ * tertiary/secondary/primary/trunk/motorway) into a spatial grid, carrying each
+ * way's OSM `lanes` count (0 when untagged) on its segments. Same Seg shape +
+ * tolerances as the fast-speed join; the lane count drives the caution gradient
+ * (see cautionTier / maxLanesAlong). */
+export function buildArterialLaneGrid(arterials: FCLike): FastGrid {
   const grid: FastGrid = new Map();
   for (const feat of arterials.features ?? []) {
+    const raw = Number(feat.properties?.["lanes"]);
+    const lanes = Number.isFinite(raw) ? raw : 0;
     eachLine(feat.geometry, (line) => {
-      for (let i = 0; i < line.length - 1; i++) addSeg(grid, line[i], line[i + 1]);
-    });
-  }
-  return grid;
-}
-
-/** Index only the MULTI-LANE arterials (OSM `lanes` ≥ minLanes) into a spatial
- * grid — the wide stroads whose unprotected bike lanes are stressful regardless
- * of posted speed. Ways without a numeric `lanes` tag are skipped (conservative:
- * an untagged way is never assumed wide). Same Seg shape + tolerances as the
- * other grids. */
-export function buildWideArterialGrid(
-  arterials: FCLike,
-  minLanes = MIN_STROAD_LANES
-): FastGrid {
-  const grid: FastGrid = new Map();
-  for (const feat of arterials.features ?? []) {
-    const lanes = Number(feat.properties?.["lanes"]);
-    if (!Number.isFinite(lanes) || lanes < minLanes) continue;
-    eachLine(feat.geometry, (line) => {
-      for (let i = 0; i < line.length - 1; i++) addSeg(grid, line[i], line[i + 1]);
+      for (let i = 0; i < line.length - 1; i++) addSeg(grid, line[i], line[i + 1], lanes);
     });
   }
   return grid;
@@ -214,64 +201,92 @@ function featureIsFast(geom: FeatureLike["geometry"], grid: FastGrid): boolean {
   return fast;
 }
 
+/** Max OSM `lanes` count of any arterial segment the feature runs along, or -1
+ * if it runs along NO arterial. A feature on an arterial whose `lanes` is
+ * untagged returns 0 (still "on an arterial", just unknown width → lightest
+ * caution tier). Mirrors isOnFast's cell scan + tolerances. */
+function maxLanesAlong(geom: FeatureLike["geometry"], grid: FastGrid): number {
+  let best = -1;
+  eachLine(geom, (line) => {
+    for (let i = 0; i < line.length - 1; i++) {
+      const a = line[i];
+      const b = line[i + 1];
+      const M: LngLat = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      const brg = bearing(a, b);
+      const cellLat = Math.floor(M[1] / CELL);
+      const cellLng = Math.floor(M[0] / CELL);
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const bucket = grid.get(`${cellLat + dy},${cellLng + dx}`);
+          if (!bucket) continue;
+          for (const seg of bucket) {
+            if (bearingDiff(brg, seg.bearing) > BEARING_TOL_DEG) continue;
+            if (perpDistanceM(M, seg.a, seg.b) > THRESHOLD_M) continue;
+            if (seg.lanes > best) best = seg.lanes;
+          }
+        }
+      }
+    }
+  });
+  return best;
+}
+
+/** Lane count → caution render tier (orange gradient; darker = more lanes).
+ * "one more lane is one more lane" — graded rather than a single 4+ cliff. */
+function cautionTier(lanes: number): "caution2" | "caution3" | "caution4" {
+  if (lanes >= MIN_STROAD_LANES) return "caution4";
+  if (lanes === 3) return "caution3";
+  return "caution2";
+}
+
 /**
  * Mutate each bike feature in place, adding `rclass`: the facility `class`,
- * down-rated when the road context makes it stressful. Two down-rate tiers:
+ * down-rated when the road context makes it stressful.
  *
  *   "busy" (red — danger):
- *   1. any unprotected lane (lane/buffered/shared) along a ≥ minMph FAST street.
- *      A painted facility stranded on a 40+ mph road is the danger signal.
+ *   - any unprotected lane (lane/buffered/shared) along a ≥ minMph FAST street.
+ *     A painted facility stranded on a 40+ mph road is the danger signal.
  *
- *   "caution" (orange — a lane, but a stressful street; counts toward coverage):
- *   2. a plain unbuffered lane (PBOT "lane"/BL) along an arterial — the door-zone
- *      collector-lane case (e.g. NE 7th Ave, SE Irving: tertiary, posted ~20 mph
- *      so rule 1 misses it). Buffered lanes (BBL) are spared. Mirrors the BRouter
- *      self-build `weaklane` penalty. Skipped when `arterials` is omitted.
- *   3. any unprotected facility (lane/buffered/shared) along a MULTI-LANE stroad
- *      (OSM `lanes` ≥ MIN_STROAD_LANES) — the 30–35 mph 4–5 lane arterials
- *      (Foster/Powell/Holgate/Lombard) that sit below minMph so rule 1 misses
- *      them, but where even a buffered lane is stranded. Spares calm 2–3 lane
- *      buffered lanes. Skipped when `arterials` is omitted or lacks `lanes` tags.
- *      Same tier as rule 2 so a plain lane and a buffered lane on the SAME stroad
- *      never split colors (which would draw the better facility redder).
+ *   "caution2/3/4" (orange gradient — a lane, but a stressful street; darker as
+ *   the road widens; all count toward route comfort-coverage):
+ *   - a plain unbuffered lane (PBOT "lane"/BL) along an arterial, graded by the
+ *     arterial's OSM `lanes`: ≤2 → caution2, 3 → caution3, 4+ → caution4. The
+ *     door-zone collector-lane case (e.g. NE 7th Ave is 3-lane → caution3; SE
+ *     Irving / NE 16th are 1–2 lane → caution2). Buffered lanes (BBL) are spared
+ *     unless the road is a 4+ lane stroad (below). Mirrors the graded BRouter
+ *     self-build weaklane penalty. Skipped when `arterials` is omitted.
+ *   - any OTHER unprotected facility (buffered/shared) along a MULTI-LANE stroad
+ *     (`lanes` ≥ MIN_STROAD_LANES, e.g. Foster/Powell) → caution4. Spares calm
+ *     2–3 lane buffered lanes. A plain lane on the same stroad already lands on
+ *     caution4 via the gradient above, so the two never split colors.
  *
- * Returns a count summary. Physically separated facilities are never down-rated.
+ * Returns a per-tier count summary. Separated facilities are never down-rated.
  */
 export function bakeRenderClass(
   bikeFeatures: FeatureLike[],
   speeds: FCLike,
   minMph = MIN_FAST_MPH,
   arterials?: FCLike
-): { downgraded: number; downgradedArterial: number; downgradedWide: number; total: number } {
+): { busy: number; caution2: number; caution3: number; caution4: number; total: number } {
   const grid = buildFastSpeedGrid(speeds, minMph);
-  const arterialGrid = arterials ? buildArterialGrid(arterials) : null;
-  const wideGrid = arterials ? buildWideArterialGrid(arterials) : null;
-  let downgraded = 0;
-  let downgradedArterial = 0;
-  let downgradedWide = 0;
+  const arterialGrid = arterials ? buildArterialLaneGrid(arterials) : null;
+  const counts = { busy: 0, caution2: 0, caution3: 0, caution4: 0 };
   for (const f of bikeFeatures) {
     const cls = String(f.properties?.["class"] ?? "");
     let rclass = cls;
     if (cls && !STRONG.has(cls) && featureIsFast(f.geometry, grid)) {
       rclass = "busy";
-      downgraded++;
-    } else if (
-      arterialGrid &&
-      cls === ARTERIAL_DOWNRATE_CLASS &&
-      featureIsFast(f.geometry, arterialGrid)
-    ) {
-      rclass = "caution";
-      downgradedArterial++;
-    } else if (
-      wideGrid &&
-      cls &&
-      !STRONG.has(cls) &&
-      featureIsFast(f.geometry, wideGrid)
-    ) {
-      rclass = "caution";
-      downgradedWide++;
+    } else if (arterialGrid && cls && !STRONG.has(cls)) {
+      const lanes = maxLanesAlong(f.geometry, arterialGrid);
+      if (lanes >= 0) {
+        // On an arterial. A plain painted lane is always down-rated (graded by
+        // width); buffered/shared only on a genuine 4+ lane stroad.
+        if (cls === ARTERIAL_DOWNRATE_CLASS) rclass = cautionTier(lanes);
+        else if (lanes >= MIN_STROAD_LANES) rclass = "caution4";
+      }
     }
     if (f.properties) f.properties["rclass"] = rclass;
+    if (rclass !== cls && rclass in counts) counts[rclass as keyof typeof counts]++;
   }
-  return { downgraded, downgradedArterial, downgradedWide, total: bikeFeatures.length };
+  return { ...counts, total: bikeFeatures.length };
 }

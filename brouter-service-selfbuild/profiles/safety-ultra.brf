@@ -377,8 +377,16 @@ assign isbuffered =
    or cycleway:both:buffer=yes or cycleway:left:buffer=yes cycleway:right:buffer=yes
 assign isweaklane =
    and isclassifiedroad and isplainlane and not isprotectedtrack not isbuffered
+# Graded by lane count — "one more lane is one more lane". A plain door-zone lane
+# on a 3-lane collector (e.g. SE 7th Ave) is worse than on a 2-lane one (NE 16th),
+# and on a 4+ lane stroad worse still (a plain lane "redeems" stroadpenalty via
+# hasrealbikelane, so this is the only width signal it pays). Buckets mirror the
+# coloring caution2/3/4 tiers (scripts/lib/render-class.ts). lanes folds 8..25 → "8".
 assign weaklanepenalty =
-   if isweaklane then 1.0 else 0
+   if not isweaklane then 0
+   else if lanes=4|5|6|7|8 then 2.0
+   else if lanes=3         then 1.5
+   else 1.0
 
 #
 # calculate the cost-factor, which is the factor

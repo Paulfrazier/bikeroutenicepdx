@@ -352,9 +352,15 @@ assign isbuffered =
 assign isweaklane =
    and isclassifiedroad and isplainlane and not isprotectedtrack not isbuffered
 # COMFORT: a gentle nudge onto a parallel greenway; additive + modest so an
-# unavoidable block of 7th still resolves rather than detouring absurdly.
+# unavoidable block of 7th still resolves rather than detouring absurdly. Graded
+# by lane count ("one more lane is one more lane") — 3-lane (SE 7th) costs more
+# than 2-lane (NE 16th), 4+ more still. Buckets mirror the coloring caution2/3/4
+# tiers. lanes folds 8..25 → "8".
 assign weaklanepenalty =
-   if isweaklane then 0.4 else 0
+   if not isweaklane then 0
+   else if lanes=4|5|6|7|8 then 0.9
+   else if lanes=3         then 0.6
+   else 0.4
 
 
 #

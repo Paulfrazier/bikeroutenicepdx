@@ -16,7 +16,9 @@ enum RouteClass: String, Equatable, Sendable {
     case path
     case buffered
     case lane
-    case caution // baked rclass downgrade — painted lane on a stressful arterial/stroad
+    case caution2 // baked rclass — painted lane on a ≤2-lane arterial (light orange)
+    case caution3 // baked rclass — painted lane on a 3-lane arterial (orange)
+    case caution4 // baked rclass — painted lane on a 4+ lane stroad (dark orange)
     case shared
     case quiet   // off-network, no busy arterial nearby — a calm street
     case busy    // off-network AND on/along a busy arterial — the danger signal
@@ -30,7 +32,9 @@ enum RouteClass: String, Equatable, Sendable {
         case .path:      return UIColor(red: 0.706, green: 0.325, blue: 0.035, alpha: 1) // #B45309
         case .buffered:  return UIColor(red: 0.031, green: 0.569, blue: 0.698, alpha: 1) // #0891B2
         case .lane:      return UIColor(red: 0.961, green: 0.620, blue: 0.043, alpha: 1) // #F59E0B
-        case .caution:   return UIColor(red: 0.918, green: 0.345, blue: 0.047, alpha: 1) // #EA580C
+        case .caution2:  return UIColor(red: 0.984, green: 0.573, blue: 0.235, alpha: 1) // #FB923C
+        case .caution3:  return UIColor(red: 0.918, green: 0.345, blue: 0.047, alpha: 1) // #EA580C
+        case .caution4:  return UIColor(red: 0.604, green: 0.204, blue: 0.071, alpha: 1) // #9A3412
         case .shared:    return UIColor(red: 0.612, green: 0.639, blue: 0.686, alpha: 1) // #9CA3AF
         case .quiet:     return UIColor(red: 0.392, green: 0.455, blue: 0.545, alpha: 1) // #64748B
         case .busy:      return UIColor(red: 0.863, green: 0.149, blue: 0.149, alpha: 1) // #DC2626
@@ -53,7 +57,9 @@ enum RouteClass: String, Equatable, Sendable {
         case "path": return .path
         case "buffered": return .buffered
         case "lane": return .lane
-        case "caution": return .caution // baked rclass downgrade — lane on a stressful street
+        case "caution2": return .caution2 // baked rclass — lane on a ≤2-lane arterial
+        case "caution3": return .caution3 // baked rclass — lane on a 3-lane arterial
+        case "caution4": return .caution4 // baked rclass — lane on a 4+ lane stroad
         case "shared": return .shared
         case "busy": return .busy // baked rclass downgrade — fast unprotected lane
         default: return .shared // anything unrecognized

@@ -234,9 +234,9 @@ async function main(): Promise<void> {
         `[rclass] WARN: ${path.relative(REPO_ROOT, arterialsPath)} not found — run export:arterials. Skipping the door-zone-lane-on-arterial down-rate.`
       );
     }
-    const { downgraded, downgradedArterial, downgradedWide } = bakeRenderClass(kept, speeds, MIN_FAST_MPH, arterials);
+    const { busy, caution2, caution3, caution4 } = bakeRenderClass(kept, speeds, MIN_FAST_MPH, arterials);
     console.log(
-      `[rclass] ${downgraded} unprotected lanes on ≥${MIN_FAST_MPH} mph streets → "busy"; ${downgradedArterial} plain unbuffered lanes on arterials + ${downgradedWide} unprotected facilities on ≥${MIN_STROAD_LANES}-lane stroads → "caution"`
+      `[rclass] ${busy} on ≥${MIN_FAST_MPH} mph → "busy"; arterial-lane gradient → caution2 ${caution2} (≤2 lanes) · caution3 ${caution3} (3) · caution4 ${caution4} (≥${MIN_STROAD_LANES})`
     );
   } else {
     console.warn(

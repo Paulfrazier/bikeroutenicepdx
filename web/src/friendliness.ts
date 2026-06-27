@@ -65,8 +65,9 @@ const M_PER_DEG_LAT = 110540;
 
 /**
  * A route segment's category: one of the bike-network facility classes (so the
- * route matches the bike-map legend exactly), the baked "caution" down-rate (a
- * painted lane on a stressful arterial/stroad), plus two off-network states —
+ * route matches the bike-map legend exactly), the baked "caution2/3/4" down-rate
+ * gradient (a painted lane on an arterial, darker as the road widens), plus two
+ * off-network states —
  * "quiet" (calm neighborhood street) and "busy" (the red dashed danger signal).
  */
 export type RouteClass =
@@ -75,7 +76,9 @@ export type RouteClass =
   | "path"
   | "buffered"
   | "lane"
-  | "caution"
+  | "caution2"
+  | "caution3"
+  | "caution4"
   | "shared"
   | "quiet"
   | "busy";
@@ -92,7 +95,9 @@ export const ROUTE_CLASS_COLORS: Record<RouteClass, string> = {
   path: "#B45309",
   buffered: "#0891B2",
   lane: "#F59E0B",
-  caution: "#EA580C",
+  caution2: "#FB923C",
+  caution3: "#EA580C",
+  caution4: "#9A3412",
   shared: "#9CA3AF",
   quiet: "#64748B",
   busy: "#DC2626",
@@ -112,10 +117,11 @@ export interface RouteFriendliness {
 }
 
 /** Normalize a bike-network render class (`rclass`, falling back to `class`) to a
- * known RouteClass. "busy" and "caution" are valid baked values — an unprotected
- * lane the export down-rated (busy = on a ≥40 mph street; caution = a painted lane
- * on a slower arterial/stroad; see scripts/lib/render-class.ts) — so the overlay
- * and the route draw them without any runtime speed lookup. */
+ * known RouteClass. "busy" and "caution2/3/4" are valid baked values — an
+ * unprotected lane the export down-rated (busy = on a ≥40 mph street; caution2/3/4
+ * = a painted lane on an arterial, graded by lane count; see
+ * scripts/lib/render-class.ts) — so the overlay and the route draw them without
+ * any runtime speed lookup. */
 function normalizeClass(cls: string): RouteClass {
   switch (cls) {
     case "protected":
@@ -123,7 +129,9 @@ function normalizeClass(cls: string): RouteClass {
     case "path":
     case "buffered":
     case "lane":
-    case "caution":
+    case "caution2":
+    case "caution3":
+    case "caution4":
     case "shared":
     case "busy":
       return cls;

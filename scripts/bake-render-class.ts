@@ -45,14 +45,14 @@ function main(): void {
     );
   }
 
-  const { downgraded, downgradedArterial, downgradedWide, total } = bakeRenderClass(
+  const { busy, caution2, caution3, caution4, total } = bakeRenderClass(
     bike.features,
     speeds,
     MIN_FAST_MPH,
     arterials
   );
   console.log(
-    `[bake] rclass on ${total} features — ${downgraded} unprotected lanes on ≥${MIN_FAST_MPH} mph streets → "busy"; ${downgradedArterial} plain unbuffered lanes on arterials + ${downgradedWide} unprotected facilities on ≥${MIN_STROAD_LANES}-lane stroads → "caution"`
+    `[bake] rclass on ${total} features — ${busy} on ≥${MIN_FAST_MPH} mph → "busy"; arterial-lane gradient → caution2 ${caution2} (≤2 lanes) · caution3 ${caution3} (3) · caution4 ${caution4} (≥${MIN_STROAD_LANES})`
   );
 
   const json = JSON.stringify(bike);
