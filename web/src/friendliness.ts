@@ -51,11 +51,11 @@ const MIN_RUN_M = 25;
 const CALM_MAX_MPH = 25;
 /** Widened facility-match radius (m) used ONLY to rescue a would-be-"busy"
  * segment when a bike facility ON THE SAME STREET sits just past THRESHOLD_M
- * (PBOT facility geometry is often offset ~20–25 m from the road centerline, so a
+ * (PBOT facility geometry is often offset ~20–35 m from the road centerline, so a
  * real buffered/protected lane gets missed and the street is wrongly painted red).
- * Name-gated, so it can never adopt a different street's facility. (KEEP IN SYNC
- * WITH iOS.) */
-const FACILITY_RESCUE_M = 25;
+ * Name-gated, so a larger radius only catches MORE same-street offsets — it can
+ * never adopt a different street's facility. (KEEP IN SYNC WITH iOS.) */
+const FACILITY_RESCUE_M = 35;
 
 const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
@@ -694,12 +694,15 @@ function rescueFacility(
 ): RouteClass | null {
   const cellLat = Math.floor(M[1] / CELL);
   const cellLng = Math.floor(M[0] / CELL);
+  // The rescue radius can exceed one grid cell (~33 m), so widen the cell scan to
+  // cover it (mirrors nearestStreetName's reach calc).
+  const reach = Math.max(1, Math.ceil(FACILITY_RESCUE_M / (CELL * M_PER_DEG_LAT)));
   let bestDist = FACILITY_RESCUE_M;
   let bestClass: RouteClass | null = null;
   let strongDist = FACILITY_RESCUE_M;
   let strongClass: RouteClass | null = null;
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
+  for (let dy = -reach; dy <= reach; dy++) {
+    for (let dx = -reach; dx <= reach; dx++) {
       const bucket = grid.get(`${cellLat + dy},${cellLng + dx}`);
       if (!bucket) continue;
       for (const seg of bucket) {

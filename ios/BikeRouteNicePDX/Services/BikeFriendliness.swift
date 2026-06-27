@@ -91,11 +91,11 @@ actor BikeFriendliness {
     private static let calmMaxMph = 25
     /// Widened facility-match radius (m) used ONLY to rescue a would-be-`.busy`
     /// segment when a bike facility ON THE SAME STREET sits just past
-    /// `thresholdMeters` (PBOT facility geometry is often offset ~20–25 m from the
+    /// `thresholdMeters` (PBOT facility geometry is often offset ~20–35 m from the
     /// road centerline, so a real lane is missed and the street is wrongly
-    /// reddened). Name-gated, so it can never adopt a different street's facility.
-    /// KEEP IN SYNC WITH web.
-    private static let facilityRescueMeters = 25.0
+    /// reddened). Name-gated, so a larger radius only catches MORE same-street
+    /// offsets — it can never adopt a different street's facility. KEEP IN SYNC WITH web.
+    private static let facilityRescueMeters = 35.0
 
     // MARK: - Index storage
 
@@ -389,8 +389,11 @@ actor BikeFriendliness {
         var strongDist = Self.facilityRescueMeters
         var strongClass: RouteClass?
         var seen = Set<Int>()
-        for gx in (cx - 1)...(cx + 1) {
-            for gy in (cy - 1)...(cy + 1) {
+        // The rescue radius can exceed one grid cell (~33 m), so widen the cell
+        // scan to cover it (mirrors matchArterial/nearestStreetName reach calc).
+        let reach = max(1, Int(ceil(Self.facilityRescueMeters / (Self.cell * 110_540))))
+        for gx in (cx - reach)...(cx + reach) {
+            for gy in (cy - reach)...(cy + reach) {
                 guard let bucket = grid[CellKey(x: gx, y: gy)] else { continue }
                 for idx in bucket {
                     if !seen.insert(idx).inserted { continue }
