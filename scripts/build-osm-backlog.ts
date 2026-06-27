@@ -36,17 +36,33 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RECON = path.join(REPO, "data", "reconciled", "current");
 const OUT = path.join(REPO, "data", "backlog");
 
-type PbotClass = "off_street" | "greenway" | "protected" | "buffered" | "standard";
+type PbotClass =
+  | "off_street"
+  | "greenway"
+  | "protected"
+  | "buffered"
+  | "standard"
+  | "calm" // SR_LT recommended shared roadway (no built facility)
+  | "calm_mod"; // SR_MT recommended shared roadway
 
 /** PBOT class → suggested OSM tags (mirrors build-graph.ts CLASS_TAGS). A
- *  STARTING POINT for human verification, not a blind apply. */
+ *  STARTING POINT for human verification, not a blind apply. The calm classes
+ *  carry a CUSTOM pbot_calm marker (not a real OSM tag) the self-build BRouter
+ *  profiles read for a small graded preference — these are baked into the tiles
+ *  but NEVER pushed to the MapRoulette/upstream-OSM worklist. */
 const SUGGESTED_TAGS: Record<PbotClass, Record<string, string>> = {
   off_street: { cycleway: "track", bicycle: "designated", lcn: "yes" },
   greenway: { cycleway: "track", bicycle: "designated", lcn: "yes" },
   protected: { cycleway: "track", bicycle: "designated" },
   buffered: { cycleway: "lane" },
   standard: { cycleway: "lane" },
+  calm: { pbot_calm: "low" },
+  calm_mod: { pbot_calm: "moderate" },
 };
+
+/** The no-facility recommended-route classes, handled by their own emission path
+ *  (a custom marker for the router) — kept out of the facility presence backlog. */
+const CALM_CLASSES = new Set<PbotClass>(["calm", "calm_mod"]);
 
 interface WayTag {
   bicycle_network_class: PbotClass;
@@ -143,7 +159,7 @@ function main(): void {
   }
 
   interface Gap {
-    type: "presence" | "contraflow";
+    type: "presence" | "contraflow" | "calm";
     osm_way_id: string;
     name: string;
     pbot_class: PbotClass | null;
@@ -167,8 +183,9 @@ function main(): void {
     const f = byId.get(id);
     if (!f?.geometry || f.geometry.type !== "LineString") { presenceMissingGeom++; continue; }
     const p = f.properties ?? {};
-    if (hasBikeTag(p)) continue; // already visible to the router
     const cls = wt.bicycle_network_class;
+    if (CALM_CLASSES.has(cls)) continue; // no-facility recommended route — separate path below
+    if (hasBikeTag(p)) continue; // already visible to the router
     const mismatch = facilityMismatch(cls, p);
     if (mismatch) {
       dropped.push({
@@ -182,6 +199,32 @@ function main(): void {
     gaps.push({
       type: "presence", osm_way_id: id, name: wt.name ?? String(p["name"] ?? ""),
       pbot_class: cls, suggested: SUGGESTED_TAGS[cls] ?? { cycleway: "lane" },
+      geometry: { type: "LineString", coordinates: coords }, lng, lat,
+      length_m: Math.round(wt.length_m),
+    });
+  }
+
+  // ---- CALM: PBOT recommended shared roadways (SR_LT/SR_MT) ----
+  //   These are quiet streets with NO built facility, so we DON'T suggest a bike
+  //   lane/track. Instead we bake a custom pbot_calm=low|moderate marker that ONLY
+  //   the self-build BRouter profiles read, for a small graded preference (calm
+  //   below greenway, calm_mod below calm). Unlike presence/contraflow these are
+  //   NOT real OSM edits, so they're excluded from the MapRoulette/upstream output
+  //   below. We still reject a 2D-snap mislanding onto a freeway/sidewalk.
+  let calmMissingGeom = 0;
+  for (const [id, wt] of Object.entries(wayTags)) {
+    const cls = wt.bicycle_network_class;
+    if (!CALM_CLASSES.has(cls)) continue;
+    const f = byId.get(id);
+    if (!f?.geometry || f.geometry.type !== "LineString") { calmMissingGeom++; continue; }
+    const p = f.properties ?? {};
+    if (FREEWAY.has(String(p["highway"] ?? ""))) continue; // never route-prefer a freeway
+    if (String(p["footway"] ?? "") === "sidewalk") continue; // nor a sidewalk
+    const coords = f.geometry.coordinates;
+    const [lng, lat] = lineMidpoint(coords);
+    gaps.push({
+      type: "calm", osm_way_id: id, name: wt.name ?? String(p["name"] ?? ""),
+      pbot_class: cls, suggested: SUGGESTED_TAGS[cls],
       geometry: { type: "LineString", coordinates: coords }, lng, lat,
       length_m: Math.round(wt.length_m),
     });
@@ -280,7 +323,8 @@ function main(): void {
   fs.writeFileSync(path.join(OUT, "dropped-mismatches.csv"), dropRows.join("\n"));
 
   // MapRoulette: newline-delimited GeoJSON, one task per line (cooperative tag-fix hint in properties).
-  const mr = gaps.map((g) => JSON.stringify({
+  // Calm gaps are EXCLUDED — pbot_calm is a local router marker, not a real OSM edit to push upstream.
+  const mr = gaps.filter((g) => g.type !== "calm").map((g) => JSON.stringify({
     type: "FeatureCollection",
     features: [{ type: "Feature", properties: {
       osmid: `way/${g.osm_way_id}`, gap: g.type, name: g.name,
@@ -295,6 +339,9 @@ function main(): void {
   // Summary + SE 17th focus.
   const presence = gaps.filter((g) => g.type === "presence");
   const contraflow = gaps.filter((g) => g.type === "contraflow");
+  const calm = gaps.filter((g) => g.type === "calm");
+  const calmByClass: Record<string, number> = {};
+  for (const g of calm) calmByClass[g.pbot_class ?? "?"] = (calmByClass[g.pbot_class ?? "?"] ?? 0) + 1;
   const byClass: Record<string, number> = {};
   for (const g of presence) byClass[g.pbot_class ?? "?"] = (byClass[g.pbot_class ?? "?"] ?? 0) + 1;
   const se17 = gaps.filter((g) => /(^|\b)(SE |Southeast )?17th/i.test(g.name) && /17th/i.test(g.name));
@@ -305,6 +352,9 @@ function main(): void {
     presence_gaps: presence.length,
     presence_by_class: byClass,
     contraflow_gaps: contraflow.length,
+    calm_gaps: calm.length,
+    calm_by_class: calmByClass,
+    calm_missing_geometry: calmMissingGeom,
     presence_dropped_mismatch: dropped.length,
     presence_dropped_by_reason: dropByReason,
     presence_missing_geometry: presenceMissingGeom,
@@ -317,6 +367,7 @@ function main(): void {
   console.log(`[backlog] PRESENCE gaps: ${presence.length}  ${JSON.stringify(byClass)}`);
   console.log(`[backlog] DROPPED (2D-snap mismatch, not baked): ${dropped.length}  ${JSON.stringify(dropByReason)} -> data/backlog/dropped-mismatches.csv`);
   console.log(`[backlog] CONTRAFLOW gaps: ${contraflow.length}  streets: ${summary.contraflow_streets.slice(0, 8).join(", ")}`);
+  console.log(`[backlog] CALM gaps (pbot_calm marker, router-only): ${calm.length}  ${JSON.stringify(calmByClass)}`);
   console.log(`[backlog] SE 17th gaps: ${se17.length}`);
   console.log(`[backlog] wrote osm-gaps.geojson / .csv / maproulette.geojson / summary.json → data/backlog/`);
 }

@@ -474,6 +474,8 @@ cycleway:right:buffer;0000000001 yes
 cycleway:right:buffer;0000000001 no
 cycleway:left:buffer;0000000001 yes
 cycleway:left:buffer;0000000001 no
+pbot_calm;0000000001 low
+pbot_calm;0000000001 moderate
 
 incline;0000052784 up
 incline;0000035413 down

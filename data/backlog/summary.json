@@ -9,6 +9,12 @@
     "standard": 676
   },
   "contraflow_gaps": 1,
+  "calm_gaps": 3082,
+  "calm_by_class": {
+    "calm": 2679,
+    "calm_mod": 403
+  },
+  "calm_missing_geometry": 0,
   "presence_dropped_mismatch": 263,
   "presence_dropped_by_reason": {
     "freeway carriageway (highway=trunk_link)": 2,
@@ -25,8 +31,39 @@
     "off_street facility on motor road (highway=tertiary)": 3
   },
   "presence_missing_geometry": 0,
-  "se17th_gaps": 0,
-  "se17th_examples": [],
+  "se17th_gaps": 13,
+  "se17th_examples": [
+    {
+      "way": "5522166",
+      "gap": "calm",
+      "suggested": "pbot_calm=low"
+    },
+    {
+      "way": "5525325",
+      "gap": "calm",
+      "suggested": "pbot_calm=low"
+    },
+    {
+      "way": "141553012",
+      "gap": "calm",
+      "suggested": "pbot_calm=low"
+    },
+    {
+      "way": "5522164",
+      "gap": "calm",
+      "suggested": "pbot_calm=low"
+    },
+    {
+      "way": "415635484",
+      "gap": "calm",
+      "suggested": "pbot_calm=low"
+    },
+    {
+      "way": "5520222",
+      "gap": "calm",
+      "suggested": "pbot_calm=low"
+    }
+  ],
   "contraflow_streets": [
     "Southwest Naito Parkway"
   ]

@@ -105,7 +105,9 @@ type NormalizedClass =
   | "greenway"
   | "protected"
   | "buffered"
-  | "standard";
+  | "standard"
+  | "calm" // SR_LT — recommended low-traffic shared roadway (no built facility)
+  | "calm_mod"; // SR_MT — recommended moderate-traffic shared roadway
 
 /**
  * Maps a source classification value to our internal NormalizedClass.
@@ -121,6 +123,8 @@ const CLASS_MAP: Record<string, NormalizedClass> = {
   lane: "standard",
   shared: "standard",
   path: "off_street",
+  calm: "calm", // SR_LT recommended shared roadway
+  calm_mod: "calm_mod", // SR_MT recommended shared roadway
   // legacy PBOT FacilityType values
   "neighborhood greenway": "greenway",
   "protected bike lane": "protected",
@@ -285,6 +289,12 @@ const CLASS_TAGS: Record<NormalizedClass, Record<string, string>> = {
   protected: { cycleway: "track", bicycle: "designated" },
   buffered: { cycleway: "lane" },
   standard: { cycleway: "lane" },
+  // calm classes carry NO facility tag (no lane/track exists on these recommended
+  // quiet streets — tagging cycleway= would fake infrastructure). Instead a custom
+  // marker the self-build BRouter profiles read for a small graded preference
+  // (pbot_calm=low < greenway; pbot_calm=moderate < low). Decoded via lookups.dat.
+  calm: { pbot_calm: "low" },
+  calm_mod: { pbot_calm: "moderate" },
 };
 
 function runOsmium(args: string[], label: string): void {
@@ -546,13 +556,18 @@ function spatialJoin(
   const wayTags: WayTagMap = new Map();
   const lcnWays: Feature[] = [];
 
-  // Priority order: off_street > greenway > protected > buffered > standard
+  // Priority order: off_street > greenway > protected > buffered > standard >
+  // calm > calm_mod. A real built facility (incl. a plain lane = "standard")
+  // always wins over a no-facility recommended shared roadway, so a street that
+  // is BOTH a facility and SR-recommended keeps its facility class.
   const classPriority: Record<NormalizedClass, number> = {
-    off_street: 5,
-    greenway: 4,
-    protected: 3,
-    buffered: 2,
-    standard: 1,
+    off_street: 7,
+    greenway: 6,
+    protected: 5,
+    buffered: 4,
+    standard: 3,
+    calm: 2,
+    calm_mod: 1,
   };
 
   const classCounters: Record<NormalizedClass, number> = {
@@ -561,6 +576,8 @@ function spatialJoin(
     protected: 0,
     buffered: 0,
     standard: 0,
+    calm: 0,
+    calm_mod: 0,
   };
 
   // Pre-index difficult crossings as turf points for distance checks

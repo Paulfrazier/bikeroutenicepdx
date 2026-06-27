@@ -48,8 +48,11 @@ export const MIN_FAST_MPH = 40;
  * its rank above a no-facility calm collector. */
 export const MIN_STROAD_LANES = 4;
 
-/** Facility classes that are physically separated/calmed — never down-rated. */
-const STRONG = new Set(["protected", "greenway", "path"]);
+/** Facility classes that are physically separated/calmed — never down-rated.
+ * `calm`/`calm_mod` (PBOT SR_LT/SR_MT shared roadways) are quiet-by-definition
+ * recommended streets with no facility to "strand" on a stroad, so the speed/
+ * arterial down-rate doesn't apply — they keep their class as rclass. */
+const STRONG = new Set(["protected", "greenway", "path", "calm", "calm_mod"]);
 
 /** The one weak facility we down-rate when it runs ALONG an arterial: a plain
  * unbuffered painted lane (PBOT "BL"). A buffered lane ("buffered"/BBL) is a

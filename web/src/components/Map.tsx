@@ -238,8 +238,10 @@ function pointFeature(at: LngLat): GeoJSON.Feature {
 const LEGEND_ITEMS = [
   { cls: "protected", color: ROUTE_CLASS_COLORS.protected, label: "Protected bike lane",      dashed: false },
   { cls: "greenway",  color: ROUTE_CLASS_COLORS.greenway,  label: "Neighborhood greenway",    dashed: false },
+  { cls: "calm",      color: ROUTE_CLASS_COLORS.calm,      label: "Quiet street (recommended)",       dashed: true  },
   { cls: "path",      color: ROUTE_CLASS_COLORS.path,      label: "Off-street path",          dashed: false },
   { cls: "buffered",  color: ROUTE_CLASS_COLORS.buffered,  label: "Buffered bike lane",       dashed: false },
+  { cls: "calm_mod",  color: ROUTE_CLASS_COLORS.calm_mod,  label: "Quiet-ish street (recommended)",   dashed: true  },
   { cls: "lane",      color: ROUTE_CLASS_COLORS.lane,      label: "Bike lane",                dashed: false },
   { cls: "caution2",  color: ROUTE_CLASS_COLORS.caution2,  label: "Bike lane · 2-lane arterial",   dashed: false },
   { cls: "caution3",  color: ROUTE_CLASS_COLORS.caution3,  label: "Bike lane · 3-lane arterial",   dashed: false },
@@ -553,16 +555,27 @@ export function Map({
         data: "/bike-network.geojson",
       });
 
-      // Layer 1 — dashed: shared roadways (gray) + fast-street lanes (red), bottom.
+      // Layer 1 — dashed: shared roadways (gray), fast-street lanes (red), and the
+      // recommended-but-unbuilt calm/calm_mod streets (sage/olive). Bottom.
+      // Filter reuses ROUTE_CLASS_DASHED so the overlay's dashed set can never
+      // drift from the route line's.
       map.addLayer({
         id: "bike-network-shared",
         type: "line",
         source: "bike-network",
-        filter: ["in", ["get", "rclass"], ["literal", ["shared", "busy"]]],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        filter: ["in", ["get", "rclass"], ["literal", [...ROUTE_CLASS_DASHED]]] as any,
         layout: { "line-cap": "butt", "line-join": "round" },
         paint: {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          "line-color": ["match", ["get", "rclass"], "busy", "#DC2626", "#9CA3AF"] as any,
+          "line-color": [
+            "match",
+            ["get", "rclass"],
+            "busy", ROUTE_CLASS_COLORS.busy,
+            "calm", ROUTE_CLASS_COLORS.calm,
+            "calm_mod", ROUTE_CLASS_COLORS.calm_mod,
+            ROUTE_CLASS_COLORS.shared,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ] as any,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1, 16, 2.5] as any,
           "line-dasharray": [4, 3],
@@ -570,12 +583,13 @@ export function Map({
         },
       });
 
-      // Layer 2 — solid facilities (everything but the dashed shared/busy), color by rclass
+      // Layer 2 — solid facilities (everything but the dashed set), color by rclass
       map.addLayer({
         id: "bike-network-solid",
         type: "line",
         source: "bike-network",
-        filter: ["!", ["in", ["get", "rclass"], ["literal", ["shared", "busy"]]]],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        filter: ["!", ["in", ["get", "rclass"], ["literal", [...ROUTE_CLASS_DASHED]]]] as any,
         layout: {
           "line-cap": "round",
           "line-join": "round",

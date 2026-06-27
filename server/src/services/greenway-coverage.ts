@@ -29,11 +29,15 @@ export type NetworkClass =
   | "greenway"
   | "protected"
   | "buffered"
+  | "calm"
   | "standard";
 
 /**
  * Greenway-equivalent classes — kept in sync with tests/routes/run.ts
  * (computeCoverage's GREENWAY_CLASSES). These count toward greenway_coverage.
+ * `calm` (PBOT SR_LT/SR_MT recommended shared roadways) is deliberately EXCLUDED:
+ * it's a quiet street with no built facility, reported separately as
+ * `calm_coverage`, never folded into greenway_coverage.
  */
 export const GREENWAY_EQUIVALENT: ReadonlySet<NetworkClass> = new Set<NetworkClass>([
   "off_street",
@@ -41,12 +45,19 @@ export const GREENWAY_EQUIVALENT: ReadonlySet<NetworkClass> = new Set<NetworkCla
   "protected",
 ]);
 
-/** bike-network.geojson display class → harness NetworkClass. */
+/** Recommended calm shared-roadway classes (SR_LT/SR_MT) — drive `calm_coverage`,
+ * tracked separately from greenway coverage. */
+export const CALM_CLASSES: ReadonlySet<NetworkClass> = new Set<NetworkClass>(["calm"]);
+
+/** bike-network.geojson display class → harness NetworkClass. Both calm display
+ * classes (SR_LT→calm, SR_MT→calm_mod) collapse to one `calm` coverage bucket. */
 const DISPLAY_TO_CLASS: Record<string, NetworkClass> = {
   greenway: "greenway",
   path: "off_street",
   protected: "protected",
   buffered: "buffered",
+  calm: "calm",
+  calm_mod: "calm",
   lane: "standard",
   shared: "standard",
 };

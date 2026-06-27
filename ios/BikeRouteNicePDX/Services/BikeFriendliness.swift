@@ -14,6 +14,8 @@ enum RouteClass: String, Equatable, Sendable {
     case protected
     case greenway
     case path
+    case calm     // SR_LT — recommended low-traffic shared roadway (no built facility)
+    case calm_mod // SR_MT — recommended moderate-traffic shared roadway
     case buffered
     case lane
     case caution2 // baked rclass — painted lane on a ≤2-lane arterial (light orange)
@@ -30,6 +32,8 @@ enum RouteClass: String, Equatable, Sendable {
         case .protected: return UIColor(red: 0.427, green: 0.157, blue: 0.851, alpha: 1) // #6D28D9
         case .greenway:  return UIColor(red: 0.180, green: 0.620, blue: 0.282, alpha: 1) // #2E9E48
         case .path:      return UIColor(red: 0.706, green: 0.325, blue: 0.035, alpha: 1) // #B45309
+        case .calm:      return UIColor(red: 0.498, green: 0.690, blue: 0.412, alpha: 1) // #7FB069
+        case .calm_mod:  return UIColor(red: 0.639, green: 0.694, blue: 0.541, alpha: 1) // #A3B18A
         case .buffered:  return UIColor(red: 0.031, green: 0.569, blue: 0.698, alpha: 1) // #0891B2
         case .lane:      return UIColor(red: 0.961, green: 0.620, blue: 0.043, alpha: 1) // #F59E0B
         case .caution2:  return UIColor(red: 0.984, green: 0.573, blue: 0.235, alpha: 1) // #FB923C
@@ -43,7 +47,9 @@ enum RouteClass: String, Equatable, Sendable {
 
     /// Shared roadways mirror the overlay's dashed style; busy is the dashed
     /// danger signal. Everything else renders solid.
-    var dashed: Bool { self == .shared || self == .busy }
+    var dashed: Bool {
+        self == .shared || self == .busy || self == .calm || self == .calm_mod
+    }
 
     /// Normalize a raw bike-network `class` (or `rclass`) value to a known
     /// facility class. `rclass` may carry `"busy"` when the data has already
@@ -55,6 +61,8 @@ enum RouteClass: String, Equatable, Sendable {
         case "protected": return .protected
         case "greenway": return .greenway
         case "path": return .path
+        case "calm": return .calm
+        case "calm_mod": return .calm_mod
         case "buffered": return .buffered
         case "lane": return .lane
         case "caution2": return .caution2 // baked rclass — lane on a ≤2-lane arterial

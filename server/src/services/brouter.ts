@@ -18,6 +18,7 @@ import type { RouteResult, RouteStep } from "./valhalla.js";
 import {
   classifyPoint,
   isGreenwayEquivalent,
+  CALM_CLASSES,
   type NetworkClass,
 } from "./greenway-coverage.js";
 
@@ -172,6 +173,8 @@ export async function getRouteBrouter(
     duration_s,
     greenway_coverage:
       totalForCoverage > 0 ? fallback.greenwayMeters / totalForCoverage : 0,
+    calm_coverage:
+      totalForCoverage > 0 ? fallback.calmMeters / totalForCoverage : 0,
   };
 }
 
@@ -189,10 +192,12 @@ function sumLength(coords: [number, number][]): number {
 function buildSteps(coords: [number, number][]): {
   steps: RouteStep[];
   greenwayMeters: number;
+  calmMeters: number;
 } {
   const steps: RouteStep[] = [];
   let greenwayMeters = 0;
-  if (coords.length < 2) return { steps, greenwayMeters };
+  let calmMeters = 0;
+  if (coords.length < 2) return { steps, greenwayMeters, calmMeters };
 
   let runClass: NetworkClass | null = null;
   let runMeters = 0;
@@ -223,6 +228,7 @@ function buildSteps(coords: [number, number][]): {
       classifyPoint(a[0], a[1]) ??
       classifyPoint(b[0], b[1]);
     if (isGreenwayEquivalent(cls)) greenwayMeters += segLen;
+    if (cls !== null && CALM_CLASSES.has(cls)) calmMeters += segLen;
 
     if (!started) {
       started = true;
@@ -239,5 +245,5 @@ function buildSteps(coords: [number, number][]): {
     }
   }
   flush(true);
-  return { steps, greenwayMeters };
+  return { steps, greenwayMeters, calmMeters };
 }

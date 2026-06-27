@@ -362,6 +362,21 @@ assign weaklanepenalty =
    else if lanes=3         then 0.6
    else 0.4
 
+# PBOT SHARED ROADWAY (SELF-BUILD ONLY): SR_LT (pbot_calm=low) and SR_MT
+# (pbot_calm=moderate) are PBOT-recommended quiet streets with NO built facility
+# (baked by build-osm-backlog.ts as the custom pbot_calm marker; decoded only on
+# self-built tiles via lookups.dat). Nudge the router ONTO them — but LESS than a
+# greenway, which is costfactor 1.0 via is_ldcr. A small NEGATIVE cost: SR_LT the
+# bigger nudge, SR_MT half. Applied ONLY on the calm street classes
+# (residential/living/unclassified) so the summed costfactor stays >= 1. Mirrors
+# the coloring calm/calm_mod hierarchy (just-below-greenway / below-that).
+assign iscalmbase = or highway=residential|living_street|unclassified living_street=yes
+assign pbotcalmbonus =
+   if not iscalmbase then 0
+   else if pbot_calm=low      then -0.10
+   else if pbot_calm=moderate then -0.05
+   else 0
+
 
 #
 # calculate the cost-factor, which is the factor
@@ -400,6 +415,7 @@ assign costfactor
   add stroadpenalty        # 4-lane no-bike-lane hazard
   add fastnolane           # >25mph + no physical bike lane
   add weaklanepenalty      # plain unbuffered door-zone lane on a classified street
+  add pbotcalmbonus        # PBOT SR_LT/SR_MT recommended-quiet-street preference (negative)
 
   #
   # apply oneway-and access-penalties

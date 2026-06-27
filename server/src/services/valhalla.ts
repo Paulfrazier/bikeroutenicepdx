@@ -40,6 +40,10 @@ export interface RouteResult {
   distance_m: number;
   duration_s: number;
   greenway_coverage: number;
+  /** Share of distance on PBOT recommended calm shared roadways (SR_LT/SR_MT).
+   * Tracked separately from greenway_coverage; optional so other engines/
+   * synthesizers that don't compute it can omit it. */
+  calm_coverage?: number;
 }
 
 // ---------------------------------------------------------------------------

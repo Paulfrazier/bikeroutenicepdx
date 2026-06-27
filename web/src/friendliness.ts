@@ -74,6 +74,8 @@ export type RouteClass =
   | "protected"
   | "greenway"
   | "path"
+  | "calm" // SR_LT — recommended low-traffic shared roadway (no built facility)
+  | "calm_mod" // SR_MT — recommended moderate-traffic shared roadway
   | "buffered"
   | "lane"
   | "caution2"
@@ -93,6 +95,12 @@ export const ROUTE_CLASS_COLORS: Record<RouteClass, string> = {
   protected: "#6D28D9",
   greenway: "#2E9E48",
   path: "#B45309",
+  // Shared-roadway recommended quiet streets (PBOT SR_LT/SR_MT): a sage→olive
+  // step down from greenway's vivid green, signalling "calm but no built
+  // facility". calm (SR_LT) sits just below greenway; calm_mod (SR_MT) a notch
+  // lower. Both dashed (no physical facility) — see ROUTE_CLASS_DASHED.
+  calm: "#7FB069",
+  calm_mod: "#A3B18A",
   buffered: "#0891B2",
   lane: "#F59E0B",
   caution2: "#FB923C",
@@ -103,8 +111,14 @@ export const ROUTE_CLASS_COLORS: Record<RouteClass, string> = {
   busy: "#DC2626",
 };
 
-/** Route classes drawn dashed (shared mirrors the overlay; busy = danger). */
-export const ROUTE_CLASS_DASHED: readonly RouteClass[] = ["shared", "busy"];
+/** Route classes drawn dashed (shared mirrors the overlay; busy = danger; calm/
+ * calm_mod are recommended streets with no built facility, so dashed too). */
+export const ROUTE_CLASS_DASHED: readonly RouteClass[] = [
+  "shared",
+  "busy",
+  "calm",
+  "calm_mod",
+];
 
 /** The only class excluded from the comfort-coverage fraction. */
 export const DANGER_CLASS: RouteClass = "busy";
@@ -127,6 +141,8 @@ function normalizeClass(cls: string): RouteClass {
     case "protected":
     case "greenway":
     case "path":
+    case "calm":
+    case "calm_mod":
     case "buffered":
     case "lane":
     case "caution2":
