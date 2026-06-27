@@ -754,6 +754,14 @@ button {
   background: rgba(0, 0, 0, 0.04);
 }
 
+/* Draw-mode pause toggle, lit while panning the map instead of drawing. */
+.build-controls__btn--active,
+.build-controls__btn--active:hover:not(:disabled) {
+  color: #fff;
+  background: var(--color-accent, #16a34a);
+  border-color: var(--color-accent, #16a34a);
+}
+
 .build-controls__btn:disabled {
   opacity: 0.45;
   cursor: default;

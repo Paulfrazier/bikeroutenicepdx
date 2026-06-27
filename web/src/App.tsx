@@ -90,6 +90,10 @@ export default function App() {
   // it overrides the BRouter auto-route. Persists across endpoint tweaks.
   const [drawnStrokes, setDrawnStrokes] = useState<ManualSegment[]>([]);
   const [drawMode, setDrawMode] = useState(false);
+  // Draw "pause": while on, the drag gesture pans/zooms the map instead of
+  // painting a stroke, so you can reposition mid-draw and then resume. Resets
+  // whenever Draw turns off (see effect below).
+  const [drawPaused, setDrawPaused] = useState(false);
   // Guided-draw ("Build") mode: tap the map to append pass-through waypoints one
   // at a time (router auto-snaps the path between them), tap a pin to remove it.
   // Unlike drag mode (arc-length insertion), Build APPENDS in tap order.
@@ -291,6 +295,11 @@ export default function App() {
     clearCorridorPick();
   }, [from, to, clearCorridorPick]);
 
+  // Pause is a Draw-only sub-state; never let it leak past leaving Draw mode.
+  useEffect(() => {
+    if (!drawMode) setDrawPaused(false);
+  }, [drawMode]);
+
   // ── Route ──────────────────────────────────────────────────────────────────
   // Greenway-vs-speed tier (Ultra ↔ Fast). Persisted; changing it re-routes.
   const [preference, setPreference] = useState<RoutePreference>(
@@ -324,6 +333,13 @@ export default function App() {
   // re-splice whenever the store version changes, so a freshly drawn/deleted fix
   // updates the line at once.
   const activeCoords = useMemo<LngLat[] | null>(() => {
+    // From-scratch canvas: until the user has drawn a stroke (Draw) or dropped a
+    // waypoint (Build), show no route line — only the start/end pins + overlay.
+    const blankCanvas =
+      !nav.navigating &&
+      ((drawMode && drawnStrokes.length === 0) ||
+        (buildMode && vias.length === 0));
+    if (blankCanvas) return null;
     // A fully hand-drawn route (Draw mode) overrides everything: the snapped
     // strokes joined by straight bridges to the pins ARE the route.
     if (!nav.navigating && drawnStrokes.length > 0 && from && to) {
@@ -337,7 +353,7 @@ export default function App() {
     return splices.length ? applyManualSegments(auto, splices) : auto;
     // connectorsVersion gates re-splicing on store changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayRoute, drawnStrokes, from, to, nav.navigating, connectorsVersion]);
+  }, [displayRoute, drawnStrokes, vias, drawMode, buildMode, from, to, nav.navigating, connectorsVersion]);
 
   // Once anything is spliced (a hand-drawn stretch or a connector) the server
   // distance no longer matches — measure the displayed geometry instead. When no
@@ -776,6 +792,8 @@ export default function App() {
               onUndoStroke={handleUndoStroke}
               onClearStrokes={handleClearStrokes}
               strokeCount={drawnStrokes.length}
+              drawPaused={drawPaused}
+              onTogglePause={() => setDrawPaused((p) => !p)}
               canRestore={!!preResetSnapshot}
               steps={drawnStrokes.length > 0 ? [] : route.steps}
               onStepClick={handleStepClick}
@@ -819,6 +837,7 @@ export default function App() {
           onToggleVia={handleToggleVia}
           onMoveEndpoint={handleMoveEndpoint}
           drawMode={drawMode}
+          drawPaused={drawPaused}
           drawnStrokes={drawnStrokes}
           onDrawStroke={handleDrawStroke}
           onStrokeNudge={handleStrokeNudge}
@@ -950,6 +969,8 @@ export default function App() {
                 onUndoStroke={handleUndoStroke}
                 onClearStrokes={handleClearStrokes}
                 strokeCount={drawnStrokes.length}
+                drawPaused={drawPaused}
+                onTogglePause={() => setDrawPaused((p) => !p)}
                 canRestore={!!preResetSnapshot}
                 steps={drawnStrokes.length > 0 ? [] : route.steps}
                 onStepClick={handleStepClick}

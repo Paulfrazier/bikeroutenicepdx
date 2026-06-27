@@ -113,6 +113,10 @@ final class RouteStore {
 
     // Draw mode
     var isDrawMode = false
+    /// When true the map pans/zooms on drag in Draw mode instead of drawing — the
+    /// "✋ Move map / ✏️ Draw" toggle. Reset on entering Draw and on exiting reshape
+    /// modes. Mirrors the web `drawPaused`.
+    var isDrawPaused = false
     /// True while the rider is building a CONNECTOR (a saved global map-fix) by
     /// TAPPING nodes onto the map. Unlike manual draw (`isDrawMode`, freehand pan)
     /// the map stays interactive and each tap appends a node to `connectorPoints`;
@@ -480,6 +484,14 @@ final class RouteStore {
     ///      straight bridges to the pins (`assembleDrawnRoute`), overriding auto.
     ///   2. Otherwise → the auto route with qualifying connectors spliced in.
     private func recomputeDisplay() async {
+        // From-scratch canvas: until the rider draws a stroke (Draw) or drops a
+        // waypoint (Build), show no route line — only the start/end pins + network
+        // overlay. Mirrors web `blankCanvas`; the web `!nav.navigating` clause is
+        // implicit here because neither reshape mode is ever active while navigating.
+        if (isDrawMode && manualSegments.isEmpty) || (isBuildMode && vias.isEmpty) {
+            snapped = nil
+            return
+        }
         // A fully hand-drawn route (Draw strokes) overrides everything.
         if !manualSegments.isEmpty, let startC = start?.coordinate, let endC = end?.coordinate {
             let coords = GeoMath.assembleDrawnRoute(
@@ -546,11 +558,17 @@ final class RouteStore {
         isCorridorMode = false
         clearCorridorPick()
         isDrawMode = true
+        isDrawPaused = false
         drawnTrace = []
         errorMessage = nil
         isManuallyEdited = false
         phase = .routed
+        // Blank the route line on entry (web `blankCanvas`): reroute when custom
+        // work was wiped (keeps autoRoute fresh for the duration fallback), else
+        // recompute directly — both land on the empty-canvas guard until the first
+        // stroke, so the old auto line disappears immediately.
         if hadCustom { Task { await rerouteKeepingPhase() } }
+        else { Task { await recomputeDisplay() } }
     }
 
     /// Enter CONNECTOR-build mode: TAP nodes onto the map to trace a fix, which is
@@ -1000,7 +1018,10 @@ final class RouteStore {
         clearCorridorPick()
         isBuildMode = true
         isManuallyEdited = false
+        // Blank the route line on entry (web `blankCanvas`) until the first
+        // waypoint — see enterDrawMode for the reroute-vs-recompute split.
         if hadCustom { Task { await rerouteKeepingPhase() } }
+        else { Task { await recomputeDisplay() } }
     }
 
     /// Leave all reshape modes (drag/draw/corridor/build) — backs the grouped
@@ -1010,6 +1031,7 @@ final class RouteStore {
         isEditMode = false
         isBuildMode = false
         isDrawMode = false
+        isDrawPaused = false
         isCorridorMode = false
         preResetSnapshot = nil
         clearCorridorPick()

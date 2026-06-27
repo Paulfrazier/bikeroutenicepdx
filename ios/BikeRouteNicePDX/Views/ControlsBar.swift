@@ -399,7 +399,7 @@ struct ControlsBar: View {
             return "Starts fresh from your start & end. Tap the map to add waypoints; drag a pin to move it, tap a pin to remove it."
         }
         if store.isDrawMode {
-            return "Starts fresh from your start & end. Draw the route in strokes (they snap to roads) — lift and continue where you left off. Drag a point to adjust."
+            return "Starts fresh from your start & end. Draw the route in strokes (they snap to roads) — lift and continue where you left off. Tap “Move map” to pan/zoom, then resume. Drag a point to adjust."
         }
         if store.isEditMode {
             return "Drag the route on the map to reshape it — it re-snaps to roads."
@@ -423,16 +423,31 @@ struct ControlsBar: View {
         )
     }
 
-    /// Draw-mode controls: stroke count + Undo (drop last stroke, or undo the wipe
-    /// when empty) + Clear.
+    /// Draw-mode controls: a "✋ Move map / ✏️ Draw" pause toggle (pan/zoom ⇄ draw)
+    /// above the stroke count + Undo (drop last stroke, or undo the wipe when empty)
+    /// + Clear. Mirrors the web RouteDrawer toggle + hint.
     private var drawControlsRow: some View {
-        countControls(
-            count: store.manualSegments.count,
-            noun: "stroke",
-            canRestore: store.canRestoreSnapshot,
-            undo: { Task { await store.undoDrawnStroke() } },
-            clear: { Task { await store.clearDrawnStrokes() } }
-        )
+        VStack(spacing: 8) {
+            Button {
+                store.isDrawPaused.toggle()
+            } label: {
+                Label(
+                    store.isDrawPaused ? "Draw" : "Move map",
+                    systemImage: store.isDrawPaused ? "pencil" : "hand.draw"
+                )
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(store.isDrawPaused ? .accentColor : nil)
+            countControls(
+                count: store.manualSegments.count,
+                noun: "stroke",
+                canRestore: store.canRestoreSnapshot,
+                undo: { Task { await store.undoDrawnStroke() } },
+                clear: { Task { await store.clearDrawnStrokes() } }
+            )
+        }
     }
 
     /// Shared count + Undo (drop last) + Clear (drop all) row for Build/Draw.

@@ -352,6 +352,9 @@ interface MapProps {
   /** Draw mode: a finger/mouse stroke on the map becomes a snapped route
    * segment. Resumable — lift and the next stroke picks up from the pen. */
   drawMode: boolean;
+  /** Draw "pause": while true, a drag pans/zooms the map instead of painting a
+   * stroke, so the user can reposition mid-draw and then resume. */
+  drawPaused: boolean;
   /** Hand-drawn strokes that make up the drawn route (App snaps each via /match).
    * Their vertices are draggable; the last vertex is the resume "pen". */
   drawnStrokes: ManualSegment[];
@@ -401,6 +404,7 @@ export function Map({
   onToggleVia,
   onMoveEndpoint,
   drawMode,
+  drawPaused,
   drawnStrokes,
   onDrawStroke,
   onStrokeNudge,
@@ -457,6 +461,7 @@ export function Map({
   const editingRef = useRef(editing);
   const buildModeRef = useRef(buildMode);
   const drawModeRef = useRef(drawMode);
+  const drawPausedRef = useRef(drawPaused);
   const corridorModeRef = useRef(corridorMode);
   const connectorDrawModeRef = useRef(connectorDrawMode);
   const viasRef = useRef(vias);
@@ -483,6 +488,7 @@ export function Map({
     editingRef.current = editing;
     buildModeRef.current = buildMode;
     drawModeRef.current = drawMode;
+    drawPausedRef.current = drawPaused;
     corridorModeRef.current = corridorMode;
     connectorDrawModeRef.current = connectorDrawMode;
     viasRef.current = vias;
@@ -1159,8 +1165,9 @@ export function Map({
       }
 
       // Draw mode: grab a stroke vertex to nudge it, else start a (resumable)
-      // stroke — the pen continues from where the last stroke ended.
-      if (drawModeRef.current) {
+      // stroke — the pen continues from where the last stroke ended. While
+      // paused, fall through so the press pans/zooms the map (default dragPan).
+      if (drawModeRef.current && !drawPausedRef.current) {
         const manual = manualHitPx(point);
         if (manual) startVertexNudge(manual, e);
         else startDrawStroke("segment", e);
@@ -1226,6 +1233,9 @@ export function Map({
           return;
         }
       }
+      // Draw mode owns the gesture: drawing is a drag and panning-while-paused
+      // is a drag, so a bare tap is inert — never let it drop a from/to pin.
+      if (drawModeRef.current) return;
       onMapClickRef.current([e.lngLat.lng, e.lngLat.lat]);
     });
 

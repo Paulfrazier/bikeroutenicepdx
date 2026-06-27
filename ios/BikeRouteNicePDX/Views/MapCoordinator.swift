@@ -138,7 +138,9 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         // Lock map interaction while drawing (Draw mode) so our pan gesture owns the
         // touch. Draw is the only freehand mode now (the old Build+Snap-off sketch
         // is retired); taps are disabled so a drag isn't read as a waypoint tap.
-        let freehand = store.isDrawMode
+        // While Draw is PAUSED ("✋ Move map") the pan gesture stands down so the map
+        // scrolls/zooms normally; taps stay inert (handleTap guards !isDrawMode).
+        let freehand = store.isDrawMode && !store.isDrawPaused
         map.isScrollEnabled = !freehand
         map.isZoomEnabled = !freehand
         map.isRotateEnabled = !freehand

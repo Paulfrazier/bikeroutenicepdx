@@ -44,6 +44,10 @@ interface RouteDrawerProps {
   onClearStrokes: () => void;
   /** Number of hand-drawn strokes on the route. */
   strokeCount: number;
+  /** Draw mode: when true the map pans/zooms on drag instead of drawing. */
+  drawPaused: boolean;
+  /** Draw mode: toggle the pause (pan/zoom ⇄ draw). */
+  onTogglePause: () => void;
   /** True when entering Build/Draw wiped a route that Undo can still restore. */
   canRestore: boolean;
   steps: RouteStep[];
@@ -56,7 +60,7 @@ const TOOLS: { id: Exclude<EditTool, null>; label: string; icon: string; hint: s
   { id: "through", label: "Through", icon: "↦", hint: "Tap the start then the end of a section on the map. Tap a section's pin to remove it." },
   { id: "drag", label: "Drag", icon: "✎", hint: "Drag the route on the map to reshape it — it re-snaps to roads." },
   { id: "build", label: "Build", icon: "📍", hint: "Starts fresh from your start & end. Tap the map to add waypoints; drag a pin to move it, tap a pin to remove it." },
-  { id: "draw", label: "Draw", icon: "✏️", hint: "Starts fresh from your start & end. Draw the route in strokes (they snap to roads) — lift and continue where you left off. Drag a point to adjust." },
+  { id: "draw", label: "Draw", icon: "✏️", hint: "Starts fresh from your start & end. Draw the route in strokes (they snap to roads) — lift and continue where you left off. Tap “Move map” to pan/zoom, then resume. Drag a point to adjust." },
 ];
 
 export function RouteDrawer({
@@ -76,6 +80,8 @@ export function RouteDrawer({
   onUndoStroke,
   onClearStrokes,
   strokeCount,
+  drawPaused,
+  onTogglePause,
   canRestore,
   steps,
   onStepClick,
@@ -153,6 +159,14 @@ export function RouteDrawer({
               <span className="build-controls__count">
                 {strokeCount} {strokeCount === 1 ? "stroke" : "strokes"}
               </span>
+              <button
+                type="button"
+                className={`build-controls__btn ${drawPaused ? "build-controls__btn--active" : ""}`}
+                aria-pressed={drawPaused}
+                onClick={onTogglePause}
+              >
+                {drawPaused ? "✏️ Draw" : "✋ Move map"}
+              </button>
               <button
                 type="button"
                 className="build-controls__btn"
