@@ -64,8 +64,9 @@ const M_PER_DEG_LNG = 111320; // scaled by cos(lat) at use-site
 const M_PER_DEG_LAT = 110540;
 
 /**
- * A route segment's category: one of the six bike-network facility classes (so
- * the route matches the bike-map legend exactly) plus two off-network states —
+ * A route segment's category: one of the bike-network facility classes (so the
+ * route matches the bike-map legend exactly), the baked "caution" down-rate (a
+ * painted lane on a stressful arterial/stroad), plus two off-network states —
  * "quiet" (calm neighborhood street) and "busy" (the red dashed danger signal).
  */
 export type RouteClass =
@@ -74,12 +75,13 @@ export type RouteClass =
   | "path"
   | "buffered"
   | "lane"
+  | "caution"
   | "shared"
   | "quiet"
   | "busy";
 
 /**
- * Route-class → render color. The six facility colors are IDENTICAL to the
+ * Route-class → render color. The facility colors are IDENTICAL to the
  * bike-network overlay (LEGEND_ITEMS in Map.tsx) so one legend explains both the
  * map and the route. KEEP IN SYNC WITH iOS (BikeFriendliness.swift) — the parity
  * guard (scripts/check-parity.ts) compares these pairs.
@@ -90,6 +92,7 @@ export const ROUTE_CLASS_COLORS: Record<RouteClass, string> = {
   path: "#B45309",
   buffered: "#0891B2",
   lane: "#F59E0B",
+  caution: "#EA580C",
   shared: "#9CA3AF",
   quiet: "#64748B",
   busy: "#DC2626",
@@ -109,9 +112,10 @@ export interface RouteFriendliness {
 }
 
 /** Normalize a bike-network render class (`rclass`, falling back to `class`) to a
- * known RouteClass. "busy" is a valid baked value — an unprotected lane on a fast
- * street that the export down-rated (see scripts/lib/render-class.ts) — so the
- * overlay and the route draw it red without any runtime speed lookup. */
+ * known RouteClass. "busy" and "caution" are valid baked values — an unprotected
+ * lane the export down-rated (busy = on a ≥40 mph street; caution = a painted lane
+ * on a slower arterial/stroad; see scripts/lib/render-class.ts) — so the overlay
+ * and the route draw them without any runtime speed lookup. */
 function normalizeClass(cls: string): RouteClass {
   switch (cls) {
     case "protected":
@@ -119,6 +123,7 @@ function normalizeClass(cls: string): RouteClass {
     case "path":
     case "buffered":
     case "lane":
+    case "caution":
     case "shared":
     case "busy":
       return cls;

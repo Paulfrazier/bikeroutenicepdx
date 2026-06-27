@@ -16,13 +16,14 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { bakeRenderClass, MIN_FAST_MPH, type FeatureLike, type FCLike } from "./lib/render-class.js";
+import { bakeRenderClass, MIN_FAST_MPH, MIN_STROAD_LANES, type FeatureLike, type FCLike } from "./lib/render-class.js";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
 
 const BIKE = path.join(REPO_ROOT, "web", "public", "bike-network.geojson");
 const SPEEDS = path.join(REPO_ROOT, "web", "public", "speeds.geojson");
+const ARTERIALS = path.join(REPO_ROOT, "web", "public", "arterials.geojson");
 const TARGETS = [
   BIKE,
   path.join(REPO_ROOT, "ios", "BikeRouteNicePDX", "Resources", "bike-network.geojson"),
@@ -37,10 +38,21 @@ function main(): void {
   const bike = read(BIKE);
   const speeds = read(SPEEDS);
   if (!bike.features?.length) throw new Error(`no features in ${BIKE}`);
+  const arterials = fs.existsSync(ARTERIALS) ? read(ARTERIALS) : undefined;
+  if (!arterials) {
+    console.warn(
+      `[bake] WARN: ${path.relative(REPO_ROOT, ARTERIALS)} not found — run export:arterials. Skipping the door-zone-lane-on-arterial down-rate.`
+    );
+  }
 
-  const { downgraded, total } = bakeRenderClass(bike.features, speeds, MIN_FAST_MPH);
+  const { downgraded, downgradedArterial, downgradedWide, total } = bakeRenderClass(
+    bike.features,
+    speeds,
+    MIN_FAST_MPH,
+    arterials
+  );
   console.log(
-    `[bake] rclass on ${total} features — ${downgraded} unprotected lanes on ≥${MIN_FAST_MPH} mph streets → "busy"`
+    `[bake] rclass on ${total} features — ${downgraded} unprotected lanes on ≥${MIN_FAST_MPH} mph streets → "busy"; ${downgradedArterial} plain unbuffered lanes on arterials + ${downgradedWide} unprotected facilities on ≥${MIN_STROAD_LANES}-lane stroads → "caution"`
   );
 
   const json = JSON.stringify(bike);

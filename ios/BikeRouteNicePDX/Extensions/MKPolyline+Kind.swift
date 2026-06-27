@@ -65,11 +65,16 @@ enum BikeClass: String, CaseIterable {
     case `protected`
     case buffered
     case lane
+    /// Painted lane on a stressful street — baked into `rclass` when a plain lane
+    /// runs along an arterial, or any unprotected facility runs along a 4+ lane
+    /// stroad (below the ≥40 mph `busy` threshold). Still a lane, so rendered
+    /// solid orange — a step short of the red `busy` danger signal.
+    case caution
     case path
     case shared
     /// Fast unprotected lane — baked into `rclass` in the data when a lane/
     /// buffered/shared facility runs along a ≥40 mph street. Not a separate
-    /// physical facility; excluded from the legend.
+    /// physical facility; rendered red dashed.
     case busy
 
     /// Human-readable legend label.
@@ -79,6 +84,7 @@ enum BikeClass: String, CaseIterable {
         case .protected: return "Protected Bike Lane"
         case .buffered: return "Buffered Bike Lane"
         case .lane: return "Bike Lane"
+        case .caution: return "Bike Lane on a Busy Street"
         case .path: return "Off-Street Path"
         case .shared: return "Enhanced Shared Roadway"
         case .busy: return "Fast Unprotected Lane"
@@ -92,6 +98,7 @@ enum BikeClass: String, CaseIterable {
         case .protected: return UIColor(red: 0.427, green: 0.157, blue: 0.851, alpha: 1) // #6D28D9
         case .buffered: return UIColor(red: 0.031, green: 0.569, blue: 0.698, alpha: 1) // #0891B2
         case .lane: return UIColor(red: 0.961, green: 0.620, blue: 0.043, alpha: 1) // #F59E0B
+        case .caution: return UIColor(red: 0.918, green: 0.345, blue: 0.047, alpha: 1) // #EA580C
         case .path: return UIColor(red: 0.706, green: 0.325, blue: 0.035, alpha: 1) // #B45309
         case .shared: return UIColor(red: 0.612, green: 0.639, blue: 0.686, alpha: 1) // #9CA3AF
         case .busy: return UIColor(red: 0.863, green: 0.149, blue: 0.149, alpha: 1) // #DC2626
@@ -101,7 +108,7 @@ enum BikeClass: String, CaseIterable {
     var lineWidth: CGFloat {
         switch self {
         case .greenway, .protected, .path: return 4
-        case .buffered, .lane, .busy: return 3
+        case .buffered, .lane, .caution, .busy: return 3
         case .shared: return 2.5
         }
     }
@@ -110,23 +117,25 @@ enum BikeClass: String, CaseIterable {
     var dashed: Bool { self == .shared || self == .busy }
 
     /// Lower draws first (underneath). Higher-quality facilities sit on top.
-    /// `busy` renders below `shared` — it is a downgraded lane, not new infra.
+    /// `busy` renders below `shared` — it is a downgraded lane, not new infra;
+    /// `caution` sits just above `shared` (a painted lane, but stressful).
     var zPriority: Int {
         switch self {
         case .busy: return -1
         case .shared: return 0
-        case .lane: return 1
-        case .path: return 2
-        case .buffered: return 3
-        case .greenway: return 4
-        case .protected: return 5
+        case .caution: return 1
+        case .lane: return 2
+        case .path: return 3
+        case .buffered: return 4
+        case .greenway: return 5
+        case .protected: return 6
         }
     }
 
     /// Order facilities appear in the legend (best/most familiar first).
     /// `busy` is excluded — it is a data-derived render indicator, not a
     /// distinct facility type the legend needs to explain.
-    static let legendOrder: [BikeClass] = [.greenway, .protected, .buffered, .lane, .path, .shared]
+    static let legendOrder: [BikeClass] = [.greenway, .protected, .buffered, .lane, .caution, .path, .shared]
 }
 
 extension MKPolyline {

@@ -25,12 +25,17 @@
  *         ios/BikeRouteNicePDX/Resources/arterials.geojson    (bundled iOS)
  *
  * Each feature: { type:"Feature", geometry:LineString,
- *                 properties:{ class, name?, mph? } }
+ *                 properties:{ class, name?, mph?, lanes? } }
  *   class — OSM highway value: motorway|trunk|primary|secondary|tertiary
  *   name  — OSM street name (when tagged); lets the friendliness classifier
  *           apply the user's personal per-street ratings to a bare arterial.
  *   mph   — max city-posted speed found along the way (when name+geometry matched
  *           a PortlandMaps speed segment); omitted when unmatched.
+ *   lanes — OSM `lanes` count (total, both directions incl. turn lanes) when the
+ *           way carries a numeric tag; omitted otherwise. The render-class bake
+ *           reads it to down-rate an unprotected bike lane on a 4+ lane stroad
+ *           (e.g. Foster/Powell/Holgate, posted 30–35 so the speed rule misses
+ *           them) to "caution" — see scripts/lib/render-class.ts (MIN_STROAD_LANES).
  *
  * Coordinates are rounded to 5 decimals (~1 m) to keep the file small.
  *
@@ -330,6 +335,7 @@ async function main(): Promise<void> {
   const counts: Record<string, number> = {};
   let matched = 0;
   let calm = 0;
+  let wide = 0;
   for (const el of elements) {
     if (el.type !== "way" || !el.geometry || el.geometry.length < 2) continue;
     const cls = el.tags?.highway;
@@ -347,6 +353,15 @@ async function main(): Promise<void> {
     const name = el.tags?.name?.trim();
     const properties: Record<string, string | number> = { class: cls };
     if (name) properties.name = name;
+
+    // OSM `lanes` (total, both directions). Lets the render-class bake spot a
+    // multi-lane stroad whose unprotected bike lane is stressful regardless of
+    // posted speed. Omitted when untagged or non-numeric.
+    const lanes = Number(el.tags?.lanes);
+    if (Number.isFinite(lanes) && lanes >= 1) {
+      properties.lanes = lanes;
+      if (lanes >= 4) wide++;
+    }
 
     // Stamp the city's max posted speed along this way (name+proximity join).
     const mph = name ? postedSpeedFor(coords, normalizeStreetName(name), speedGrid) : null;
@@ -378,7 +393,7 @@ async function main(): Promise<void> {
   console.log(
     `[done] ${features.length} arterials`,
     counts,
-    `· speed-matched ${matched} (${calm} calm ≤25mph)`
+    `· speed-matched ${matched} (${calm} calm ≤25mph) · ${wide} ways ≥4 lanes`
   );
 }
 

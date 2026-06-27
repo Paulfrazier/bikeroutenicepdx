@@ -29,7 +29,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { bakeRenderClass, MIN_FAST_MPH } from "./lib/render-class.js";
+import { bakeRenderClass, MIN_FAST_MPH, MIN_STROAD_LANES } from "./lib/render-class.js";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -222,9 +222,21 @@ async function main(): Promise<void> {
   const speedsPath = path.join(REPO_ROOT, "web", "public", "speeds.geojson");
   if (fs.existsSync(speedsPath)) {
     const speeds = JSON.parse(fs.readFileSync(speedsPath, "utf8"));
-    const { downgraded } = bakeRenderClass(kept, speeds, MIN_FAST_MPH);
+    // Also down-rate plain unbuffered lanes (PBOT "lane"/BL) that run along an
+    // arterial — the door-zone collector-lane case (NE 7th etc.) that the posted-
+    // speed rule misses because these are tagged 20 mph. Buffered lanes are spared.
+    const arterialsPath = path.join(REPO_ROOT, "web", "public", "arterials.geojson");
+    const arterials = fs.existsSync(arterialsPath)
+      ? JSON.parse(fs.readFileSync(arterialsPath, "utf8"))
+      : undefined;
+    if (!arterials) {
+      console.warn(
+        `[rclass] WARN: ${path.relative(REPO_ROOT, arterialsPath)} not found — run export:arterials. Skipping the door-zone-lane-on-arterial down-rate.`
+      );
+    }
+    const { downgraded, downgradedArterial, downgradedWide } = bakeRenderClass(kept, speeds, MIN_FAST_MPH, arterials);
     console.log(
-      `[rclass] ${downgraded} unprotected lanes on ≥${MIN_FAST_MPH} mph streets → "busy"`
+      `[rclass] ${downgraded} unprotected lanes on ≥${MIN_FAST_MPH} mph streets → "busy"; ${downgradedArterial} plain unbuffered lanes on arterials + ${downgradedWide} unprotected facilities on ≥${MIN_STROAD_LANES}-lane stroads → "caution"`
     );
   } else {
     console.warn(

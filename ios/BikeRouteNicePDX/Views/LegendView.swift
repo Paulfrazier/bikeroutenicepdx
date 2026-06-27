@@ -74,7 +74,7 @@ struct LegendView: View {
     private var offNetworkRows: [(label: String, color: UIColor, dashed: Bool)] {
         [
             ("Quiet street", RouteClass.quiet.color, false),
-            ("Bike lane on a fast/busy road — use caution", RouteClass.busy.color, true),
+            ("Fast or high-stress road — use caution", RouteClass.busy.color, true),
         ]
     }
 
