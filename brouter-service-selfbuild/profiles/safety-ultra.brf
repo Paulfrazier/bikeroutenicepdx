@@ -13,6 +13,8 @@
 # ***   2. avoid_unsafe non-bike add  2 → 5.
 # ***   3. non-bike arterial cost factors raised (primary/secondary/tertiary/
 # ***      unclassified) so busy roads without bike infra are strongly avoided.
+# ***   4. 4-lane stroad penalty: any way with lanes>=4 and NO real bike lane is
+# ***      effectively no-go (+50), regardless of posted speed. (search "STROAD:")
 
 ---context:global   # following code refers to global config
 
@@ -118,6 +120,18 @@ assign strongbikelane =
        or  cycleway:right=lane|track
        or  cycleway:left=lane|track
        cycleway:both=lane|track
+
+# 4-lane-stroad redemption: a REAL bike lane (painted lane or protected track),
+# or a designated bike street — NOT a sharrow (shared_lane) and NOT mere
+# bicycle=yes. (Mirrors strongbikelane's cycleway part, plus the bike-street tags.)
+assign hasrealbikelane =
+   or  cycleway=lane|track
+   or  cycleway:left=lane|track
+   or  cycleway:right=lane|track
+   or  cycleway:both=lane|track
+   or  bicycle_road=yes
+   or  cyclestreet=yes
+       bicycle=designated
 
 assign ispaved = or surface=paved|asphalt|concrete|paving_stones|sett smoothness=excellent|good
 assign isunpaved = not or ispaved or ( and surface= smoothness= ) or surface=fine_gravel|cobblestone smoothness=intermediate|bad
@@ -302,6 +316,19 @@ assign speedpenalty
    switch maxspeed=80|90|100|110|120|130       0.7
    0
 
+# STROAD: a 4+ lane road with NO real bike lane is the core hazard this router
+# exists to avoid. Penalize it hard REGARDLESS of posted speed (catches the
+# 35-40 mph 4-laners like Holgate that the maxspeed penalty deliberately leaves
+# alone). Additive +50 = "effectively no-go": the router takes any reasonable
+# detour but a short unavoidable stub still resolves. A real bike lane redeems
+# it (hasrealbikelane). NOTE: applies only when traveling ALONG the way, so
+# CROSSING a stroad on a smaller cross-street is unaffected (per-way cost).
+# lookups.dat folds raw lanes 8..25 into the single bucket whose token is "8",
+# so "8" here matches any way with 8+ lanes (9..25 are not valid profile tokens).
+assign ismultilane = lanes=4|5|6|7|8
+assign stroadpenalty =
+   if ( and ismultilane not hasrealbikelane ) then 50 else 0
+
 #
 # calculate the cost-factor, which is the factor
 # by which the distance of a way-segment is multiplied
@@ -336,6 +363,7 @@ assign costfactor
   add noise_penalty
   add traffic_penalty
   add speedpenalty
+  add stroadpenalty        # 4-lane no-bike-lane hazard
 
   #
   # apply oneway-and access-penalties

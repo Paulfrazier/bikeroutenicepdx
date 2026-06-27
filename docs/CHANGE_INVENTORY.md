@@ -49,7 +49,26 @@ now maps to it instead of stock `safety`.
 | **Ships via** | Railway redeploy + a server redeploy (so the new mapping is live). **Test router: deploying. Prod: not done.** |
 | **Unwind** | In `brouter.ts` set `comfort: "safety"` again (instant revert to stock — the profile can stay in the image unused). To fully remove: drop the COPY lines + delete the two `.brf` files. |
 
-**Cull all of A:** revert the A1+A2+A3 file lists above, then redeploy whatever
+### A4 — Routing: avoid 4-lane no-bike-lane stroads (both safety tiers)
+A `stroadpenalty` makes any way with `lanes>=4` and **no real bike lane**
+(painted `cycleway=lane`/protected `track`, or `bicycle_road`/`cyclestreet`/
+`bicycle=designated`) effectively no-go: **+50** additive to `costfactor`,
+regardless of posted speed. This catches the 35–40 mph 4-laners (Holgate, Powell,
+82nd, Sandy) that sit *below* A2's 45 mph `maxspeed` bucket and are tagged only
+`bicycle=yes`. Crossing such a road perpendicularly is unaffected — `costfactor`
+is per-way, so it only fires when riding *along* the stroad.
+
+| | |
+|---|---|
+| **Edited** | `brouter-service/profiles/{safety-ultra,safety-comfort}.brf` + the `brouter-service-selfbuild/profiles/` copies (kept identical) |
+| **Adds** | `hasrealbikelane` + `ismultilane` + `stroadpenalty` assigns, and one `add stroadpenalty` line in `costfactor` (right after `add speedpenalty`) |
+| **Data** | None — `lanes` is already in BRouter's stock `lookups.dat`; verified encoded in **both** brouter.de (prod) and self-build tiles. No tile rebuild. |
+| **Ships via** | Railway redeploy of the brouter service(s). **DEPLOYED 2026-06-24 to BOTH `brouter` (prod) + `brouter-selfbuild`.** |
+| **Verified** | Local A/B (new vs. a `-stroadpenalty`-removed control) on the Holgate corridor: control rides ~600–850 m of 4-lane no-lane road; new profile = **0 m**, at a ~15% distance detour. Crossing-only OD unchanged. **Live-confirmed post-deploy:** prod `safety-ultra` 5343→6138 m on that OD; end-to-end `POST /route` returns `distance_m:6138`; N→S crossing OD unchanged at 1829 m. |
+| **Unwind** | Remove the `hasrealbikelane`/`ismultilane`/`stroadpenalty` assigns **and** the `add stroadpenalty` line from all four `.brf` files, then redeploy. |
+| **Tune** | The `50` (penalty strength) and the `lanes=4|5|6|7|8` threshold (`8` = the bucket folding raw lanes 8–25; 9–25 are not valid profile tokens). |
+
+**Cull all of A:** revert the A1+A2+A3+A4 file lists above, then redeploy whatever
 routers/web/iOS had already shipped.
 
 ---
@@ -86,8 +105,8 @@ iOS `MapCoordinator.swift` (freehand sketch + connector tap-build),
 
 | Target | Carries | Status |
 |---|---|---|
-| Test router `beautiful-charm` (app's `selfbuild`) | A2 + A3 | 🔄 deploying |
-| Prod router `brouter` (app's `prod`) | A2 + A3 | ⛔ not deployed |
+| Prod router `brouter` (app's `prod`) | A2 + A3 + **A4** | ✅ A4 deployed 2026-06-24 |
+| Self-build router `brouter-selfbuild` (app's `selfbuild`) | A2 + A3 + **A4** | ✅ A4 deployed 2026-06-24 |
 | Web (Vercel) | A1 (+ would also ship B1/B2) | ⛔ blocked on mixed tree |
 | iOS (TestFlight) | A1 (+ would also ship B1/B2/B3) | ⛔ blocked on mixed tree |
 | Orphan `brouter-selfbuild` service | stray deploy + a public domain I created | 🧹 to remove |

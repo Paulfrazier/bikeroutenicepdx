@@ -80,6 +80,24 @@ mismatch**: a true-40 mph lane is red on the map but not routing-avoided (see §
 
 `brouter-service/profiles/safety-ultra.brf`, `assign speedpenalty`.
 
+### Companion: 4-lane stroad penalty (lanes, not speed)
+
+The speed penalty deliberately ignores 35–40 mph streets — but a **4-lane road
+with no bike lane** at 35–40 mph (Holgate, parts of Powell/82nd/Sandy) is exactly
+the hazard this router exists to avoid, and it slips under the 45 mph line. A
+separate `stroadpenalty` closes that gap, keying off **lane count** instead of
+speed: any way with `lanes>=4` and **no real bike lane** gets a large additive
+penalty (**+50**, "effectively no-go"). A painted/protected lane or a designated
+bike street redeems it; sharrows and bare `bicycle=yes` do not. It applies to
+**both** safety tiers (Ultra + Comfort).
+
+The two penalties are **complementary**: speed catches fast *bike-laned*
+arterials; lanes catches slower *un-laned* 4-laners. Crossing a stroad
+perpendicularly is unaffected (`costfactor` is per-way — it only fires when riding
+*along* the road). `lanes` is in BRouter's stock `lookups.dat`, so this needs no
+tile rebuild and works on the brouter.de (prod) tiles. See `assign stroadpenalty`
+in both profiles and **A4** in `docs/CHANGE_INVENTORY.md`.
+
 ---
 
 ## 4. Before/after routing report
