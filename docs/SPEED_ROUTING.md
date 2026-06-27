@@ -121,6 +121,46 @@ rebuild — but `maxspeed` must match a **canonical** bucket token (30 mph=`50`,
 `85`/`95` are not matchable. See `assign fastnolane` in both profiles and **A5**
 in `docs/CHANGE_INVENTORY.md`.
 
+### Companion: door-zone weaklane penalty (the lane-on-a-busy-street gap) — self-build only
+
+All of the above key off speed or absence-of-lane. The remaining gap is a street
+that **has** a lane and is posted **slow** but is still low-comfort: a **plain,
+unbuffered, door-zone painted lane on a busy through-street**. The motivating case
+is **NE 7th Ave** through inner NE — in OSM it's `highway=tertiary`,
+`cycleway=lane`, `cycleway:*:buffer=no`, **`maxspeed=20 mph`**. Because it's posted
+20 and carries a lane, *none* of the speed/no-lane/stroad rules touch it; it routes
+cheap (`tertiary`+`isbike`=1.0) and Ultra even handed it the `strongbikelane`
+greenway-magnet credit. So the lever here is **road class + plain-lane + unbuffered**,
+not speed.
+
+`weaklane` fires on a way that is (a) `highway=tertiary|secondary|primary` (+links),
+(b) a plain `cycleway=lane` and **not** a protected `track`, and (c) **not buffered**
+(`cycleway:*:buffer=yes`). Additive penalty: **comfort +0.4, ultra +1.0**; Ultra
+*also* denies it the `strongbikelane` magnet so a parallel neighborhood greenway
+(e.g. the Rodney / NE 9th greenway) wins. Gentle enough that an unavoidable block
+still resolves.
+
+**Why self-build only:** `cycleway:*:buffer` is **not in stock BRouter
+`lookups.dat`**, so prod's brouter.de tiles can't tell a buffered lane from a
+door-zone one. The buffer tag was added to `lookups.dat` and the **self-build tiles
+rebuilt** so only *unbuffered* lanes are penalized — so this lives **only** in the
+`brouter-service-selfbuild/profiles/` copies and the two profile sets now diverge
+(prod is unchanged). See `assign weaklane`/`isweaklane` and **A6** in
+`docs/CHANGE_INVENTORY.md`.
+
+**Verified (post-rebuild, local BRouter on the self-build tiles).** BRouter's own
+WayTags export is ground truth that `cycleway:*:buffer` **decodes** (no
+lookups/tile mismatch): NE 7th's tertiary segments report
+`cycleway:right:buffer=no`, SE 17th reports `…:buffer=yes`. A weaklane-vs-control
+A/B *on the same tiles* fires the penalty **only** on the unbuffered case — NE 7th
+core cost 2960 → 2989 (the +0.4 applied), SE 17th's 5 buffered segments **unchanged**
+(3494 → 3494, spared) — which rules out the "buffer misdecodes → every plain lane
+penalized" failure mode. End-to-end (home → inner-SE waterfront), metres ridden on a
+plain unbuffered classified lane: **prod 486 m** (comfort *and* ultra — stock tiles
+can't see the buffer) vs self-build **comfort 53 m** (+199 m, +3 %) and **ultra 0 m**
+(detours to the parallel Rodney/9th greenway at 7031 m ≈ prod ultra's 7033 m — no
+distance cost).
+
 ---
 
 ## 4. Before/after routing report

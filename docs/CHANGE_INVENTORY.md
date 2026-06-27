@@ -91,7 +91,36 @@ approach on Cully→PDX rides through rather than detouring 4.7 km).
 | **Unwind** | Remove the `hasphysicalbikelane`/`fastnolane` assigns **and** the `add fastnolane` line from all four `.brf` files, then redeploy. |
 | **Tune** | The `2`/`3`/`5` penalty strengths (raise to avoid harder / detour more; lower to yield sooner) and the maxspeed token set. |
 
-**Cull all of A:** revert the A1+A2+A3+A4+A5 file lists above, then redeploy whatever
+### A6 — Door-zone lanes: knock down plain unbuffered lanes on classified streets
+A `weaklane` penalty (routing) + an arterial-lane bake (color) for the **NE 7th
+Ave** case: a **plain painted bike lane (`cycleway=lane`, NOT a protected `track`)
+with NO buffer, running along a classified through-street (tertiary/secondary/
+primary)**. These are Portland's door-zone collector lanes. A1–A5 all miss them:
+7th is posted **20 mph** in OSM and **has** a lane, so no speed/no-lane/stroad rule
+fires; today it routes cheap (tertiary+isbike=1.0) and `ultra` even gave it the
+`strongbikelane` greenway-magnet credit. So this keys off **road class + plain-lane
++ unbuffered**, not speed.
+
+**The buffer split is the crux.** `cycleway:*:buffer` is **NOT in stock BRouter
+`lookups.dat`** (prod's brouter.de tiles can't see it). So the routing change is
+**self-build ONLY** and required adding the tag to `lookups.dat` + a tile rebuild.
+**This intentionally DIVERGES the two profile sets** — `brouter-service/profiles/`
+(prod) is now NOT identical to `brouter-service-selfbuild/profiles/`; only the
+self-build copies carry `weaklane`. The "profiles are byte-identical" assumption
+from A2–A5 no longer holds. Coloring has no such limit (PBOT distinguishes BL vs
+BBL), so the **map color** down-rate applies on both engines / web + iOS.
+
+| | |
+|---|---|
+| **Routing (self-build only)** | `brouter-service-selfbuild/profiles/{safety-comfort,safety-ultra}.brf`: `isweaklane` + `weaklanepenalty` (comfort **+0.4**, ultra **+1.0**) + `add weaklanepenalty`; ultra also gates the `strongbikelane` magnet on `not isweaklane`. |
+| **Tiles (self-build only)** | `data/brouter-build/tools/brouter/brouter-1.7.9/profiles2/lookups.dat` + committed copy `brouter-service-selfbuild/profiles/lookups.dat` add `cycleway:{both,left,right}:buffer`; `brouter-service-selfbuild/Dockerfile` COPYs it so **build & serve lookups match** (a mismatch silently misdecodes tags); `brouter-service-selfbuild/segments4/*.rd5` rebuilt via `scripts/build-brouter-tiles.sh`. |
+| **Color (both engines, web+iOS)** | `scripts/lib/render-class.ts` (`buildArterialGrid` + arterial-lane→`busy`, class `lane` only — buffered/protected spared), callers `scripts/{bake-render-class,export-bike-network}.ts` pass `arterials.geojson`. Re-baked all 3 `bike-network.geojson`. **No `friendliness.ts`/Swift change** — both already read `rclass`, so the bake covers overlay + route on both surfaces (parity guard stays green). |
+| **Ships via** | Railway redeploy of **`brouter-selfbuild` only** (prod unchanged) + Web (Vercel) + iOS. |
+| **Verified** | Color: NE 7th tertiary core 63 `lane`→busy, its greenway/buffered/protected segments spared; SE 17th 15 `buffered` preserved; Rodney/Ankeny/Klickitat greenways untouched (1602 `lane`→busy metro-wide — Portland stripes most painted lanes on arterials). Routing (post-rebuild, local BRouter on the self-build tiles): `cycleway:*:buffer` decodes via WayTags (`:buffer=no` on NE 7th, `:buffer=yes` on SE 17th) — no lookups/tile mismatch; weaklane-vs-control A/B fires **only** unbuffered (NE 7th +0.4; SE 17th's 5 buffered segs unchanged — spared); home→inner-SE door-zone metres prod 486 → comfort 53 / **ultra 0** (parallel greenway, no distance cost). Full A/B in `docs/SPEED_ROUTING.md`. |
+| **Unwind** | Routing: drop the `isweaklane`/`weaklanepenalty` assigns + `add weaklanepenalty` from the two self-build `.brf`s, revert the ultra magnet line, redeploy selfbuild. (Profiles re-converge with prod.) Color: revert `render-class.ts` + the two callers, `npm run bake:render-class`. Tiles can keep the buffer lookup harmlessly. |
+| **Tune** | `weaklanepenalty` strengths (comfort 0.4 / ultra 1.0) and `ARTERIAL_DOWNRATE_CLASS`/arterial class set. |
+
+**Cull all of A:** revert the A1+A2+A3+A4+A5+A6 file lists above, then redeploy whatever
 routers/web/iOS had already shipped.
 
 ---

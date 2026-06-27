@@ -30,9 +30,16 @@ RUN mkdir -p segments4 customprofiles
 COPY segments4/W125_N45.rd5 segments4/W125_N45.rd5
 COPY segments4/W125_N40.rd5 segments4/W125_N40.rd5
 
-# Custom profiles (the app's "Ultra" + "Comfort" tiers), same as the stock service.
+# Custom profiles (the app's "Ultra" + "Comfort" tiers). UNLIKE the stock service
+# these DIVERGE from brouter-service/profiles/ — they carry the weaklane penalty,
+# which reads cycleway:*:buffer (only decodable on self-build tiles).
 COPY profiles/safety-ultra.brf brouter-1.7.9/profiles2/safety-ultra.brf
 COPY profiles/safety-comfort.brf brouter-1.7.9/profiles2/safety-comfort.brf
+
+# CRITICAL: serve with the SAME lookups.dat the tiles were BUILT against
+# (scripts/build-brouter-tiles.sh). It adds cycleway:*:buffer over stock v1.7.9;
+# a mismatch silently misdecodes tags. Overrides the stock file from the zip.
+COPY profiles/lookups.dat brouter-1.7.9/profiles2/lookups.dat
 
 # Railway injects $PORT. Args: <segmentdir> <profiledir> <customprofiledir> <port> <maxthreads>
 ENV PORT=17777

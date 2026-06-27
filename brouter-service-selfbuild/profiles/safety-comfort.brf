@@ -332,6 +332,30 @@ assign fastnolane =
    else if maxspeed=50                    then 2
    else 0
 
+# WEAKLANE: a plain painted bike lane (cycleway=lane, NOT a protected track) with
+# NO buffer, running ALONG a classified through-street (tertiary/secondary/primary).
+# In Portland these are the door-zone collector lanes (e.g. NE 7th Ave: tertiary,
+# cycleway=lane, cycleway:*:buffer=no, posted 20 mph) that the router treats as a
+# good bikeway today (isbike + cheap tertiary cost). maxspeed is useless here
+# (these are tagged 20), so key off road CLASS + plain-lane + unbuffered. A
+# protected track or a buffered lane is spared. SELF-BUILD ONLY: cycleway:*:buffer
+# is decodable only on the self-built tiles (added to lookups.dat); stock brouter.de
+# tiles can't see it, which is why prod's profile does NOT carry this penalty.
+assign isclassifiedroad =
+   highway=tertiary|tertiary_link|secondary|secondary_link|primary|primary_link
+assign isprotectedtrack =
+   or cycleway=track or cycleway:left=track or cycleway:right=track cycleway:both=track
+assign isplainlane =
+   or cycleway=lane or cycleway:left=lane or cycleway:right=lane cycleway:both=lane
+assign isbuffered =
+   or cycleway:both:buffer=yes or cycleway:left:buffer=yes cycleway:right:buffer=yes
+assign isweaklane =
+   and isclassifiedroad and isplainlane and not isprotectedtrack not isbuffered
+# COMFORT: a gentle nudge onto a parallel greenway; additive + modest so an
+# unavoidable block of 7th still resolves rather than detouring absurdly.
+assign weaklanepenalty =
+   if isweaklane then 0.4 else 0
+
 
 #
 # calculate the cost-factor, which is the factor
@@ -369,6 +393,7 @@ assign costfactor
   add speedpenalty
   add stroadpenalty        # 4-lane no-bike-lane hazard
   add fastnolane           # >25mph + no physical bike lane
+  add weaklanepenalty      # plain unbuffered door-zone lane on a classified street
 
   #
   # apply oneway-and access-penalties

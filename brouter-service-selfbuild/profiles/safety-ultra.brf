@@ -358,6 +358,28 @@ assign fastnolane =
    else if maxspeed=50                    then 2
    else 0
 
+# WEAKLANE: a plain painted bike lane (cycleway=lane, NOT a protected track) with
+# NO buffer, running ALONG a classified through-street (tertiary/secondary/primary).
+# In Portland these are the door-zone collector lanes (e.g. NE 7th Ave: tertiary,
+# cycleway=lane, cycleway:*:buffer=no, posted 20 mph). ULTRA hits them harder than
+# comfort AND strips the strongbikelane greenway-magnet credit below, so a parallel
+# neighborhood greenway wins. maxspeed is useless here (tagged 20) → key off road
+# CLASS + plain-lane + unbuffered. Protected track / buffered lane spared.
+# SELF-BUILD ONLY: cycleway:*:buffer is decodable only on the self-built tiles
+# (added to lookups.dat); prod's stock-tile profile does NOT carry this penalty.
+assign isclassifiedroad =
+   highway=tertiary|tertiary_link|secondary|secondary_link|primary|primary_link
+assign isprotectedtrack =
+   or cycleway=track or cycleway:left=track or cycleway:right=track cycleway:both=track
+assign isplainlane =
+   or cycleway=lane or cycleway:left=lane or cycleway:right=lane cycleway:both=lane
+assign isbuffered =
+   or cycleway:both:buffer=yes or cycleway:left:buffer=yes cycleway:right:buffer=yes
+assign isweaklane =
+   and isclassifiedroad and isplainlane and not isprotectedtrack not isbuffered
+assign weaklanepenalty =
+   if isweaklane then 1.0 else 0
+
 #
 # calculate the cost-factor, which is the factor
 # by which the distance of a way-segment is multiplied
@@ -394,6 +416,7 @@ assign costfactor
   add speedpenalty
   add stroadpenalty        # 4-lane no-bike-lane hazard
   add fastnolane           # >25mph + no physical bike lane
+  add weaklanepenalty      # plain unbuffered door-zone lane on a classified street
 
   #
   # apply oneway-and access-penalties
@@ -416,7 +439,10 @@ assign costfactor
   # ULTRA: a strong striped/separated bike lane gets nearly cycle-route credit
   # (+0.1) instead of the full non-cycleroute surcharge (+0.5), so built buffered/
   # protected lanes compete with parallel greenway-routes instead of being detoured.
-  add ( if stick_to_cycleroutes then ( if strongbikelane then 0.1 else 0.5 ) else 0.05 )
+  # BUT a weaklane (plain unbuffered lane on a classified through-street) is NOT a
+  # comfortable facility — deny it the magnet credit so it pays the full +0.5 on top
+  # of weaklanepenalty, and a parallel greenway wins.
+  add ( if stick_to_cycleroutes then ( if ( and strongbikelane not isweaklane ) then 0.1 else 0.5 ) else 0.05 )
 
   #
   # some other highway types
