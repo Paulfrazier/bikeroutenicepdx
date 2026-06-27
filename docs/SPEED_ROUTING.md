@@ -98,6 +98,29 @@ perpendicularly is unaffected (`costfactor` is per-way — it only fires when ri
 tile rebuild and works on the brouter.de (prod) tiles. See `assign stroadpenalty`
 in both profiles and **A4** in `docs/CHANGE_INVENTORY.md`.
 
+### Companion: fast-no-physical-lane penalty (the 2–3 lane gap)
+
+The speed penalty starts at 45 mph and the stroad penalty needs 4+ lanes — so a
+**2–3 lane 30–40 mph collector with no painted lane** falls through both. Worse,
+some such streets (e.g. **NE Halsey** around NE 70th) are tagged
+`bicycle=designated` with **no physical lane**, which made the stroad penalty's
+`hasrealbikelane` treat them as safe and exempt them entirely. Comfort happily
+rode them; Ultra only dodged them as a side effect of its globally higher arterial
+aversion.
+
+`fastnolane` closes this: a graduated additive penalty (**30 mph +2, 35–45 mph +3,
+50+ mph +5**) on any way posted **above 25 mph** with **no PHYSICAL bike lane** —
+a new `hasphysicalbikelane` that, unlike `hasrealbikelane`, does **not** count
+`bicycle=designated`. The values are deliberately gentle: enough to divert onto a
+parallel calm street when one exists (NE 74th→St Johns drops 272 m of no-lane
+Halsey for a +1% detour), but small enough to **yield** where there's no calm
+alternative (the 38 mph airport approach on Cully→PDX rides through rather than
+detouring 4.7 km). `maxspeed`/`cycleway` are in stock `lookups.dat` — no tile
+rebuild — but `maxspeed` must match a **canonical** bucket token (30 mph=`50`,
+35-40=`60`, 45=`70`, 50–80 mph=`80`/`90`/`100`/`110`/`120`/`130`); aliases like
+`85`/`95` are not matchable. See `assign fastnolane` in both profiles and **A5**
+in `docs/CHANGE_INVENTORY.md`.
+
 ---
 
 ## 4. Before/after routing report

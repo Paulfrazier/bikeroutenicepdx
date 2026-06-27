@@ -115,6 +115,18 @@ assign hasrealbikelane =
    or  cyclestreet=yes
        bicycle=designated
 
+# PHYSICAL bike lane — the stricter cousin of hasrealbikelane that does NOT count
+# bicycle=designated. A fast multi-lane road tagged bicycle=designated but with no
+# painted lane (e.g. stretches of NE Halsey) is NOT comfortable; fastnolane keys
+# off this so the "designated" tag can't whitewash a no-lane arterial.
+assign hasphysicalbikelane =
+   or  cycleway=lane|track
+   or  cycleway:left=lane|track
+   or  cycleway:right=lane|track
+   or  cycleway:both=lane|track
+   or  bicycle_road=yes
+       cyclestreet=yes
+
 assign ispaved = or surface=paved|asphalt|concrete|paving_stones|sett smoothness=excellent|good
 assign isunpaved = not or ispaved or ( and surface= smoothness= ) or surface=fine_gravel|cobblestone smoothness=intermediate|bad
 assign probablyGood = or ispaved and ( or isbike highway=footway ) not isunpaved
@@ -303,6 +315,23 @@ assign ismultilane = lanes=4|5|6|7|8
 assign stroadpenalty =
    if ( and ismultilane not hasrealbikelane ) then 50 else 0
 
+# FASTNOLANE: a street posted ABOVE 25 mph with NO physical bike lane. Fills the
+# gap between the 25 mph calm baseline and the 45+ speedpenalty / 4-lane
+# stroadpenalty: catches 2-3 lane 30-40 mph collectors AND designated-but-unlaned
+# arterials (NE Halsey) that slip past both. Graduated by posted speed; keyed off
+# hasphysicalbikelane (NOT hasrealbikelane) so a bare "bicycle=designated" tag with
+# no painted lane does NOT exempt it. maxspeed must be a CANONICAL lookups.dat
+# token (the first value on its bucket line — aliases like 85/95 are not
+# matchable): 30 mph=50, 35-40 mph=60, 45 mph=70, 50/55/60-65/70/75/80 mph =
+# 80/90/100/110/120/130. 25 mph (token 40) is deliberately NOT included — that's
+# the calm line. Per-way, so CROSSING a fast street on a cross-street is unaffected.
+assign fastnolane =
+   if hasphysicalbikelane then 0
+   else if maxspeed=80|90|100|110|120|130 then 5
+   else if maxspeed=60|70                 then 3
+   else if maxspeed=50                    then 2
+   else 0
+
 
 #
 # calculate the cost-factor, which is the factor
@@ -339,6 +368,7 @@ assign costfactor
   add traffic_penalty
   add speedpenalty
   add stroadpenalty        # 4-lane no-bike-lane hazard
+  add fastnolane           # >25mph + no physical bike lane
 
   #
   # apply oneway-and access-penalties

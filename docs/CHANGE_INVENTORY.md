@@ -68,7 +68,30 @@ is per-way, so it only fires when riding *along* the stroad.
 | **Unwind** | Remove the `hasrealbikelane`/`ismultilane`/`stroadpenalty` assigns **and** the `add stroadpenalty` line from all four `.brf` files, then redeploy. |
 | **Tune** | The `50` (penalty strength) and the `lanes=4|5|6|7|8` threshold (`8` = the bucket folding raw lanes 8–25; 9–25 are not valid profile tokens). |
 
-**Cull all of A:** revert the A1+A2+A3+A4 file lists above, then redeploy whatever
+### A5 — Routing: avoid >25 mph streets with no PHYSICAL bike lane (both tiers)
+A `fastnolane` penalty fills the gap between A1's 25 mph calm line and A2/A3's
+45 mph `maxspeed` penalty and A4's 4-lane stroad penalty: a **2–3 lane 30–40 mph
+collector** with no painted lane (and a **`bicycle=designated`-but-unlaned**
+arterial like **NE Halsey** around NE 70th) slipped past all three. Graduated
+additive penalty by posted speed: **30 mph → +2, 35–45 mph → +3, 50+ mph → +5**.
+Keyed off a NEW `hasphysicalbikelane` (cycleway `lane`/`track`, `bicycle_road`,
+`cyclestreet`) that — unlike A4's `hasrealbikelane` — **excludes
+`bicycle=designated`**, so the "designated" tag can't whitewash a no-lane
+arterial. Per-way, so crossing is unaffected. Values are deliberately gentle so
+the router *yields* where there's no calm alternative (e.g. the 38 mph airport
+approach on Cully→PDX rides through rather than detouring 4.7 km).
+
+| | |
+|---|---|
+| **Edited** | `brouter-service/profiles/{safety-ultra,safety-comfort}.brf` + the `brouter-service-selfbuild/profiles/` copies (kept identical) |
+| **Adds** | `hasphysicalbikelane` + `fastnolane` assigns, and one `add fastnolane` line in `costfactor` (right after `add stroadpenalty`) |
+| **Data** | None — `maxspeed` + `cycleway` are in BRouter's stock `lookups.dat`. No tile rebuild. NOTE: `maxspeed` must match a **canonical** bucket token (first value on its `lookups.dat` line: 30 mph=`50`, 35-40=`60`, 45=`70`, 50/55/60-65/70/75/80 mph=`80`/`90`/`100`/`110`/`120`/`130`); aliases like `85`/`95` are NOT matchable (parse error). 25 mph=`40` is intentionally excluded. |
+| **Ships via** | Railway redeploy of the brouter service(s). |
+| **Verified** | Local A/B on stock brouter.de tiles via BRouter's own `WayTags` export (ground truth). Comfort fixed at tiny cost: your NE 74th→St Johns **272 m → 0 m (+1%)**, St Johns→Gateway **616→0 (+1%)**, outer-SE **1791→0 (+2%)**, Belmont→Mt Tabor **43→0 (free)**. Cully→PDX **yields** (1316 m unchanged, 0% — airport road, no calm alt). No failed routes, no blow-ups; ultra essentially unchanged (already avoided these). |
+| **Unwind** | Remove the `hasphysicalbikelane`/`fastnolane` assigns **and** the `add fastnolane` line from all four `.brf` files, then redeploy. |
+| **Tune** | The `2`/`3`/`5` penalty strengths (raise to avoid harder / detour more; lower to yield sooner) and the maxspeed token set. |
+
+**Cull all of A:** revert the A1+A2+A3+A4+A5 file lists above, then redeploy whatever
 routers/web/iOS had already shipped.
 
 ---
@@ -105,8 +128,8 @@ iOS `MapCoordinator.swift` (freehand sketch + connector tap-build),
 
 | Target | Carries | Status |
 |---|---|---|
-| Prod router `brouter` (app's `prod`) | A2 + A3 + **A4** | ✅ A4 deployed 2026-06-24 |
-| Self-build router `brouter-selfbuild` (app's `selfbuild`) | A2 + A3 + **A4** | ✅ A4 deployed 2026-06-24 |
+| Prod router `brouter` (app's `prod`) | A2 + A3 + A4 + **A5** | ✅ A4 deployed 2026-06-24 · A5 deployed 2026-06-26 |
+| Self-build router `brouter-selfbuild` (app's `selfbuild`) | A2 + A3 + A4 + **A5** | ✅ A4 deployed 2026-06-24 · A5 deployed 2026-06-26 |
 | Web (Vercel) | A1 (+ would also ship B1/B2) | ⛔ blocked on mixed tree |
 | iOS (TestFlight) | A1 (+ would also ship B1/B2/B3) | ⛔ blocked on mixed tree |
 | Orphan `brouter-selfbuild` service | stray deploy + a public domain I created | 🧹 to remove |
