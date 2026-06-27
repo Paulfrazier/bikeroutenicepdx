@@ -2,73 +2,316 @@
   {
     "id": "01-sabin-lloyd",
     "name": "Sabin → Lloyd Center",
-    "from": { "name": "Sabin neighborhood", "lng": -122.6420, "lat": 45.5470 },
-    "to":   { "name": "Lloyd Center", "lng": -122.6540, "lat": 45.5310 },
-    "expected_greenways": ["NE Going St", "NE Klickitat St"],
-    "forbidden_streets": ["NE Broadway"],
-    "expected_greenway_coverage": 0.70
+    "from": {
+      "name": "Sabin neighborhood",
+      "lng": -122.642,
+      "lat": 45.547
+    },
+    "to": {
+      "name": "Lloyd Center",
+      "lng": -122.654,
+      "lat": 45.531
+    },
+    "expected_greenways": [
+      "NE Going St",
+      "NE Klickitat St"
+    ],
+    "forbidden_streets": [
+      "NE Broadway"
+    ],
+    "expected_greenway_coverage": 0.7
   },
   {
     "id": "02-stjohns-downtown",
     "name": "St Johns → Downtown",
-    "from": { "name": "St Johns neighborhood", "lng": -122.7550, "lat": 45.5970 },
-    "to":   { "name": "Downtown Portland", "lng": -122.6784, "lat": 45.5230 },
-    "expected_greenways": ["N Willamette Blvd", "N Bryant St", "Steel Bridge", "Broadway Bridge"],
-    "forbidden_streets": ["N Interstate Ave"],
+    "from": {
+      "name": "St Johns neighborhood",
+      "lng": -122.755,
+      "lat": 45.597
+    },
+    "to": {
+      "name": "Downtown Portland",
+      "lng": -122.6784,
+      "lat": 45.523
+    },
+    "expected_greenways": [
+      "N Willamette Blvd",
+      "N Bryant St",
+      "Steel Bridge",
+      "Broadway Bridge"
+    ],
+    "forbidden_streets": [
+      "N Interstate Ave"
+    ],
     "expected_greenway_coverage": 0.65
   },
   {
     "id": "03-hawthorne-ohsu",
     "name": "Hawthorne neighborhood → OHSU",
-    "from": { "name": "Hawthorne neighborhood", "lng": -122.6340, "lat": 45.5120 },
-    "to":   { "name": "OHSU", "lng": -122.6864, "lat": 45.4990 },
-    "expected_greenways": ["SE Lincoln St", "SE Harrison St", "Tilikum Crossing"],
-    "forbidden_streets": ["SE Hawthorne Blvd", "SE Powell Blvd"],
-    "expected_greenway_coverage": 0.70
+    "from": {
+      "name": "Hawthorne neighborhood",
+      "lng": -122.634,
+      "lat": 45.512
+    },
+    "to": {
+      "name": "OHSU",
+      "lng": -122.6864,
+      "lat": 45.499
+    },
+    "expected_greenways": [
+      "SE Lincoln St",
+      "SE Harrison St",
+      "Tilikum Crossing"
+    ],
+    "forbidden_streets": [
+      "SE Hawthorne Blvd",
+      "SE Powell Blvd"
+    ],
+    "expected_greenway_coverage": 0.7
   },
   {
     "id": "04-sellwood-pearl",
     "name": "Sellwood → Pearl District",
-    "from": { "name": "Sellwood neighborhood", "lng": -122.6580, "lat": 45.4720 },
-    "to":   { "name": "Pearl District", "lng": -122.6840, "lat": 45.5270 },
-    "expected_greenways": ["SE 19th Ave", "Springwater Corridor", "Eastbank Esplanade", "Steel Bridge"],
-    "forbidden_streets": ["SE McLoughlin Blvd"],
-    "expected_greenway_coverage": 0.70
+    "from": {
+      "name": "Sellwood neighborhood",
+      "lng": -122.658,
+      "lat": 45.472
+    },
+    "to": {
+      "name": "Pearl District",
+      "lng": -122.684,
+      "lat": 45.527
+    },
+    "expected_greenways": [
+      "SE 19th Ave",
+      "Springwater Corridor",
+      "Eastbank Esplanade",
+      "Steel Bridge"
+    ],
+    "forbidden_streets": [
+      "SE McLoughlin Blvd"
+    ],
+    "expected_greenway_coverage": 0.7
   },
   {
     "id": "05-beaumont-psu",
     "name": "Beaumont → PSU",
-    "from": { "name": "Beaumont neighborhood", "lng": -122.6280, "lat": 45.5530 },
-    "to":   { "name": "Portland State University", "lng": -122.6848, "lat": 45.5119 },
-    "expected_greenways": ["NE Tillamook St", "NE Williams Ave", "NE Vancouver Ave", "SE Hawthorne Blvd", "Tilikum Crossing"],
-    "forbidden_streets": ["NE Sandy Blvd", "E Burnside St"],
-    "expected_greenway_coverage": 0.70
+    "from": {
+      "name": "Beaumont neighborhood",
+      "lng": -122.628,
+      "lat": 45.553
+    },
+    "to": {
+      "name": "Portland State University",
+      "lng": -122.6848,
+      "lat": 45.5119
+    },
+    "expected_greenways": [
+      "NE Tillamook St",
+      "NE Williams Ave",
+      "NE Vancouver Ave",
+      "SE Hawthorne Blvd",
+      "Tilikum Crossing"
+    ],
+    "forbidden_streets": [
+      "NE Sandy Blvd",
+      "E Burnside St"
+    ],
+    "expected_greenway_coverage": 0.7
   },
   {
     "id": "06-belmont-mttabor",
     "name": "Belmont area → Mt Tabor",
-    "from": { "name": "Belmont / SE 30th", "lng": -122.6390, "lat": 45.5170 },
-    "to":   { "name": "Mt Tabor Park", "lng": -122.5960, "lat": 45.5113 },
-    "expected_greenways": ["SE Lincoln St", "SE Harrison St", "SE Salmon St"],
-    "forbidden_streets": ["SE Belmont St"],
-    "expected_greenway_coverage": 0.70
+    "from": {
+      "name": "Belmont / SE 30th",
+      "lng": -122.639,
+      "lat": 45.517
+    },
+    "to": {
+      "name": "Mt Tabor Park",
+      "lng": -122.596,
+      "lat": 45.5113
+    },
+    "expected_greenways": [
+      "SE Lincoln St",
+      "SE Harrison St",
+      "SE Salmon St"
+    ],
+    "forbidden_streets": [
+      "SE Belmont St"
+    ],
+    "expected_greenway_coverage": 0.7
   },
   {
     "id": "07-nw23rd-alberta",
     "name": "NW 23rd → Alberta Arts District",
-    "from": { "name": "NW 23rd Ave / Thurman", "lng": -122.6990, "lat": 45.5320 },
-    "to":   { "name": "Alberta Arts District", "lng": -122.6490, "lat": 45.5600 },
-    "expected_greenways": ["NW Overton St", "NW Pettygrove St", "Broadway Bridge", "NE Tillamook St"],
-    "forbidden_streets": ["W Burnside St", "E Burnside St", "NE Sandy Blvd"],
+    "from": {
+      "name": "NW 23rd Ave / Thurman",
+      "lng": -122.699,
+      "lat": 45.532
+    },
+    "to": {
+      "name": "Alberta Arts District",
+      "lng": -122.649,
+      "lat": 45.56
+    },
+    "expected_greenways": [
+      "NW Overton St",
+      "NW Pettygrove St",
+      "Broadway Bridge",
+      "NE Tillamook St"
+    ],
+    "forbidden_streets": [
+      "W Burnside St",
+      "E Burnside St",
+      "NE Sandy Blvd"
+    ],
     "expected_greenway_coverage": 0.65
   },
   {
     "id": "08-cully-pdx",
     "name": "Cully → PDX Airport",
-    "from": { "name": "Cully neighborhood", "lng": -122.5990, "lat": 45.5580 },
-    "to":   { "name": "PDX Airport", "lng": -122.5975, "lat": 45.5887 },
-    "expected_greenways": ["NE Going St", "NE 47th Ave", "Marine Drive"],
-    "forbidden_streets": ["NE Sandy Blvd", "NE Columbia Blvd"],
+    "from": {
+      "name": "Cully neighborhood",
+      "lng": -122.599,
+      "lat": 45.558
+    },
+    "to": {
+      "name": "PDX Airport",
+      "lng": -122.5975,
+      "lat": 45.5887
+    },
+    "expected_greenways": [
+      "NE Going St",
+      "NE 47th Ave",
+      "Marine Drive"
+    ],
+    "forbidden_streets": [
+      "NE Sandy Blvd",
+      "NE Columbia Blvd"
+    ],
     "expected_greenway_coverage": 0.65
+  },
+  {
+    "id": "09-rosecity-stjohns",
+    "name": "South of Rose City Park → St Johns",
+    "from": {
+      "name": "South of Rose City Park",
+      "lng": -122.606,
+      "lat": 45.53
+    },
+    "to": {
+      "name": "St Johns",
+      "lng": -122.7455,
+      "lat": 45.5981
+    },
+    "expected_greenways": [
+      "NE Tillamook St",
+      "NE Going St",
+      "N Concord Ave",
+      "N Willamette Blvd"
+    ],
+    "forbidden_streets": [
+      "NE Sandy Blvd",
+      "NE Lombard St"
+    ],
+    "expected_greenway_coverage": 0.65
+  },
+  {
+    "id": "10-house-omsi",
+    "name": "House → OMSI",
+    "from": {
+      "name": "House (Sabin/Alameda)",
+      "lng": -122.6431,
+      "lat": 45.5497
+    },
+    "to": {
+      "name": "OMSI",
+      "lng": -122.6657,
+      "lat": 45.5083
+    },
+    "expected_greenways": [
+      "NE Tillamook St",
+      "NE 7th Ave",
+      "Eastbank Esplanade",
+      "SE Water Ave"
+    ],
+    "forbidden_streets": [
+      "NE Broadway"
+    ],
+    "expected_greenway_coverage": 0.7
+  },
+  {
+    "id": "11-house-trackers",
+    "name": "House → Trackers Earth",
+    "from": {
+      "name": "House (Sabin/Alameda)",
+      "lng": -122.6431,
+      "lat": 45.5497
+    },
+    "to": {
+      "name": "Trackers Earth (Brooklyn)",
+      "lng": -122.6515,
+      "lat": 45.4895
+    },
+    "expected_greenways": [
+      "NE Tillamook St",
+      "SE Ankeny St",
+      "SE Clinton St",
+      "SE 26th Ave"
+    ],
+    "forbidden_streets": [
+      "SE Powell Blvd",
+      "SE Milwaukie Ave"
+    ],
+    "expected_greenway_coverage": 0.7
+  },
+  {
+    "id": "12-house-pcg",
+    "name": "House → Portland City Grill",
+    "from": {
+      "name": "House (Sabin/Alameda)",
+      "lng": -122.6431,
+      "lat": 45.5497
+    },
+    "to": {
+      "name": "Portland City Grill (Big Pink)",
+      "lng": -122.676,
+      "lat": 45.5226
+    },
+    "expected_greenways": [
+      "NE Tillamook St",
+      "NE Williams Ave",
+      "Broadway Bridge"
+    ],
+    "forbidden_streets": [
+      "NE Broadway",
+      "W Burnside St"
+    ],
+    "expected_greenway_coverage": 0.65
+  },
+  {
+    "id": "13-hmart-kpark",
+    "name": "H Mart (Belmont) → Kʰunamokwst Park",
+    "from": {
+      "name": "H Mart (SE Belmont)",
+      "lng": -122.6305,
+      "lat": 45.5166
+    },
+    "to": {
+      "name": "Kʰunamokwst Park (Cully)",
+      "lng": -122.6088,
+      "lat": 45.5586
+    },
+    "expected_greenways": [
+      "SE Ankeny St",
+      "NE Going St",
+      "NE Klickitat St"
+    ],
+    "forbidden_streets": [
+      "E Burnside St",
+      "NE Sandy Blvd"
+    ],
+    "expected_greenway_coverage": 0.7
   }
 ]
