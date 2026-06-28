@@ -403,6 +403,15 @@ assign pbotcalmbonus =
    else if pbot_calm=moderate then -0.05
    else 0
 
+# THROUGH-ROUTING GUARD: access=destination|private ways are LOCAL-access only,
+# not legitimate through routes. BRouter otherwise treats access=destination as
+# fully passable, so it will cut through e.g. a gravel destination-alley and fake
+# a connection that doesn't really exist on the ground (the SE 16th/Division alley
+# that masqueraded as a 16th->17th hop). Penalize hard so the router avoids them
+# as a through-cut — a short stub still resolves if it's genuinely the only option
+# or the actual destination. Keys off the standard `access` tag (no rebuild needed).
+assign throughpenalty = if access=destination|private then 8 else 0
+
 #
 # calculate the cost-factor, which is the factor
 # by which the distance of a way-segment is multiplied
@@ -441,6 +450,7 @@ assign costfactor
   add fastnolane           # >25mph + no physical bike lane
   add weaklanepenalty      # plain unbuffered door-zone lane on a classified street
   add pbotcalmbonus        # PBOT SR_LT/SR_MT recommended-quiet-street preference (negative)
+  add throughpenalty       # access=destination|private alleys: not a through route
 
   #
   # apply oneway-and access-penalties
