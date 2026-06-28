@@ -762,6 +762,14 @@ button {
   border-color: var(--color-accent, #16a34a);
 }
 
+/* Build-mode "Finish" CTA — links the waypoints into a route. */
+.build-controls__btn--primary,
+.build-controls__btn--primary:hover:not(:disabled) {
+  color: #fff;
+  background: var(--color-accent, #16a34a);
+  border-color: var(--color-accent, #16a34a);
+}
+
 .build-controls__btn:disabled {
   opacity: 0.45;
   cursor: default;

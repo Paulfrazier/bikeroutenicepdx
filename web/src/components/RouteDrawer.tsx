@@ -36,6 +36,8 @@ interface RouteDrawerProps {
   onUndoWaypoint: () => void;
   /** Build mode: remove every waypoint at once. */
   onClearWaypoints: () => void;
+  /** Build mode: link the waypoints into a route and exit Build. */
+  onFinishBuild: () => void;
   /** Number of pass-through waypoints currently on the route. */
   waypointCount: number;
   /** Draw mode: remove the last stroke (or undo the wipe when empty). */
@@ -59,7 +61,7 @@ interface RouteDrawerProps {
 const TOOLS: { id: Exclude<EditTool, null>; label: string; icon: string; hint: string }[] = [
   { id: "through", label: "Through", icon: "↦", hint: "Tap the start then the end of a section on the map. Tap a section's pin to remove it." },
   { id: "drag", label: "Drag", icon: "✎", hint: "Drag the route on the map to reshape it — it re-snaps to roads." },
-  { id: "build", label: "Build", icon: "📍", hint: "Starts fresh from your start & end. Tap the map to add waypoints; drag a pin to move it, tap a pin to remove it." },
+  { id: "build", label: "Build", icon: "📍", hint: "Starts fresh from your start & end. Tap the map to drop waypoints (joined by straight lines); drag a pin to move it, tap a pin to remove it. Press ✓ Finish to link them into a route." },
   { id: "draw", label: "Draw", icon: "✏️", hint: "Starts fresh from your start & end. Draw the route in strokes (they snap to roads) — lift and continue where you left off. Tap “Move map” to pan/zoom, then resume. Drag a point to adjust." },
 ];
 
@@ -76,6 +78,7 @@ export function RouteDrawer({
   onSelectTool,
   onUndoWaypoint,
   onClearWaypoints,
+  onFinishBuild,
   waypointCount,
   onUndoStroke,
   onClearStrokes,
@@ -151,6 +154,14 @@ export function RouteDrawer({
                 disabled={waypointCount === 0}
               >
                 ✕ Clear
+              </button>
+              <button
+                type="button"
+                className="build-controls__btn build-controls__btn--primary"
+                onClick={onFinishBuild}
+                disabled={waypointCount === 0}
+              >
+                ✓ Finish
               </button>
             </div>
           )}

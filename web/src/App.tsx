@@ -49,7 +49,7 @@ import {
   assembleDrawnRoute,
   MAX_VIAS,
 } from "./geo";
-import { fetchCorridor, fetchMatch } from "./api";
+import { fetchCorridor } from "./api";
 import type {
   LngLat,
   Via,
@@ -84,10 +84,11 @@ export default function App() {
   // careful edit isn't wiped when you nudge start/end.
   const [vias, setVias] = useState<Via[]>([]);
   const [editing, setEditing] = useState(false);
-  // Draw mode: a fully hand-drawn route. Each stroke is snapped to roads (via
-  // /match) and kept; strokes + the start/end pins are joined by STRAIGHT bridges
-  // (see assembleDrawnRoute). When non-empty, the drawn path IS the route —
-  // it overrides the BRouter auto-route. Persists across endpoint tweaks.
+  // Draw mode: a fully hand-drawn route. Each stroke is kept VERBATIM (no
+  // snapping — the line stays exactly where you traced it); strokes + the
+  // start/end pins are joined by STRAIGHT bridges (see assembleDrawnRoute). When
+  // non-empty, the drawn path IS the route — it overrides the BRouter auto-route.
+  // Persists across endpoint tweaks.
   const [drawnStrokes, setDrawnStrokes] = useState<ManualSegment[]>([]);
   const [drawMode, setDrawMode] = useState(false);
   // Draw "pause": while on, the drag gesture pans/zooms the map instead of
@@ -95,8 +96,10 @@ export default function App() {
   // whenever Draw turns off (see effect below).
   const [drawPaused, setDrawPaused] = useState(false);
   // Guided-draw ("Build") mode: tap the map to append pass-through waypoints one
-  // at a time (router auto-snaps the path between them), tap a pin to remove it.
-  // Unlike drag mode (arc-length insertion), Build APPENDS in tap order.
+  // at a time, tap a pin to remove it. While building, the waypoints are joined
+  // by STRAIGHT lines and are NOT routed; pressing Finish (handleFinishBuild)
+  // flips this off so the waypoints feed BRouter and the route links through
+  // them. Unlike drag mode (arc-length insertion), Build APPENDS in tap order.
   const [buildMode, setBuildMode] = useState(false);
   // Build & Draw are "from scratch" canvases — entering either wipes all
   // customization except the start/end pins. We snapshot the wiped state here so
@@ -310,7 +313,12 @@ export default function App() {
     saveRoutePreference(pref);
   }, []);
 
-  const viaCoords = useMemo(() => vias.map((v) => v.at), [vias]);
+  // While Build is active the waypoints are previewed as straight lines and are
+  // NOT routed; Finish flips buildMode off, which lets them feed the router.
+  const viaCoords = useMemo(
+    () => (buildMode ? [] : vias.map((v) => v.at)),
+    [vias, buildMode]
+  );
   const { route, loading: routeLoading, error: routeError } = useRoute(
     from,
     to,
@@ -340,8 +348,13 @@ export default function App() {
       ((drawMode && drawnStrokes.length === 0) ||
         (buildMode && vias.length === 0));
     if (blankCanvas) return null;
-    // A fully hand-drawn route (Draw mode) overrides everything: the snapped
-    // strokes joined by straight bridges to the pins ARE the route.
+    // Build mode (pre-Finish): the waypoints are previewed as STRAIGHT lines
+    // from → wp₁ → … → end. No routing happens until Finish links them.
+    if (!nav.navigating && buildMode && vias.length > 0 && from && to) {
+      return [from, ...vias.map((v) => v.at), to];
+    }
+    // A fully hand-drawn route (Draw mode) overrides everything: the raw strokes
+    // joined by straight bridges to the pins ARE the route.
     if (!nav.navigating && drawnStrokes.length > 0 && from && to) {
       return assembleDrawnRoute(from, to, drawnStrokes);
     }
@@ -448,9 +461,10 @@ export default function App() {
 
   // Guided-draw ("Build") mode: a bare map tap APPENDS a pass-through waypoint at
   // the end of the chain (tap order), so the route is built piecemeal start →
-  // wp₁ → … → end. Unlike a drag insert, we don't reorder by arc-length. The
-  // point snaps to the nearest bike-network edge (unless that collapses onto an
-  // existing waypoint) and is capped at MAX_VIAS.
+  // wp₁ → … → end (joined by straight lines until Finish). Unlike a drag insert,
+  // we don't reorder by arc-length. The point snaps to the nearest bike-network
+  // edge (unless that collapses onto an existing waypoint) and is capped at
+  // MAX_VIAS.
   const handleAddWaypoint = useCallback((rawAt: LngLat) => {
     // Committing to the new canvas — the wipe is no longer undoable.
     setPreResetSnapshot(null);
@@ -481,28 +495,23 @@ export default function App() {
     setVias([]);
   }, []);
 
-  // Finished a freehand draw stroke: snap it to roads (/match, follow=true) and
-  // append it to the drawn route. Stay in draw mode so drawing is resumable —
-  // the next stroke picks up from the pen. On a snap failure keep the verbatim
-  // trace so a stroke is never lost.
-  const handleDrawStroke = useCallback(async (coords: LngLat[]) => {
+  // Build mode Finish: commit the waypoints. Leaving buildMode ungates viaCoords,
+  // so useRoute links from → vias → to via BRouter (the "final linking"), and the
+  // straight-line preview gives way to the real routed geometry. Close the edit
+  // panel back to the plain routed view (reopen Edit → Drag to fine-tune).
+  const handleFinishBuild = useCallback(() => {
+    setPreResetSnapshot(null);
+    setBuildMode(false);
+    setEditOpen(false);
+  }, []);
+
+  // Finished a freehand draw stroke: keep it VERBATIM (no snapping — the line
+  // stays exactly where it was traced) and append it to the drawn route. Stay in
+  // draw mode so drawing is resumable — the next stroke picks up from the pen.
+  const handleDrawStroke = useCallback((coords: LngLat[]) => {
     if (coords.length < 2) return;
     setPreResetSnapshot(null);
-    let snapped = coords;
-    try {
-      const res = await fetchMatch({
-        trace: coords,
-        start: coords[0],
-        end: coords[coords.length - 1],
-        follow: true,
-      });
-      if (res.geometry.coordinates.length >= 2) {
-        snapped = res.geometry.coordinates;
-      }
-    } catch {
-      // Network/match failure — fall back to the raw trace (kept verbatim).
-    }
-    setDrawnStrokes((prev) => [...prev, { id: nextSegId(), coords: snapped }]);
+    setDrawnStrokes((prev) => [...prev, { id: nextSegId(), coords }]);
   }, []);
 
   // Draw mode Undo: drop the last stroke; once empty, restore the snapshot.
@@ -788,6 +797,7 @@ export default function App() {
               onSelectTool={selectEditTool}
               onUndoWaypoint={handleUndoWaypoint}
               onClearWaypoints={handleClearWaypoints}
+              onFinishBuild={handleFinishBuild}
               waypointCount={vias.length}
               onUndoStroke={handleUndoStroke}
               onClearStrokes={handleClearStrokes}
@@ -965,6 +975,7 @@ export default function App() {
                 onSelectTool={selectEditTool}
                 onUndoWaypoint={handleUndoWaypoint}
                 onClearWaypoints={handleClearWaypoints}
+                onFinishBuild={handleFinishBuild}
                 waypointCount={vias.length}
                 onUndoStroke={handleUndoStroke}
                 onClearStrokes={handleClearStrokes}
