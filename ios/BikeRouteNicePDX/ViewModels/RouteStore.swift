@@ -232,7 +232,6 @@ final class RouteStore {
     private(set) var useLocationTick = 0
     func useMyLocationAsStart() { useLocationTick += 1 }
 
-    private let match = MatchService()
     private let router = RouteService()
     private let search = SearchService()
     private let corridorService = CorridorService()
@@ -490,6 +489,20 @@ final class RouteStore {
         // implicit here because neither reshape mode is ever active while navigating.
         if (isDrawMode && manualSegments.isEmpty) || (isBuildMode && vias.isEmpty) {
             snapped = nil
+            return
+        }
+        // Build mode (pre-Finish): preview the waypoints as STRAIGHT lines
+        // start → wp₁ → … → end. No routing happens until Finish links them
+        // (web parity with the buildMode branch of `activeCoords`).
+        if isBuildMode, !vias.isEmpty, let startC = start?.coordinate, let endC = end?.coordinate {
+            var coords = [startC]
+            coords.append(contentsOf: vias.map(\.coordinate))
+            coords.append(endC)
+            guard coords.count >= 2 else { snapped = nil; return }
+            var base = SnappedRoute(coordinates: coords, distanceMeters: GeoMath.length(coords))
+            base.durationSeconds = 0
+            base.steps = []
+            snapped = await classified(base)
             return
         }
         // A fully hand-drawn route (Draw strokes) overrides everything.
@@ -783,6 +796,15 @@ final class RouteStore {
             vias.remove(at: index)
         }
 
+        // In Build mode the chain is a straight-line preview (not yet linked), so a
+        // delete just re-previews — no routing until Finish.
+        if isBuildMode {
+            isManuallyEdited = !vias.isEmpty
+            phase = .routed
+            await recomputeDisplay()
+            return
+        }
+
         do {
             let routed = try await router.route(
                 from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue
@@ -803,36 +825,21 @@ final class RouteStore {
     /// at the end of the chain (tap order, NOT arc-length), so the route builds
     /// piecemeal start → wp₁ → … → end. The point snaps to the nearest bike-network
     /// edge (unless that collapses onto an existing via, ≤8m) and is capped at
-    /// maxVias. Re-routes; reverts on failure. Mirrors the web `handleAddWaypoint`.
+    /// maxVias. While building, waypoints are joined by STRAIGHT lines and are NOT
+    /// routed — Finish (`finishBuild`) links them. Mirrors the web `handleAddWaypoint`.
     func addWaypoint(_ rawAt: CLLocationCoordinate2D) async {
         guard vias.count < Self.maxVias,
-              let startC = start?.coordinate, let endC = end?.coordinate else { return }
+              start?.coordinate != nil, end?.coordinate != nil else { return }
 
         // Committing to the new canvas — the wipe is no longer undoable.
         preResetSnapshot = nil
-        let previousVias = vias
-        let previousSnapped = snapped
-        let previousAuto = autoRoute
         let snappedPt = await BikeFriendliness.shared.nearestNetworkPoint(rawAt) ?? rawAt
         let at = vias.contains(where: { GeoMath.distance($0.coordinate, snappedPt) < 8 }) ? rawAt : snappedPt
         vias.append(Via(coordinate: at, precise: false))
         isManuallyEdited = true
         phase = .routed
-
-        do {
-            let routed = try await router.route(
-                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue
-            )
-            guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
-            autoRoute = routed
-            await recomputeDisplay()
-            isManuallyEdited = false
-        } catch {
-            vias = previousVias
-            autoRoute = previousAuto
-            snapped = previousSnapped
-            isManuallyEdited = !previousVias.isEmpty
-        }
+        // Straight-line preview only; the route is linked on Finish.
+        await recomputeDisplay()
     }
 
     /// Build mode Undo: drop the most-recently-added waypoint and re-route; once the
@@ -846,27 +853,25 @@ final class RouteStore {
         await restoreSnapshot()
     }
 
-    /// Build mode: remove every waypoint at once and re-route start → end.
+    /// Build mode: remove every waypoint at once. The chain is a straight-line
+    /// preview (not yet linked), so this just blanks the canvas — no routing.
     func clearWaypoints() async {
-        guard !vias.isEmpty, let startC = start?.coordinate, let endC = end?.coordinate else { return }
-        let previousVias = vias
-        let previousSnapped = snapped
-        let previousAuto = autoRoute
+        guard !vias.isEmpty else { return }
         vias = []
-        do {
-            let routed = try await router.route(
-                from: startC, to: endC, vias: [], preference: routePreference.rawValue, engine: routingEngine.rawValue
-            )
-            guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
-            autoRoute = routed
-            await recomputeDisplay()
-            isManuallyEdited = false
-            phase = .routed
-        } catch {
-            vias = previousVias
-            autoRoute = previousAuto
-            snapped = previousSnapped
-        }
+        isManuallyEdited = false
+        phase = .routed
+        await recomputeDisplay()
+    }
+
+    /// Build mode Finish: link the waypoints into a route. Leaving Build mode lets
+    /// the waypoints feed the router (start → vias → end via BRouter — the "final
+    /// linking"), replacing the straight-line preview. Mirrors web `handleFinishBuild`.
+    func finishBuild() async {
+        isBuildMode = false
+        preResetSnapshot = nil
+        guard !vias.isEmpty else { await recomputeDisplay(); return }
+        isManuallyEdited = true
+        await rerouteKeepingPhase()
     }
 
     /// Long-press on the line: drop a PRECISE anchor exactly there (no snap) so
@@ -917,24 +922,15 @@ final class RouteStore {
         vias[index].precise.toggle()
     }
 
-    /// Finished a freehand Draw stroke: snap it to roads (`/match`, follow=true) and
-    /// append it to the drawn route. Stays in Draw mode so drawing is resumable (the
-    /// next stroke picks up from the pen). On a snap failure the verbatim trace is
-    /// kept so a stroke is never lost. Mirrors the web `handleDrawStroke`.
+    /// Finished a freehand Draw stroke: keep it VERBATIM (no snapping — the line
+    /// stays exactly where it was traced) and append it to the drawn route. Stays
+    /// in Draw mode so drawing is resumable (the next stroke picks up from the pen).
+    /// Mirrors the web `handleDrawStroke`.
     func addDrawnStroke(_ coords: [CLLocationCoordinate2D]) async {
         guard coords.count >= 2 else { return }
         // Committing to the new canvas — the wipe is no longer undoable.
         preResetSnapshot = nil
-        var snappedCoords = coords
-        do {
-            let res = try await match.snap(
-                trace: coords, start: coords.first, end: coords.last, follow: true
-            )
-            if res.coordinates.count >= 2 { snappedCoords = res.coordinates }
-        } catch {
-            // Network / match failure — fall back to the raw trace (kept verbatim).
-        }
-        manualSegments.append(ManualSegment(coords: snappedCoords))
+        manualSegments.append(ManualSegment(coords: coords))
         isManuallyEdited = false
         await recomputeDisplay()
         phase = .routed

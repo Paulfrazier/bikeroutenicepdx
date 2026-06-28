@@ -396,10 +396,10 @@ struct ControlsBar: View {
     /// phase) hint, so it isn't covered here.
     private var activeReshapeHint: String? {
         if store.isBuildMode {
-            return "Starts fresh from your start & end. Tap the map to add waypoints; drag a pin to move it, tap a pin to remove it."
+            return "Starts fresh from your start & end. Tap the map to drop waypoints (joined by straight lines); drag a pin to move it, tap a pin to remove it. Tap Finish to link them into a route."
         }
         if store.isDrawMode {
-            return "Starts fresh from your start & end. Draw the route in strokes (they snap to roads) — lift and continue where you left off. Tap “Move map” to pan/zoom, then resume. Drag a point to adjust."
+            return "Starts fresh from your start & end. Draw the route in strokes (kept exactly as drawn) — lift and continue where you left off. Tap “Move map” to pan/zoom, then resume. Drag a point to adjust."
         }
         if store.isEditMode {
             return "Drag the route on the map to reshape it — it re-snaps to roads."
@@ -411,16 +411,27 @@ struct ControlsBar: View {
     }
 
     /// Build-mode controls: waypoint count + Undo (drop last, or undo the wipe when
-    /// empty) + Clear. Build always routes through tapped waypoints (the old
-    /// "Snap to roads" toggle / sketch mode is retired).
+    /// empty) + Clear, then a Finish button that links the straight-line chain into
+    /// a route. Waypoints are joined by straight lines until Finish (web parity).
     private var buildControlsRow: some View {
-        countControls(
-            count: store.vias.count,
-            noun: "waypoint",
-            canRestore: store.canRestoreSnapshot,
-            undo: { Task { await store.undoWaypoint() } },
-            clear: { Task { await store.clearWaypoints() } }
-        )
+        VStack(spacing: 8) {
+            countControls(
+                count: store.vias.count,
+                noun: "waypoint",
+                canRestore: store.canRestoreSnapshot,
+                undo: { Task { await store.undoWaypoint() } },
+                clear: { Task { await store.clearWaypoints() } }
+            )
+            Button {
+                Task { await store.finishBuild() }
+            } label: {
+                Label("Finish", systemImage: "checkmark")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(store.vias.isEmpty)
+        }
     }
 
     /// Draw-mode controls: a "✋ Move map / ✏️ Draw" pause toggle (pan/zoom ⇄ draw)
