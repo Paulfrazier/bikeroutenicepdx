@@ -12,6 +12,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { serve } from "@hono/node-server";
+import newrelic from "newrelic";
 import { config } from "./config.js";
 import routeHandler from "./routes/route.js";
 import matchHandler from "./routes/match.js";
@@ -27,6 +28,15 @@ const app = new Hono();
 // ---------------------------------------------------------------------------
 
 app.use("*", logger());
+
+// New Relic: name transactions by the matched route pattern (e.g. "POST /route",
+// "GET /search") instead of the generic NormalizedUri fallback. `routePath` is the
+// Hono route template, never the raw URL — so no query string or PII leaks into the
+// transaction name. PII attributes are stripped in newrelic.cjs.
+app.use("*", async (c, next) => {
+  newrelic.setTransactionName(`${c.req.method} ${c.req.routePath}`);
+  await next();
+});
 
 // CORS: allow the Vite dev server + every production web origin. WEB_ORIGIN is a
 // comma-separated list so the same server serves the vercel.app alias AND the
