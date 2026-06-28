@@ -45,14 +45,14 @@ function main(): void {
     );
   }
 
-  const { busy, caution2, caution3, caution4, total } = bakeRenderClass(
+  const { busy, caution, caution4, total } = bakeRenderClass(
     bike.features,
     speeds,
     MIN_FAST_MPH,
     arterials
   );
   console.log(
-    `[bake] rclass on ${total} features — ${busy} on ≥${MIN_FAST_MPH} mph → "busy"; arterial-lane gradient → caution2 ${caution2} (≤2 lanes) · caution3 ${caution3} (3) · caution4 ${caution4} (≥${MIN_STROAD_LANES})`
+    `[bake] rclass on ${total} features — ${busy} on ≥${MIN_FAST_MPH} mph → "busy"; lane on arterial → caution ${caution} (2–3 lanes) · caution4 ${caution4} (≥${MIN_STROAD_LANES} lanes, red)`
   );
 
   const json = JSON.stringify(bike);

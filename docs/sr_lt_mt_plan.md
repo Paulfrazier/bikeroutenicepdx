@@ -1,5 +1,19 @@
 # BikeNice: add PBOT "Shared Roadway" (SR_LT / SR_MT) calm streets
 
+## ADDENDUM (2026-06-28) — calm_mod reclassified as higher-stress
+PBOT's own map taxonomy puts SR_LT and SR_MT in DIFFERENT comfort tiers: SR_LT is
+low-stress, SR_MT ("Shared Roadway with Wider Outside Lane", moderate/higher
+traffic) is higher-stress. Data agreed (calm_mod is 84% on arterials vs calm's
+27%). So `calm_mod` was:
+- **recolored** olive `#A3B18A` → goldenrod `#CA8A04` (warm, off the green family),
+  still dashed — web + iOS.
+- **dropped from `calm_coverage`**: greenway-coverage.ts `DISPLAY_TO_CLASS` now
+  maps `calm_mod` → `standard` (was `calm`). Only SR_LT counts as calm.
+- Routing preference is UNCHANGED — the mild `pbotcalmbonus` (−0.05 SR_MT) in
+  the BRouter profiles stays; this addendum is display + coverage only.
+Same change also merged the caution lane gradient (caution2/3 → one orange
+`caution`; caution4 → red). See docs/ROUTING_COLOR_LOGIC.md.
+
 ## STATUS (resumed 2026-06-27)
 - [x] Surface 1 DATA — export-bike-network.ts pulls layer-4 SR_LT(4199)/SR_MT(534),
       tags calm/calm_mod, appends to all 3 bike-network.geojson copies. VERIFIED:

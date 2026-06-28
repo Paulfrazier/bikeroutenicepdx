@@ -238,14 +238,13 @@ function pointFeature(at: LngLat): GeoJSON.Feature {
 const LEGEND_ITEMS = [
   { cls: "protected", color: ROUTE_CLASS_COLORS.protected, label: "Protected bike lane",      dashed: false },
   { cls: "greenway",  color: ROUTE_CLASS_COLORS.greenway,  label: "Neighborhood greenway",    dashed: false },
-  { cls: "calm",      color: ROUTE_CLASS_COLORS.calm,      label: "Quiet street (recommended)",       dashed: true  },
   { cls: "path",      color: ROUTE_CLASS_COLORS.path,      label: "Off-street path",          dashed: false },
+  { cls: "calm",      color: ROUTE_CLASS_COLORS.calm,      label: "Quiet street (recommended)",       dashed: true  },
   { cls: "buffered",  color: ROUTE_CLASS_COLORS.buffered,  label: "Buffered bike lane",       dashed: false },
-  { cls: "calm_mod",  color: ROUTE_CLASS_COLORS.calm_mod,  label: "Quiet-ish street (recommended)",   dashed: true  },
   { cls: "lane",      color: ROUTE_CLASS_COLORS.lane,      label: "Bike lane",                dashed: false },
-  { cls: "caution2",  color: ROUTE_CLASS_COLORS.caution2,  label: "Bike lane · 2-lane arterial",   dashed: false },
-  { cls: "caution3",  color: ROUTE_CLASS_COLORS.caution3,  label: "Bike lane · 3-lane arterial",   dashed: false },
-  { cls: "caution4",  color: ROUTE_CLASS_COLORS.caution4,  label: "Bike lane · 4+ lane arterial",  dashed: false },
+  { cls: "caution",   color: ROUTE_CLASS_COLORS.caution,   label: "Bike lane · busy arterial",     dashed: false },
+  { cls: "caution4",  color: ROUTE_CLASS_COLORS.caution4,  label: "Bike lane · 4+ lane stroad",    dashed: false },
+  { cls: "calm_mod",  color: ROUTE_CLASS_COLORS.calm_mod,  label: "Shared roadway · moderate traffic", dashed: true  },
   { cls: "shared",    color: ROUTE_CLASS_COLORS.shared,    label: "Shared roadway",           dashed: true  },
   { cls: "quiet",     color: ROUTE_CLASS_COLORS.quiet,     label: "Quiet street",             dashed: false },
   { cls: "busy",      color: ROUTE_CLASS_COLORS.busy,      label: "Fast or high-stress road — use caution", dashed: true  },
@@ -591,7 +590,7 @@ export function Map({
       });
 
       // Layer 1 — dashed: shared roadways (gray), fast-street lanes (red), and the
-      // recommended-but-unbuilt calm/calm_mod streets (sage/olive). Bottom.
+      // no-facility calm (sage) / calm_mod (goldenrod, higher-stress) streets. Bottom.
       // Filter reuses ROUTE_CLASS_DASHED so the overlay's dashed set can never
       // drift from the route line's.
       map.addLayer({
@@ -631,8 +630,7 @@ export function Map({
           // Draw order within this layer: higher number = painted on top
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           "line-sort-key": ["match", ["get", "rclass"],
-            "caution2", 2,
-            "caution3", 2,
+            "caution", 2,
             "caution4", 2,
             "lane", 3,
             "buffered", 4,
@@ -650,9 +648,8 @@ export function Map({
             "protected", "#6D28D9",
             "buffered",  "#0891B2",
             "lane",      "#F59E0B",
-            "caution2",  "#FB923C",
-            "caution3",  "#EA580C",
-            "caution4",  "#9A3412",
+            "caution",   "#EA580C",
+            "caution4",  "#DC2626",
             "path",      "#B45309",
             "#9CA3AF", // fallback
           ],
@@ -662,12 +659,12 @@ export function Map({
             "interpolate", ["linear"], ["zoom"],
             10, ["match", ["get", "rclass"],
               ["protected", "greenway", "path"], 1.5,
-              ["lane", "buffered", "caution2", "caution3", "caution4"], 1.2,
+              ["lane", "buffered", "caution", "caution4"], 1.2,
               1.0,
             ],
             16, ["match", ["get", "rclass"],
               ["protected", "greenway", "path"], 5,
-              ["lane", "buffered", "caution2", "caution3", "caution4"], 3.5,
+              ["lane", "buffered", "caution", "caution4"], 3.5,
               2.5,
             ],
           ] as any,

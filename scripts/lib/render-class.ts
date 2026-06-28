@@ -8,10 +8,11 @@
  * down-rate it to "busy" (red) — the SAME signal the route classifier applies —
  * so the static overlay and the route never disagree, and Lombard/MLK read red
  * on the map before you even route on them. A milder context — a painted lane on
- * a slower arterial — down-rates only to "caution2/3/4" (an orange gradient that
- * darkens with the arterial's lane count): still a lane, just a stressful street,
- * distinct from the red danger signal (see bakeRenderClass). Physically separated
- * facilities (protected / greenway / path) are NEVER down-rated.
+ * a slower arterial — down-rates to "caution" (orange) on a 2–3 lane busy
+ * arterial, or "caution4" (red) once it's a 4+ lane stroad: still a lane, just a
+ * stressful street, distinct from the red-DASHED danger signal (see
+ * bakeRenderClass). Physically separated facilities (protected / greenway / path)
+ * are NEVER down-rated.
  *
  * The downgrade keys off POSTED SPEED only (not the bicycle high-crash layer) so
  * it lines up with the BRouter `safety-ultra` maxspeed penalty, which can only
@@ -234,12 +235,12 @@ function maxLanesAlong(geom: FeatureLike["geometry"], grid: FastGrid): number {
   return best;
 }
 
-/** Lane count → caution render tier (orange gradient; darker = more lanes).
- * "one more lane is one more lane" — graded rather than a single 4+ cliff. */
-function cautionTier(lanes: number): "caution2" | "caution3" | "caution4" {
+/** Lane count → caution render tier. Two tiers: a single orange "caution" for a
+ * lane on a 2–3 lane busy arterial, and red "caution4" once the road is a 4+
+ * lane stroad (lane present, but stressful enough to read as red). */
+function cautionTier(lanes: number): "caution" | "caution4" {
   if (lanes >= MIN_STROAD_LANES) return "caution4";
-  if (lanes === 3) return "caution3";
-  return "caution2";
+  return "caution";
 }
 
 /**
@@ -250,18 +251,17 @@ function cautionTier(lanes: number): "caution2" | "caution3" | "caution4" {
  *   - any unprotected lane (lane/buffered/shared) along a ≥ minMph FAST street.
  *     A painted facility stranded on a 40+ mph road is the danger signal.
  *
- *   "caution2/3/4" (orange gradient — a lane, but a stressful street; darker as
- *   the road widens; all count toward route comfort-coverage):
- *   - a plain unbuffered lane (PBOT "lane"/BL) along an arterial, graded by the
- *     arterial's OSM `lanes`: ≤2 → caution2, 3 → caution3, 4+ → caution4. The
- *     door-zone collector-lane case (e.g. NE 7th Ave is 3-lane → caution3; SE
- *     Irving / NE 16th are 1–2 lane → caution2). Buffered lanes (BBL) are spared
- *     unless the road is a 4+ lane stroad (below). Mirrors the graded BRouter
- *     self-build weaklane penalty. Skipped when `arterials` is omitted.
+ *   "caution" (orange) and "caution4" (red) — a lane, but a stressful street;
+ *   both count toward route comfort-coverage:
+ *   - a plain unbuffered lane (PBOT "lane"/BL) along an arterial: "caution" on a
+ *     2–3 lane busy arterial (e.g. SE 52nd, NE 7th), "caution4" once the road is
+ *     a 4+ lane stroad. Buffered lanes (BBL) are spared unless the road is a 4+
+ *     lane stroad (below). Mirrors the BRouter self-build weaklane penalty.
+ *     Skipped when `arterials` is omitted.
  *   - any OTHER unprotected facility (buffered/shared) along a MULTI-LANE stroad
  *     (`lanes` ≥ MIN_STROAD_LANES, e.g. Foster/Powell) → caution4. Spares calm
  *     2–3 lane buffered lanes. A plain lane on the same stroad already lands on
- *     caution4 via the gradient above, so the two never split colors.
+ *     caution4 via cautionTier, so the two never split colors.
  *
  * Returns a per-tier count summary. Separated facilities are never down-rated.
  */
@@ -270,10 +270,10 @@ export function bakeRenderClass(
   speeds: FCLike,
   minMph = MIN_FAST_MPH,
   arterials?: FCLike
-): { busy: number; caution2: number; caution3: number; caution4: number; total: number } {
+): { busy: number; caution: number; caution4: number; total: number } {
   const grid = buildFastSpeedGrid(speeds, minMph);
   const arterialGrid = arterials ? buildArterialLaneGrid(arterials) : null;
-  const counts = { busy: 0, caution2: 0, caution3: 0, caution4: 0 };
+  const counts = { busy: 0, caution: 0, caution4: 0 };
   for (const f of bikeFeatures) {
     const cls = String(f.properties?.["class"] ?? "");
     let rclass = cls;

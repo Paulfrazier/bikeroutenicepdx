@@ -21,7 +21,8 @@ Per route-segment midpoint, in order (`friendliness.ts:671-757`):
    - separated facility (protected/greenway/path) → kept; **never** downgraded
    - weak facility (lane/buffered/shared) → uses the baked **`rclass`**: a lane on
      a ≥40 mph street is pre-downgraded to **`busy`** (red); a painted lane on a
-     slower arterial to **`caution2/3/4`** (orange gradient by lane count)
+     slower arterial to **`caution`** (orange, 2–3 lanes) or **`caution4`** (red,
+     4+ lane stroad)
 3. **No facility, but on/along an arterial OR a hazard street?** → `busy` (red)
 4. **Otherwise** → `quiet`
 
@@ -36,9 +37,9 @@ Then short runs (<25 m) are smoothed into the preceding run (hysteresis).
 | `path` | `#B45309` brown | solid | Off-street path | `bike-network.geojson` (+ connectors) | PBOT 75 `Facility` = **TRL** | `highway=cycleway`/`path` | Off-Street Path/Trail |
 | `buffered` | `#0891B2` cyan | solid | Buffered bike lane | `bike-network.geojson` | PBOT 75 `Facility` = **BBL/BBBL/SBBL** | `cycleway=lane` + `buffer=yes` | Buffered Bike Lane |
 | `lane` | `#F59E0B` amber | solid | Bike lane | `bike-network.geojson` | PBOT 75 `Facility` = **BL/ABL** | `cycleway=lane` | Bike Lane / Advisory |
-| **`caution2`** | **`#FB923C` lt orange** | solid | **Bike lane · 2-lane arterial** | baked `rclass` (`arterials` join) | see below | painted lane on a ≤2-lane `tertiary+` | Bike Lane on a small arterial |
-| **`caution3`** | **`#EA580C` orange** | solid | **Bike lane · 3-lane arterial** | baked `rclass` | see below | painted lane on a 3-lane `tertiary+` | Bike Lane on a 3-lane arterial |
-| **`caution4`** | **`#9A3412` dk orange** | solid | **Bike lane · 4+ lane arterial** | baked `rclass` | see below | painted lane / unprotected facility on a 4+ lane stroad | Bike Lane on a stroad |
+| **`caution`** | **`#EA580C` orange** | solid | **Bike lane · busy arterial** | baked `rclass` (`arterials` join) | see below | painted lane on a 2–3 lane `tertiary+` | Bike Lane on a busy arterial |
+| **`caution4`** | **`#DC2626` red** | solid | **Bike lane · 4+ lane stroad** | baked `rclass` | see below | painted lane / unprotected facility on a 4+ lane stroad | Bike Lane on a stroad |
+| `calm_mod` | `#CA8A04` goldenrod | **dashed** | Shared roadway · moderate traffic | `bike-network.geojson` (layer 4) | PBOT `ConnectionType` = **SR_MT** | none (shared roadway, wider outside lane) | Shared Roadway w/ Wider Outside Lane |
 | `shared` | `#9CA3AF` gray | **dashed** | Shared roadway | `bike-network.geojson` | PBOT 75 `Facility` = **ESR** | `cycleway=shared_lane` (sharrow) | Enhanced Shared Roadway |
 | `quiet` | `#64748B` slate | solid | Quiet street | *fallback* (matched nothing) | n/a — no facility, not an arterial | residential/living_street, untagged for bikes | (unlabeled local street) |
 | **`busy`** | **`#DC2626` red** | **dashed** | **Fast or high-stress road — use caution** | `arterials` + `speeds` + `high-crash`, or baked `rclass` | see below | `highway=primary/secondary/tertiary`, `maxspeed` | High Crash St / posted speed / arterial |
@@ -48,14 +49,14 @@ The bake (`scripts/lib/render-class.ts`) splits a stressful *mapped* lane into
 tiers — all leave the facility's geometry but recolor it:
 - **`busy`** (red) — a weak lane (lane/buffered/shared) on a **≥40 mph** street
   (`MIN_FAST_MPH=40`). The danger signal.
-- **`caution2/3/4`** (orange gradient, darker as the road widens) — a plain
-  unbuffered lane on an **arterial**, graded by the arterial's OSM `lanes`: ≤2 →
-  caution2, 3 → caution3, 4+ → caution4 ("one more lane is one more lane"). A
-  buffered/sharrow lane is spared unless it's on a 4+ lane stroad (→ caution4).
-  This separates SE 7th (3-lane → caution3) from NE 16th / Irving (1–2 lane →
-  caution2), which look identical on paper. All caution tiers count toward route
-  comfort-coverage (only `busy` is excluded). **Routing mirrors this**: the
-  self-build BRouter `weaklanepenalty` is graded by the same `lanes` buckets
+- **`caution`** (orange) / **`caution4`** (red) — a plain unbuffered lane on an
+  **arterial**: `caution` on a 2–3 lane busy arterial (SE 52nd, NE 7th), `caution4`
+  once it's a 4+ lane stroad (SE Foster, Barbur). A buffered/sharrow lane is spared
+  unless it's on a 4+ lane stroad (→ caution4). Both count toward route
+  comfort-coverage (only `busy` is excluded). `caution4` shares red with `busy`,
+  split by line style: **red solid = a stressful lane exists** (`caution4`), **red
+  dashed = no facility on a fast road** (`busy`). **Routing mirrors this**: the
+  self-build BRouter `weaklanepenalty` is graded by `lanes` buckets
   (ultra 1.0 / 1.5 / 2.0; comfort 0.4 / 0.6 / 0.9) — see `safety-{comfort,ultra}.brf`.
   OSM **parking** would be the ideal door-zone signal but covers only ~4% of
   Portland arterials, so `lanes` (~88% tagged) is the usable proxy.

@@ -35,8 +35,8 @@ export type NetworkClass =
 /**
  * Greenway-equivalent classes — kept in sync with tests/routes/run.ts
  * (computeCoverage's GREENWAY_CLASSES). These count toward greenway_coverage.
- * `calm` (PBOT SR_LT/SR_MT recommended shared roadways) is deliberately EXCLUDED:
- * it's a quiet street with no built facility, reported separately as
+ * `calm` (PBOT SR_LT recommended low-traffic shared roadway) is deliberately
+ * EXCLUDED: it's a quiet street with no built facility, reported separately as
  * `calm_coverage`, never folded into greenway_coverage.
  */
 export const GREENWAY_EQUIVALENT: ReadonlySet<NetworkClass> = new Set<NetworkClass>([
@@ -45,19 +45,22 @@ export const GREENWAY_EQUIVALENT: ReadonlySet<NetworkClass> = new Set<NetworkCla
   "protected",
 ]);
 
-/** Recommended calm shared-roadway classes (SR_LT/SR_MT) — drive `calm_coverage`,
- * tracked separately from greenway coverage. */
+/** Recommended low-traffic shared-roadway class (PBOT SR_LT) — drives
+ * `calm_coverage`, tracked separately from greenway coverage. SR_MT (calm_mod) is
+ * a higher-stress tier and is NOT included (see DISPLAY_TO_CLASS). */
 export const CALM_CLASSES: ReadonlySet<NetworkClass> = new Set<NetworkClass>(["calm"]);
 
-/** bike-network.geojson display class → harness NetworkClass. Both calm display
- * classes (SR_LT→calm, SR_MT→calm_mod) collapse to one `calm` coverage bucket. */
+/** bike-network.geojson display class → harness NetworkClass. Only SR_LT (calm)
+ * counts toward `calm_coverage`. SR_MT (calm_mod) is PBOT's HIGHER-stress
+ * "shared roadway with wider outside lane" tier (moderate/higher traffic), so it
+ * is NOT credited as calm — it maps to `standard` like a plain lane/shared. */
 const DISPLAY_TO_CLASS: Record<string, NetworkClass> = {
   greenway: "greenway",
   path: "off_street",
   protected: "protected",
   buffered: "buffered",
   calm: "calm",
-  calm_mod: "calm",
+  calm_mod: "standard",
   lane: "standard",
   shared: "standard",
 };

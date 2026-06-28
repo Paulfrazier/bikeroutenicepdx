@@ -65,8 +65,9 @@ const M_PER_DEG_LAT = 110540;
 
 /**
  * A route segment's category: one of the bike-network facility classes (so the
- * route matches the bike-map legend exactly), the baked "caution2/3/4" down-rate
- * gradient (a painted lane on an arterial, darker as the road widens), plus two
+ * route matches the bike-map legend exactly), the baked "caution"/"caution4"
+ * down-rate (a painted lane on a busy arterial — orange on a 2–3 lane road, red
+ * once it's a 4+ lane stroad), plus two
  * off-network states —
  * "quiet" (calm neighborhood street) and "busy" (the red dashed danger signal).
  */
@@ -78,9 +79,8 @@ export type RouteClass =
   | "calm_mod" // SR_MT — recommended moderate-traffic shared roadway
   | "buffered"
   | "lane"
-  | "caution2"
-  | "caution3"
-  | "caution4"
+  | "caution" // baked — painted lane on a 2–3 lane busy arterial (orange)
+  | "caution4" // baked — painted lane on a 4+ lane stroad (red)
   | "shared"
   | "quiet"
   | "busy";
@@ -95,17 +95,20 @@ export const ROUTE_CLASS_COLORS: Record<RouteClass, string> = {
   protected: "#6D28D9",
   greenway: "#2E9E48",
   path: "#B45309",
-  // Shared-roadway recommended quiet streets (PBOT SR_LT/SR_MT): a sage→olive
-  // step down from greenway's vivid green, signalling "calm but no built
-  // facility". calm (SR_LT) sits just below greenway; calm_mod (SR_MT) a notch
-  // lower. Both dashed (no physical facility) — see ROUTE_CLASS_DASHED.
+  // calm (PBOT SR_LT) is a recommended low-traffic quiet street: a sage step
+  // down from greenway's vivid green, "calm but no built facility", dashed.
+  // calm_mod (SR_MT, "shared roadway with wider outside lane" on moderate/higher
+  // traffic) is PBOT's HIGHER-stress shared-roadway tier — goldenrod (warm, not
+  // green) and dashed (no facility). See ROUTE_CLASS_DASHED.
   calm: "#7FB069",
-  calm_mod: "#A3B18A",
+  calm_mod: "#CA8A04",
   buffered: "#0891B2",
   lane: "#F59E0B",
-  caution2: "#FB923C",
-  caution3: "#EA580C",
-  caution4: "#9A3412",
+  // caution = lane on a 2–3 lane busy arterial (orange); caution4 = lane on a 4+
+  // lane stroad (red, solid). The red-DASHED "busy" below = no facility on a fast
+  // road — so red solid = stressful lane exists, red dashed = no facility.
+  caution: "#EA580C",
+  caution4: "#DC2626",
   shared: "#9CA3AF",
   quiet: "#64748B",
   busy: "#DC2626",
@@ -123,6 +126,39 @@ export const ROUTE_CLASS_DASHED: readonly RouteClass[] = [
 /** The only class excluded from the comfort-coverage fraction. */
 export const DANGER_CLASS: RouteClass = "busy";
 
+// ── Lane-type visibility groups (KEEP IN SYNC WITH iOS LaneGroup) ────────────
+// The bike-network overlay can be filtered by lane type. The network render
+// classes (every RouteClass except "quiet", which is a route-only off-network
+// fallback and never appears on the overlay) collapse into 5 user-facing groups
+// so the legend offers ~5 toggles instead of 11. Membership MUST match the iOS
+// `BikeClass.group` mapping (MKPolyline+Kind.swift) — they are one feature on two
+// surfaces.
+
+/** A toggleable group of bike-network lane types. */
+export type LaneGroupKey =
+  | "separated"
+  | "painted"
+  | "caution"
+  | "quietStreets"
+  | "shared";
+
+/**
+ * Ordered lane-type groups for the legend's visibility toggles. Order mirrors
+ * the legend's best→worst reading order. The union of all `classes` is exactly
+ * the set of network render classes ("quiet" excluded — route-only).
+ */
+export const NETWORK_LANE_GROUPS: ReadonlyArray<{
+  key: LaneGroupKey;
+  label: string;
+  classes: readonly RouteClass[];
+}> = [
+  { key: "separated",    label: "Protected, greenway & paths", classes: ["protected", "greenway", "path"] },
+  { key: "painted",      label: "Painted bike lanes",          classes: ["buffered", "lane"] },
+  { key: "caution",      label: "Caution — arterial lanes",    classes: ["caution", "caution4"] },
+  { key: "quietStreets", label: "Quiet streets (recommended)", classes: ["calm", "calm_mod"] },
+  { key: "shared",       label: "Shared & high-stress",        classes: ["shared", "busy"] },
+];
+
 export interface RouteFriendliness {
   /** Per-route-segment class; length === coords.length - 1. */
   classes: RouteClass[];
@@ -131,9 +167,9 @@ export interface RouteFriendliness {
 }
 
 /** Normalize a bike-network render class (`rclass`, falling back to `class`) to a
- * known RouteClass. "busy" and "caution2/3/4" are valid baked values — an
- * unprotected lane the export down-rated (busy = on a ≥40 mph street; caution2/3/4
- * = a painted lane on an arterial, graded by lane count; see
+ * known RouteClass. "busy" and "caution"/"caution4" are valid baked values — an
+ * unprotected lane the export down-rated (busy = on a ≥40 mph street; caution =
+ * a painted lane on a 2–3 lane arterial, caution4 = on a 4+ lane stroad; see
  * scripts/lib/render-class.ts) — so the overlay and the route draw them without
  * any runtime speed lookup. */
 function normalizeClass(cls: string): RouteClass {
@@ -145,8 +181,7 @@ function normalizeClass(cls: string): RouteClass {
     case "calm_mod":
     case "buffered":
     case "lane":
-    case "caution2":
-    case "caution3":
+    case "caution":
     case "caution4":
     case "shared":
     case "busy":

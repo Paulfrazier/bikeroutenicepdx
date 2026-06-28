@@ -383,9 +383,9 @@ async function main(): Promise<void> {
         `[rclass] WARN: ${path.relative(REPO_ROOT, arterialsPath)} not found — run export:arterials. Skipping the door-zone-lane-on-arterial down-rate.`
       );
     }
-    const { busy, caution2, caution3, caution4 } = bakeRenderClass(kept, speeds, MIN_FAST_MPH, arterials);
+    const { busy, caution, caution4 } = bakeRenderClass(kept, speeds, MIN_FAST_MPH, arterials);
     console.log(
-      `[rclass] ${busy} on ≥${MIN_FAST_MPH} mph → "busy"; arterial-lane gradient → caution2 ${caution2} (≤2 lanes) · caution3 ${caution3} (3) · caution4 ${caution4} (≥${MIN_STROAD_LANES})`
+      `[rclass] ${busy} on ≥${MIN_FAST_MPH} mph → "busy"; lane on arterial → caution ${caution} (2–3 lanes) · caution4 ${caution4} (≥${MIN_STROAD_LANES} lanes, red)`
     );
   } else {
     console.warn(
