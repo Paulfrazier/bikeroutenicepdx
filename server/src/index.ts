@@ -17,10 +17,8 @@ import newrelic from "newrelic";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-import { secureHeaders } from "hono/secure-headers";
 import { serve } from "@hono/node-server";
 import { config } from "./config.js";
-import { rateLimit } from "./middleware/rateLimit.js";
 import routeHandler from "./routes/route.js";
 import matchHandler from "./routes/match.js";
 import corridorHandler from "./routes/corridor.js";
@@ -35,25 +33,6 @@ const app = new Hono();
 // ---------------------------------------------------------------------------
 
 app.use("*", logger());
-
-// Security headers. This is a JSON-only API (it never serves HTML), so a
-// locked-down CSP and DENY framing cost nothing and harden the responses if a
-// URL is ever opened directly in a browser. HSTS/nosniff/Referrer-Policy come
-// from the defaults. crossOriginResourcePolicy is "cross-origin" because the
-// web app is served from a different origin and consumes these responses; the
-// allowlist CORS below still governs which origins may actually read them.
-app.use(
-  "*",
-  secureHeaders({
-    contentSecurityPolicy: {
-      defaultSrc: ["'none'"],
-      frameAncestors: ["'none'"],
-    },
-    xFrameOptions: "DENY",
-    referrerPolicy: "no-referrer",
-    crossOriginResourcePolicy: "cross-origin",
-  })
-);
 
 // New Relic: name transactions by the matched route pattern (e.g. "POST /route",
 // "GET /search") instead of the generic NormalizedUri fallback. `routePath` is the
@@ -90,20 +69,6 @@ app.use(
     allowHeaders: ["Content-Type"],
   })
 );
-
-// ---------------------------------------------------------------------------
-// Per-IP rate limits (best-effort, in-memory — see middleware/rateLimit.ts).
-// These guard the unauthenticated proxies to the routing/geocoding engines
-// against scripted abuse and resource/cost exhaustion. Budgets are generous
-// enough for interactive use (drag-to-reroute, as-you-type search). /health is
-// intentionally unlimited (monitoring); /fix-submit keeps its own 5/hour limit.
-// ---------------------------------------------------------------------------
-
-const ROUTING_LIMIT = { limit: 120, windowMs: 60_000 }; // 120 req/min/IP
-app.use("/route", rateLimit(ROUTING_LIMIT));
-app.use("/match", rateLimit(ROUTING_LIMIT));
-app.use("/corridor", rateLimit(ROUTING_LIMIT));
-app.use("/search", rateLimit({ limit: 60, windowMs: 60_000 })); // 60 req/min/IP
 
 // ---------------------------------------------------------------------------
 // Routes
