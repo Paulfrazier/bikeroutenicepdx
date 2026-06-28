@@ -979,6 +979,70 @@ button {
   white-space: nowrap;
 }
 
+/* ── Lane-type groups: checkbox header + indented member rows ────────────────
+   Unchecking a group hides those lanes from the network overlay. The legend
+   card is click-through (pointer-events: none); the checkbox + its label
+   re-enable pointer events so they stay tappable. */
+.bike-legend__group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.bike-legend__group + .bike-legend__group {
+  margin-top: 6px;
+}
+
+.bike-legend__group-head {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  cursor: pointer;
+}
+
+.bike-legend__checkbox {
+  pointer-events: auto;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--color-accent, #2e9e48);
+  cursor: pointer;
+}
+
+.bike-legend__group-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--color-text-muted);
+}
+
+.bike-legend__sublist {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 0 21px; /* indent member rows under the checkbox */
+  padding: 0;
+}
+
+/* A hidden group reads as "off" — dim its swatches + label. */
+.bike-legend__group--off .bike-legend__sublist {
+  opacity: 0.4;
+}
+.bike-legend__group--off .bike-legend__group-label {
+  opacity: 0.7;
+}
+
+/* Route-only rows (quiet / your fix): not filterable, shown beneath a divider. */
+.bike-legend__list--static {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border, rgba(0, 0, 0, 0.1));
+}
+
 /* On mobile, move legend up so it doesn't hide under the bottom drawer handle */
 @media (max-width: 767px) {
   .bike-legend {

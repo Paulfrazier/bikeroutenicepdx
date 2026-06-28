@@ -1,6 +1,9 @@
 import SwiftUI
 
 /// Collapsible legend for the bike-network overlay. Tap to expand/collapse.
+/// Each lane-type group has a checkbox header — unchecking it hides those lanes
+/// from the network overlay (the route line is never filtered). Mirrors the web
+/// legend (BikeNetworkLegend in Map.tsx).
 struct LegendView: View {
     @Environment(RouteStore.self) private var store
     @State private var expanded = true
@@ -25,29 +28,23 @@ struct LegendView: View {
             .accessibilityLabel(expanded ? "Hide bike map key" : "Show bike map key")
 
             if expanded {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(BikeClass.legendOrder, id: \.self) { cls in
-                        HStack(spacing: 8) {
-                            swatch(for: cls)
-                            Text(cls.label)
-                                .font(.caption2)
-                                .foregroundStyle(.primary)
-                        }
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(LaneGroup.allCases, id: \.self) { group in
+                        groupSection(group)
                     }
-                    // Off-network route states (facilities above double as the
-                    // route's colors, so only these two are route-specific).
-                    ForEach(offNetworkRows, id: \.label) { row in
-                        HStack(spacing: 8) {
-                            routeSwatch(color: row.color, dashed: row.dashed)
-                            Text(row.label)
-                                .font(.caption2)
-                                .foregroundStyle(.primary)
-                        }
+
+                    // Off-network route state (no network class of its own): a
+                    // calm street the route uses that carries no bike facility.
+                    HStack(spacing: 8) {
+                        routeSwatch(color: RouteClass.quiet.color, dashed: false)
+                        Text("Quiet street")
+                            .font(.caption2)
+                            .foregroundStyle(.primary)
                     }
 
                     Divider().padding(.vertical, 2)
 
-                    Text("Your route is drawn in these colors with a white outline.")
+                    Text("Uncheck a group to hide those lanes from the map. Your route is drawn in these colors with a white outline.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -68,14 +65,41 @@ struct LegendView: View {
         }
     }
 
-    /// Off-network route states appended to the shared key. The six facility
-    /// classes (BikeClass.legendOrder above) double as the route's colors, so
-    /// only these two are route-specific.
-    private var offNetworkRows: [(label: String, color: UIColor, dashed: Bool)] {
-        [
-            ("Quiet street", RouteClass.quiet.color, false),
-            ("Fast or high-stress road — use caution", RouteClass.busy.color, true),
-        ]
+    /// A lane-type group: a checkbox header (toggles visibility) over its
+    /// indented member facility rows. Hidden groups dim to read as "off".
+    private func groupSection(_ group: LaneGroup) -> some View {
+        let hidden = store.hiddenLaneGroups.contains(group)
+        return VStack(alignment: .leading, spacing: 5) {
+            Button {
+                store.toggleLaneGroup(group)
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: hidden ? "square" : "checkmark.square.fill")
+                        .foregroundStyle(hidden ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint))
+                    Text(group.label)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.primary)
+                }
+                .frame(minHeight: 28, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(group.label), \(hidden ? "hidden" : "shown")")
+            .accessibilityAddTraits(hidden ? [] : .isSelected)
+
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(group.classes, id: \.self) { cls in
+                    HStack(spacing: 8) {
+                        swatch(for: cls)
+                        Text(cls.label)
+                            .font(.caption2)
+                            .foregroundStyle(.primary)
+                    }
+                }
+            }
+            .padding(.leading, 24)
+            .opacity(hidden ? 0.4 : 1)
+        }
     }
 
     private func routeSwatch(color: UIColor, dashed: Bool) -> some View {
@@ -95,11 +119,11 @@ struct LegendView: View {
     private func swatch(for cls: BikeClass) -> some View {
         Capsule()
             .fill(Color(uiColor: cls.color))
-            .frame(width: 22, height: cls == .shared ? 3 : 4)
-            .opacity(cls == .shared ? 0.7 : 1)
+            .frame(width: 22, height: 4)
+            .opacity(cls.dashed ? 0.85 : 1)
             .overlay(alignment: .center) {
-                // Hint the dashed style of "shared" facilities.
-                if cls == .shared {
+                // Hint the dashed style of no-facility (shared/calm/busy) classes.
+                if cls.dashed {
                     Capsule()
                         .fill(Color(uiColor: .systemBackground))
                         .frame(width: 4, height: 4)

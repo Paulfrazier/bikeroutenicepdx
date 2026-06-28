@@ -155,8 +155,8 @@ export const NETWORK_LANE_GROUPS: ReadonlyArray<{
   { key: "separated",    label: "Protected, greenway & paths", classes: ["protected", "greenway", "path"] },
   { key: "painted",      label: "Painted bike lanes",          classes: ["buffered", "lane"] },
   { key: "caution",      label: "Caution — arterial lanes",    classes: ["caution", "caution4"] },
-  { key: "quietStreets", label: "Quiet streets (recommended)", classes: ["calm", "calm_mod"] },
-  { key: "shared",       label: "Shared & high-stress",        classes: ["shared", "busy"] },
+  { key: "quietStreets", label: "Quiet streets (recommended)", classes: ["calm"] },
+  { key: "shared",       label: "Shared & high-stress",        classes: ["calm_mod", "shared", "busy"] },
 ];
 
 export interface RouteFriendliness {

@@ -154,6 +154,51 @@ enum BikeClass: String, CaseIterable {
     /// `busy` is excluded — it is a data-derived render indicator, not a
     /// distinct facility type the legend needs to explain.
     static let legendOrder: [BikeClass] = [.greenway, .protected, .path, .calm, .buffered, .lane, .caution, .caution4, .calm_mod, .shared]
+
+    /// The lane-type visibility group this class belongs to. Mirrors the web
+    /// NETWORK_LANE_GROUPS membership (friendliness.ts) — KEEP IN SYNC.
+    var group: LaneGroup {
+        switch self {
+        case .greenway, .protected, .path: return .separated
+        case .buffered, .lane: return .painted
+        case .caution, .caution4: return .caution
+        case .calm: return .quietStreets
+        case .calm_mod, .shared, .busy: return .shared
+        }
+    }
+}
+
+/// A toggleable group of bike-network lane types. The user can hide a whole
+/// group from the static network overlay (the route line is never filtered).
+/// Mirrors web `NETWORK_LANE_GROUPS` / `LaneGroupKey` in friendliness.ts —
+/// KEEP IN SYNC (membership, order, and raw values).
+enum LaneGroup: String, CaseIterable {
+    case separated
+    case painted
+    case caution
+    case quietStreets
+    case shared
+
+    var label: String {
+        switch self {
+        case .separated: return "Protected, greenway & paths"
+        case .painted: return "Painted bike lanes"
+        case .caution: return "Caution — arterial lanes"
+        case .quietStreets: return "Quiet streets (recommended)"
+        case .shared: return "Shared & high-stress"
+        }
+    }
+
+    /// Member render classes, in legend display order.
+    var classes: [BikeClass] {
+        switch self {
+        case .separated: return [.protected, .greenway, .path]
+        case .painted: return [.buffered, .lane]
+        case .caution: return [.caution, .caution4]
+        case .quietStreets: return [.calm]
+        case .shared: return [.calm_mod, .shared, .busy]
+        }
+    }
 }
 
 extension MKPolyline {

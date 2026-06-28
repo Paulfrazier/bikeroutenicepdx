@@ -111,6 +111,29 @@ final class RouteStore {
         }
     }
 
+    /// Lane-type groups hidden from the static bike-network overlay. Persisted
+    /// across launches. Unlike the preference/engine, this does NOT re-route —
+    /// it only changes which network lanes are drawn (the route line is never
+    /// filtered). Mirrors web `hiddenGroups` (Map.tsx).
+    var hiddenLaneGroups: Set<LaneGroup> = {
+        let raw = UserDefaults.standard.stringArray(forKey: "hiddenLaneGroups") ?? []
+        return Set(raw.compactMap(LaneGroup.init(rawValue:)))
+    }() {
+        didSet {
+            guard oldValue != hiddenLaneGroups else { return }
+            UserDefaults.standard.set(hiddenLaneGroups.map(\.rawValue), forKey: "hiddenLaneGroups")
+        }
+    }
+
+    /// Flip a lane-type group between shown and hidden on the network overlay.
+    func toggleLaneGroup(_ group: LaneGroup) {
+        if hiddenLaneGroups.contains(group) {
+            hiddenLaneGroups.remove(group)
+        } else {
+            hiddenLaneGroups.insert(group)
+        }
+    }
+
     // Draw mode
     var isDrawMode = false
     /// When true the map pans/zooms on drag in Draw mode instead of drawing — the

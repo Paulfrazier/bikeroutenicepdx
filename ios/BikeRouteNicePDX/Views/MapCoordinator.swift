@@ -59,6 +59,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     /// the route reads as the foreground (toggled in sync()/removeRouteOverlays).
     private var networkFaded = false
 
+    /// Last-applied lane-type visibility. Lets sync() detect a legend toggle and
+    /// repaint the network overlays (mirrors `networkFaded`'s redraw approach).
+    private var lastHiddenLaneGroups: Set<LaneGroup> = []
+
     // Live finger-draw state (kept here, not in the store, so map moves don't
     // thrash SwiftUI's updateUIView while the finger is down).
     private var draftOverlay: DraftPolyline?
@@ -108,6 +112,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         // (finishDrawing toggles isConnectorDrawMode/isDrawMode → updateUIView →
         // sync(), so adding a connector with no route still refreshes this.)
         syncConnectorOverlays(map)
+
+        // Repaint the bike-network overlay when a lane-type group is toggled in
+        // the legend (cheap; no-ops unless the visibility set changed).
+        syncNetworkVisibility(on: map)
 
         // Recenter on the user when the store's tick advances (locate button).
         if store.recenterTick != lastRecenterTick {
@@ -276,6 +284,17 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     private func setNetworkFaded(_ faded: Bool, on map: MKMapView) {
         guard networkFaded != faded else { return }
         networkFaded = faded
+        for overlay in map.overlays where overlay is BikeMultiPolyline {
+            map.renderer(for: overlay)?.setNeedsDisplay()
+        }
+    }
+
+    /// Repaint the bike-network overlays when the user toggles a lane-type group
+    /// in the legend. The renderer reads `store.hiddenLaneGroups` (transparent
+    /// when hidden), so a redraw is all that's needed — no overlay teardown.
+    private func syncNetworkVisibility(on map: MKMapView) {
+        guard lastHiddenLaneGroups != store.hiddenLaneGroups else { return }
+        lastHiddenLaneGroups = store.hiddenLaneGroups
         for overlay in map.overlays where overlay is BikeMultiPolyline {
             map.renderer(for: overlay)?.setNeedsDisplay()
         }
@@ -1070,10 +1089,12 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             return renderer
         case let multi as BikeMultiPolyline:
             let renderer = MKMultiPolylineRenderer(multiPolyline: multi)
-            // Fade the network back while a route is displayed so the route owns
-            // the foreground (its green tier ≈ the greenway color).
-            renderer.strokeColor = multi.bikeClass.color
-                .withAlphaComponent(networkFaded ? 0.35 : 0.85)
+            // A lane-type group toggled off in the legend renders fully
+            // transparent; otherwise fade the network back while a route is
+            // displayed so the route owns the foreground.
+            let hidden = store.hiddenLaneGroups.contains(multi.bikeClass.group)
+            let alpha: CGFloat = hidden ? 0 : (networkFaded ? 0.35 : 0.85)
+            renderer.strokeColor = multi.bikeClass.color.withAlphaComponent(alpha)
             renderer.lineWidth = multi.bikeClass.lineWidth
             renderer.lineCap = .round
             renderer.lineJoin = .round

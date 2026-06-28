@@ -29,7 +29,8 @@ import maplibregl, {
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { LngLat, RouteResponse, RouteGeometry, Via, ManualSegment } from "../types";
 import { hitTestRoute, nearestVertexIndex, VERTEX_HIT_PX, MAX_VIAS, type Px } from "../geo";
-import { ROUTE_CLASS_COLORS, ROUTE_CLASS_DASHED } from "../friendliness";
+import { ROUTE_CLASS_COLORS, ROUTE_CLASS_DASHED, NETWORK_LANE_GROUPS } from "../friendliness";
+import type { RouteClass, LaneGroupKey } from "../friendliness";
 import type { Connector } from "../connectors";
 
 /** Teal "your fix" color — shared by the connector overlay + its legend entry. */
@@ -268,12 +269,124 @@ const ROUTE_DASHED_FILTER: any = ["in", ["get", "class"], ["literal", [...ROUTE_
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ROUTE_SOLID_FILTER: any = ["!", ["in", ["get", "class"], ["literal", [...ROUTE_CLASS_DASHED]]]];
 
+// ── Bike-network lane-type visibility ────────────────────────────────────────
+// The user can hide whole lane-type groups (NETWORK_LANE_GROUPS) from the static
+// bike-network overlay. Hidden state persists per-device; only the two network
+// layers are filtered — the route line is never touched.
+
+const HIDDEN_GROUPS_KEY = "bikenice.hiddenLaneGroups";
+const DASHED_SET = new Set<RouteClass>(ROUTE_CLASS_DASHED);
+
+/** Load the persisted hidden-group set, ignoring unknown/legacy keys. */
+function loadHiddenGroups(): Set<LaneGroupKey> {
+  try {
+    const raw = localStorage.getItem(HIDDEN_GROUPS_KEY);
+    if (!raw) return new Set();
+    const valid = new Set(NETWORK_LANE_GROUPS.map((g) => g.key));
+    return new Set(
+      (JSON.parse(raw) as string[]).filter((k): k is LaneGroupKey =>
+        valid.has(k as LaneGroupKey)
+      )
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function saveHiddenGroups(groups: Set<LaneGroupKey>): void {
+  try {
+    localStorage.setItem(HIDDEN_GROUPS_KEY, JSON.stringify([...groups]));
+  } catch {
+    /* storage unavailable (private mode) — visibility just won't persist */
+  }
+}
+
+/**
+ * Split the currently-visible render classes into the two network layers'
+ * `rclass` membership lists. Derived entirely from NETWORK_LANE_GROUPS, so it
+ * tracks the class set automatically.
+ */
+function visibleClasses(hidden: Set<LaneGroupKey>): {
+  dashed: RouteClass[];
+  solid: RouteClass[];
+} {
+  const dashed: RouteClass[] = [];
+  const solid: RouteClass[] = [];
+  for (const group of NETWORK_LANE_GROUPS) {
+    if (hidden.has(group.key)) continue;
+    for (const cls of group.classes) {
+      (DASHED_SET.has(cls) ? dashed : solid).push(cls);
+    }
+  }
+  return { dashed, solid };
+}
+
+/** Apply the lane-type visibility to both bike-network layers (no-op until the
+ * layers exist, so it's safe to call before the map's `load` fires). */
+function applyNetworkVisibility(map: MLMap, hidden: Set<LaneGroupKey>): void {
+  if (!map.getLayer("bike-network-shared") || !map.getLayer("bike-network-solid")) {
+    return;
+  }
+  const { dashed, solid } = visibleClasses(hidden);
+  map.setFilter("bike-network-shared", [
+    "in",
+    ["get", "rclass"],
+    ["literal", dashed],
+  ]);
+  map.setFilter("bike-network-solid", [
+    "in",
+    ["get", "rclass"],
+    ["literal", solid],
+  ]);
+}
+
+// Per-class display metadata (color/label/dashed), keyed by class, so the
+// grouped legend can pull each row's swatch + label from the same source the
+// flat legend used.
+const LEGEND_META = Object.fromEntries(
+  LEGEND_ITEMS.map((item) => [item.cls, item])
+) as Record<string, (typeof LEGEND_ITEMS)[number]>;
+
+// Route-only legend rows: the off-network "quiet" route state and the teal
+// connector "your fix" overlay. Neither is part of the toggleable network
+// overlay, so they render as static rows beneath the groups.
+const ROUTE_ONLY_LEGEND = ["quiet", "connector"] as const;
+
+function LegendSwatch({ color, dashed }: { color: string; dashed: boolean }) {
+  return (
+    <span
+      className="bike-legend__swatch"
+      style={{
+        background: dashed
+          ? `repeating-linear-gradient(to right, ${color} 0px, ${color} 5px, transparent 5px, transparent 8px)`
+          : color,
+      }}
+      aria-hidden="true"
+    />
+  );
+}
+
+function LegendRow({ cls }: { cls: string }) {
+  const meta = LEGEND_META[cls];
+  if (!meta) return null;
+  return (
+    <li className="bike-legend__item">
+      <LegendSwatch color={meta.color} dashed={meta.dashed} />
+      <span className="bike-legend__label">{meta.label}</span>
+    </li>
+  );
+}
+
 function BikeNetworkLegend({
   open,
   onToggle,
+  hiddenGroups,
+  onToggleGroup,
 }: {
   open: boolean;
   onToggle: () => void;
+  hiddenGroups: Set<LaneGroupKey>;
+  onToggleGroup: (key: LaneGroupKey) => void;
 }) {
   return (
     <div className="bike-legend" aria-label="Bike network legend">
@@ -292,23 +405,39 @@ function BikeNetworkLegend({
       {open && (
       <>
       <ul className="bike-legend__list">
-        {LEGEND_ITEMS.map(({ cls, color, label, dashed }) => (
-          <li key={cls} className="bike-legend__item">
-            <span
-              className="bike-legend__swatch"
-              style={{
-                background: dashed
-                  ? `repeating-linear-gradient(to right, ${color} 0px, ${color} 5px, transparent 5px, transparent 8px)`
-                  : color,
-              }}
-              aria-hidden="true"
-            />
-            <span className="bike-legend__label">{label}</span>
-          </li>
+        {NETWORK_LANE_GROUPS.map((group) => {
+          const hidden = hiddenGroups.has(group.key);
+          return (
+            <li
+              key={group.key}
+              className={`bike-legend__group${hidden ? " bike-legend__group--off" : ""}`}
+            >
+              <label className="bike-legend__group-head">
+                <input
+                  type="checkbox"
+                  className="bike-legend__checkbox"
+                  checked={!hidden}
+                  onChange={() => onToggleGroup(group.key)}
+                />
+                <span className="bike-legend__group-label">{group.label}</span>
+              </label>
+              <ul className="bike-legend__sublist">
+                {group.classes.map((cls) => (
+                  <LegendRow key={cls} cls={cls} />
+                ))}
+              </ul>
+            </li>
+          );
+        })}
+      </ul>
+      <ul className="bike-legend__list bike-legend__list--static">
+        {ROUTE_ONLY_LEGEND.map((cls) => (
+          <LegendRow key={cls} cls={cls} />
         ))}
       </ul>
       <p className="bike-legend__caption">
-        Your route is drawn in these colors with a white outline.
+        Uncheck a group to hide those lanes from the map. Your route stays drawn
+        in these colors with a white outline.
       </p>
       </>
       )}
@@ -464,6 +593,19 @@ export function Map({
     if (routeLoading) setLegendOpen(false);
   }, [routeLoading]);
 
+  // Lane-type visibility: which NETWORK_LANE_GROUPS are hidden from the static
+  // bike-network overlay (persisted per-device). The route line is never filtered.
+  const [hiddenGroups, setHiddenGroups] = useState<Set<LaneGroupKey>>(loadHiddenGroups);
+  const toggleGroup = useCallback((key: LaneGroupKey) => {
+    setHiddenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      saveHiddenGroups(next);
+      return next;
+    });
+  }, []);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
   const fromMarkerRef = useRef<Marker | null>(null);
@@ -507,6 +649,9 @@ export function Map({
   const drawnStrokesRef = useRef(drawnStrokes);
   const connectorsRef = useRef(connectors);
   const routeFeaturesRef = useRef(routeFeatures);
+  // Current lane-type visibility, read by the map `load` handler (which closes
+  // over the first render) to apply the persisted state once layers exist.
+  const hiddenGroupsRef = useRef(hiddenGroups);
   // Active stroke-vertex drag (raw nudge): which stroke + vertex is moving.
   const manualEditRef = useRef<{ segId: string; vertex: number } | null>(null);
   // Freehand-draw stroke in progress (lng/lat points).
@@ -534,7 +679,15 @@ export function Map({
     drawnStrokesRef.current = drawnStrokes;
     connectorsRef.current = connectors;
     routeFeaturesRef.current = routeFeatures;
+    hiddenGroupsRef.current = hiddenGroups;
   });
+
+  // Re-apply lane-type visibility whenever the user toggles a group. No-ops
+  // until the map's layers exist (the `load` handler applies the initial state).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map) applyNetworkVisibility(map, hiddenGroups);
+  }, [hiddenGroups]);
 
   /** Movement (px) before a press becomes a reshape rather than a tap. */
   const DRAG_THRESHOLD_PX = 6;
@@ -671,6 +824,10 @@ export function Map({
           "line-opacity": 0.85,
         },
       });
+
+      // Apply any persisted lane-type visibility now that both network layers
+      // exist (the user may have hidden groups on a previous visit).
+      applyNetworkVisibility(map, hiddenGroupsRef.current);
 
       // ── Connectors ("your fixes") overlay ────────────────────────────────
       // Saved map-fixes drawn as a persistent teal ribbon ABOVE the network but
@@ -1547,6 +1704,8 @@ export function Map({
       <BikeNetworkLegend
         open={legendOpen}
         onToggle={() => setLegendOpen((o) => !o)}
+        hiddenGroups={hiddenGroups}
+        onToggleGroup={toggleGroup}
       />
     </div>
   );
