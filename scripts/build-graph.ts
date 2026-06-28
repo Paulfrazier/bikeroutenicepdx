@@ -150,6 +150,10 @@ const CURRENT_LINK = path.join(DATA_RECONCILED, "current");
 // PBOT classification source for the routing graph — single source of truth
 // shared with the web/iOS display overlay.
 const BIKE_NETWORK_PATH = path.join(REPO_ROOT, "web", "public", "bike-network.geojson");
+// NOTE: the built-but-unpublished PBOT supplement (data/pbot-supplement/) is
+// merged UPSTREAM into bike-network.geojson by `npm run export:bike-network`, so
+// it arrives here as ordinary PBOT features — no separate merge needed. See
+// docs/data-sources.md.
 
 function todayString(): string {
   return new Date().toISOString().slice(0, 10);

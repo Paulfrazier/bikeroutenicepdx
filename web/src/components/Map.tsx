@@ -391,6 +391,41 @@ interface MapProps {
   navCamera: { center: LngLat; bearing: number; version: number } | null;
 }
 
+/** Minimal HTML escape for untrusted geojson property strings in popups. */
+function escapeHtml(s: unknown): string {
+  return String(s ?? "").replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!
+  );
+}
+
+/**
+ * "Learn more about this network" popup for a built-but-unpublished supplement
+ * lane (data/pbot-supplement, merged into bike-network.geojson). Shows the
+ * build_note + a source link. Reused module-level so the click handler stays lean.
+ */
+function showSupplementPopup(
+  map: maplibregl.Map,
+  lngLat: maplibregl.LngLatLike,
+  props: Record<string, unknown>
+): void {
+  const note = escapeHtml(props.build_note);
+  const url = String(props.source_url ?? "");
+  const link =
+    url && /^https?:\/\//.test(url)
+      ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">PBOT project page →</a>`
+      : "";
+  new maplibregl.Popup({ closeButton: true, maxWidth: "280px" })
+    .setLngLat(lngLat)
+    .setHTML(
+      `<div style="font:13px/1.4 system-ui,sans-serif">` +
+        `<div style="font-weight:600;margin-bottom:4px">Recently built — not yet on PBOT's map</div>` +
+        `<div style="margin-bottom:6px">${note}</div>${link}</div>`
+    )
+    .addTo(map);
+}
+
 export function Map({
   from,
   to,
@@ -1259,6 +1294,21 @@ export function Map({
       // Draw mode owns the gesture: drawing is a drag and panning-while-paused
       // is a drag, so a bare tap is inert — never let it drop a from/to pin.
       if (drawModeRef.current) return;
+      // Tap a built-but-unpublished supplement lane → "learn more" popup instead
+      // of dropping an A/B pin. Small pixel box so it's touch-friendly.
+      const hit = map
+        .queryRenderedFeatures(
+          [
+            [e.point.x - 5, e.point.y - 5],
+            [e.point.x + 5, e.point.y + 5],
+          ],
+          { layers: ["bike-network-solid"] }
+        )
+        .find((f) => f.properties && f.properties.supplement);
+      if (hit) {
+        showSupplementPopup(map, e.lngLat, hit.properties as Record<string, unknown>);
+        return;
+      }
       onMapClickRef.current([e.lngLat.lng, e.lngLat.lat]);
     });
 

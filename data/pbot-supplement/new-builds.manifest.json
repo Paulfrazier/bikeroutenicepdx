@@ -1,0 +1,174 @@
+[
+  {
+    "id": "sw-4th-pbl",
+    "name": "Southwest 4th Avenue",
+    "class": "protected",
+    "from": "Southwest Caruthers Street",
+    "to": "West Burnside Street",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/construction/sw-fourth-avenue-improvement-project",
+    "completed": "2025-12-02",
+    "note": "West-side protected bike lane. Verify bike directionality before OSM edit (one-way street; lane may be one-way)."
+  },
+  {
+    "id": "se-washington-montavilla",
+    "name": "Southeast Washington Street",
+    "class": "protected",
+    "from": "Southeast 76th Avenue",
+    "to": "Southeast 92nd Avenue",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/construction/jade-and-montavilla-multimodal-improvements-project",
+    "completed": "2026-01-01",
+    "note": "76th-80th lane reduction + PBL; 80th-92nd bus lane + PBL. Mostly complete, punch-list remained early 2026."
+  },
+  {
+    "id": "se-thorburn-montavilla",
+    "name": "Southeast Thorburn Street",
+    "class": "protected",
+    "from": "Southeast Gilham Avenue",
+    "to": "Southeast Stark Street",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/construction/jade-and-montavilla-multimodal-improvements-project",
+    "completed": "2026-01-01"
+  },
+  {
+    "id": "se-stark-outer-ph3",
+    "name": "Southeast Stark Street",
+    "class": "protected",
+    "from": "Southeast 108th Avenue",
+    "to": "Southeast 122nd Avenue",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/construction/safer-outer-stark",
+    "completed": "2026-01-15",
+    "note": "Safer Outer Stark Phase III. Concrete vertical protection installed Nov 2025-Jan 2026."
+  },
+  {
+    "id": "60s-greenway-60th",
+    "name": "Southeast 60th Avenue",
+    "class": "greenway",
+    "from": "Southeast Division Street",
+    "to": "Southeast Harney Street",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/construction/60s-neighborhood-greenway-mt-tabor-springwater-corridor",
+    "completed": "2024-10-01",
+    "note": "60s Greenway primary spine on SE 60th. Greenway also jogs onto SE 64th (not captured here) — review for a second row."
+  },
+  {
+    "id": "parkrose-115th",
+    "name": "Northeast 115th Avenue",
+    "class": "greenway",
+    "from": "Northeast Fremont Street",
+    "to": "Northeast Sandy Boulevard",
+    "bbox": [-122.5443, 45.5483, -122.5440, 45.5617],
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/construction/parkrose-neighborhood-greenway",
+    "completed": "2024-05-01",
+    "note": "NE 115th does not share an OSM node with Fremont/Sandy; bbox spans the full short 115th segment (the whole street is the greenway corridor)."
+  },
+  {
+    "id": "parkrose-skidmore",
+    "name": "Northeast Skidmore Street",
+    "class": "greenway",
+    "from": "Northeast 102nd Avenue",
+    "to": "Northeast 115th Avenue",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/construction/parkrose-neighborhood-greenway",
+    "completed": "2024-05-01"
+  },
+  {
+    "id": "bd-knapp",
+    "name": "Southeast Knapp Street",
+    "class": "greenway",
+    "from": "Southeast 52nd Avenue",
+    "to": "Southeast 87th Avenue",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/construction/brentwood-darlington-multimodal-improvements",
+    "completed": "2025-08-01"
+  },
+  {
+    "id": "bd-ogden",
+    "name": "Southeast Ogden Street",
+    "class": "greenway",
+    "from": "Southeast 52nd Avenue",
+    "to": "Southeast 87th Avenue",
+    "bbox": [-122.6090, 45.4700, -122.5730, 45.4730],
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/construction/brentwood-darlington-multimodal-improvements",
+    "completed": "2025-08-01",
+    "note": "Ogden does not share an OSM node with SE 87th; bbox clips Ogden's lat band between 52nd (~-122.609) and 87th (~-122.573)."
+  },
+  {
+    "id": "tillamook-hancock-hancock",
+    "name": "Northeast Hancock Street",
+    "class": "greenway",
+    "from": "Northeast 28th Avenue",
+    "to": "Northeast 62nd Avenue",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/construction/ne-tillamook-hancock-neighborhood-greenway-enhancement",
+    "completed": "2024-07-22"
+  },
+  {
+    "id": "tillamook-hancock-kellyplaza",
+    "name": "Northeast Sandy Boulevard",
+    "class": "protected",
+    "from": "Northeast 41st Avenue",
+    "to": "Northeast 47th Avenue",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/construction/ne-tillamook-hancock-neighborhood-greenway-enhancement",
+    "completed": "2024-07-22",
+    "note": "Kelly Plaza two-way bike lane + signals on NE Sandy near 42nd. Diagonal arterial; verify clip."
+  },
+  {
+    "id": "tillamook-hancock-43rd",
+    "name": "Northeast 43rd Avenue",
+    "class": "lane",
+    "from": "Northeast Hancock Street",
+    "to": "Northeast Tillamook Street",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/construction/ne-tillamook-hancock-neighborhood-greenway-enhancement",
+    "completed": "2024-07-22",
+    "note": "Advisory bike lanes linking Hancock and Tillamook greenways."
+  },
+  {
+    "id": "n-delaware-greenway",
+    "name": "North Delaware Avenue",
+    "class": "greenway",
+    "from": "North Sumner Street",
+    "to": "North Terry Street",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/construction/n-delaware-neighborhood-greenway-n-sumner-st-n-terry",
+    "completed": "2024-01-01"
+  },
+  {
+    "id": "ne-102nd-hardening",
+    "name": "Northeast 102nd Avenue",
+    "class": "protected",
+    "from": "Northeast Morris Street",
+    "to": "Northeast Fremont Street",
+    "separation": "kerb",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/concrete-sep",
+    "completed": "2024-12-01",
+    "note": "Concrete-separator hardening of existing PBL. Likely already in PBOT GIS as protected; this row refines separation=kerb."
+  },
+  {
+    "id": "nw-naito-hardening",
+    "name": "Northwest Naito Parkway",
+    "class": "protected",
+    "from": "Northwest Davis Street",
+    "to": "Northwest Hoyt Street",
+    "bbox": [-122.6857, 45.5225, -122.6700, 45.5275],
+    "separation": "kerb",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/concrete-sep",
+    "completed": "2025-06-01",
+    "note": "Naito (diagonal parkway) does not share an OSM node with Hoyt; bbox clips the Davis-Hoyt lat band. separation=kerb refinement."
+  },
+  {
+    "id": "ne-couch-hardening",
+    "name": "Northeast Couch Street",
+    "class": "protected",
+    "from": "Northeast 6th Avenue",
+    "to": "Northeast 7th Avenue",
+    "separation": "kerb",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/concrete-sep",
+    "completed": "2026-02-01",
+    "note": "Short hardening segment (260 ft). separation=kerb refinement."
+  },
+  {
+    "id": "sw-madison-hardening",
+    "name": "Southwest Madison Street",
+    "class": "protected",
+    "from": "Southwest 2nd Avenue",
+    "to": "Southwest 4th Avenue",
+    "separation": "kerb",
+    "source_url": "https://www.portland.gov/transportation/pbot-projects/concrete-sep",
+    "completed": "2026-02-01",
+    "note": "Hardening segment (560 ft). separation=kerb refinement."
+  }
+]

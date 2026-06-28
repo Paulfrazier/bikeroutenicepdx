@@ -109,6 +109,25 @@ const OUT_IOS = path.join(
 // bundles `server`), not just in web/public.
 const OUT_SERVER = path.join(REPO_ROOT, "server", "data", "bike-network.geojson");
 
+// Hand-curated PBOT facilities built but not yet in the published GIS — produced
+// by `npm run build:supplement` (see data/pbot-supplement/ + docs/data-sources.md).
+// Merged in here so the new lanes draw identically to official lanes on web + iOS
+// AND flow into routing (build-graph reads this same bike-network.geojson).
+const SUPPLEMENT_PATH = path.join(
+  REPO_ROOT,
+  "data",
+  "pbot-supplement",
+  "new-builds.geojson"
+);
+// Supplement `class` → PBOT facility code, to match the bike-network schema.
+const SUPPLEMENT_FACILITY: Record<string, string> = {
+  greenway: "NG",
+  protected: "PBL",
+  buffered: "BBL",
+  lane: "BL",
+  path: "TRL",
+};
+
 const COORD_PRECISION = 6;
 
 // ---------------------------------------------------------------------------
@@ -252,6 +271,46 @@ async function collect(
   return raw;
 }
 
+/**
+ * Append the built-but-unpublished supplement facilities. Each carries
+ * `rclass = class` (no speed downgrade — these are new, good facilities), the
+ * matching facility code, and a `build_note`/`source_url`/`completed` for the
+ * app's "learn more about network" panel. `supplement: true` marks provenance.
+ * No-op if the supplement file is absent.
+ */
+function mergeSupplement(kept: GeoJSONFeature[]): void {
+  if (!fs.existsSync(SUPPLEMENT_PATH)) {
+    console.warn(
+      `[supplement] WARN: ${path.relative(REPO_ROOT, SUPPLEMENT_PATH)} not found — run build:supplement. Skipping.`
+    );
+    return;
+  }
+  const fc = JSON.parse(fs.readFileSync(SUPPLEMENT_PATH, "utf8")) as FeatureCollection;
+  let added = 0;
+  for (const f of fc.features) {
+    if (!f.geometry) continue;
+    const t = f.geometry.type;
+    if (t !== "LineString" && t !== "MultiLineString") continue;
+    const cls = String(f.properties?.["class"] ?? "");
+    kept.push({
+      type: "Feature",
+      geometry: { type: t, coordinates: roundCoords(f.geometry.coordinates) },
+      properties: {
+        class: cls,
+        rclass: cls,
+        facility: SUPPLEMENT_FACILITY[cls] ?? "",
+        ...(f.properties?.["name"] ? { name: f.properties["name"] } : {}),
+        supplement: true,
+        build_note: f.properties?.["build_note"] ?? "",
+        source_url: f.properties?.["source_url"] ?? "",
+        completed: f.properties?.["completed"] ?? "",
+      },
+    });
+    added++;
+  }
+  console.log(`[supplement] merged ${added} built-but-unpublished features`);
+}
+
 function writeBoth(features: GeoJSONFeature[]): void {
   const json = JSON.stringify({ type: "FeatureCollection", features });
   for (const target of [OUT_WEB, OUT_IOS, OUT_SERVER]) {
@@ -334,6 +393,10 @@ async function main(): Promise<void> {
     );
     for (const f of kept) if (f.properties) f.properties["rclass"] = f.properties["class"];
   }
+
+  // Add the built-but-unpublished supplement AFTER rclass baking so these new
+  // facilities keep rclass = class (no speed/arterial down-rate).
+  mergeSupplement(kept);
 
   writeBoth(kept);
   console.log(`\nDone — ${kept.length} bike-network features.`);

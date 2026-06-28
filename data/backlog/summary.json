@@ -1,21 +1,21 @@
 {
   "generatedFrom": "data/reconciled/current",
-  "presence_gaps": 2108,
+  "presence_gaps": 2199,
   "presence_by_class": {
     "off_street": 189,
-    "greenway": 491,
-    "protected": 419,
-    "buffered": 333,
+    "greenway": 503,
+    "protected": 502,
+    "buffered": 329,
     "standard": 676
   },
   "contraflow_gaps": 1,
-  "calm_gaps": 3082,
+  "calm_gaps": 3064,
   "calm_by_class": {
-    "calm": 2679,
+    "calm": 2661,
     "calm_mod": 403
   },
   "calm_missing_geometry": 0,
-  "presence_dropped_mismatch": 263,
+  "presence_dropped_mismatch": 319,
   "presence_dropped_by_reason": {
     "freeway carriageway (highway=trunk_link)": 2,
     "off_street facility on motor road (highway=primary)": 32,
@@ -27,7 +27,7 @@
     "greenway facility on motor road (highway=primary)": 1,
     "off_street facility on motor road (highway=primary_link)": 8,
     "greenway facility on motor road (highway=tertiary)": 10,
-    "facility on footway=sidewalk": 131,
+    "facility on footway=sidewalk": 187,
     "off_street facility on motor road (highway=tertiary)": 3
   },
   "presence_missing_geometry": 0,

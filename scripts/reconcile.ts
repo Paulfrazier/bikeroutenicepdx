@@ -36,6 +36,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "node:url";
 import * as turf from "@turf/turf";
 import type {
   Feature,
@@ -71,7 +72,7 @@ const GREENWAY_CLASSES = new Set([
 // Path helpers
 // ---------------------------------------------------------------------------
 
-const REPO_ROOT = path.resolve(import.meta.dirname, "..");
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DATA_PBOT_CURRENT = path.join(REPO_ROOT, "data", "pbot", "current");
 const DATA_RECONCILED_CURRENT = path.join(
   REPO_ROOT,

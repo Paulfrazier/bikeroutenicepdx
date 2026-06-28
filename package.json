@@ -12,6 +12,7 @@
     "fetch:pbot": "tsx scripts/fetch-pbot.ts",
     "fetch:osm": "tsx scripts/fetch-osm.ts",
     "build:graph": "tsx scripts/build-graph.ts",
+    "build:supplement": "NODE_OPTIONS=--max-old-space-size=4096 tsx scripts/build-supplement.ts",
     "export:greenways": "tsx scripts/export-greenways.ts",
     "export:bike-network": "tsx scripts/export-bike-network.ts",
     "bake:render-class": "tsx scripts/bake-render-class.ts",
