@@ -74,6 +74,15 @@ struct RootView: View {
         .sheet(isPresented: $showConnectors) {
             ConnectorsView()
         }
+        // Tapped a built-but-unpublished "supplement" lane → "learn more about
+        // this network" panel (build note + PBOT source link). Mirrors the web.
+        .sheet(item: Binding(
+            get: { store.selectedSupplement },
+            set: { store.selectedSupplement = $0 }
+        )) { info in
+            SupplementInfoSheet(info: info)
+                .presentationDetents([.height(260), .medium])
+        }
         // Tap-to-rate: a long-press resolved a street → offer the four ratings.
         .confirmationDialog(
             store.pendingRatingStreet ?? "",
@@ -476,5 +485,64 @@ struct RootView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .transition(.move(edge: .top).combined(with: .opacity))
+    }
+}
+
+/// "Learn more about this network" panel for a tapped built-but-unpublished
+/// supplement lane. Shows the build note + a tappable PBOT source link — the
+/// native analog of the web `showSupplementPopup`.
+private struct SupplementInfoSheet: View {
+    let info: SupplementInfo
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                Label("Recently built — not yet on PBOT's map", systemImage: "hammer.fill")
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close")
+            }
+
+            if !info.name.isEmpty {
+                Text(info.name)
+                    .font(.subheadline.weight(.semibold))
+            }
+
+            if !info.buildNote.isEmpty {
+                Text(info.buildNote)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let url = sourceURL {
+                Link(destination: url) {
+                    Label("PBOT project page", systemImage: "arrow.up.right.square")
+                        .font(.subheadline.weight(.medium))
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+    }
+
+    /// Only surface the link for a well-formed http(s) URL (matches the web guard).
+    private var sourceURL: URL? {
+        guard info.sourceURL.hasPrefix("http://") || info.sourceURL.hasPrefix("https://") else {
+            return nil
+        }
+        return URL(string: info.sourceURL)
     }
 }

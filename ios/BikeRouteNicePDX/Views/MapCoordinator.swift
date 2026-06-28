@@ -12,6 +12,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     weak var mapView: MKMapView?
     var tapGesture: UITapGestureRecognizer?
     var panGesture: UIPanGestureRecognizer?
+    /// Built-but-unpublished "supplement" lanes, with their build note + source
+    /// link. A flat list parallel to the rendered overlays (referencing the same
+    /// MKPolyline objects) used for screen-space tap hit-testing. Set by MapView.
+    var supplementHits: [SupplementLine] = []
     var editPanGesture: UIPanGestureRecognizer?
     var editLongPressGesture: UILongPressGestureRecognizer?
 
@@ -476,8 +480,36 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             Task { await store.deleteVia(at: viaIndex) }
             return
         }
+        // Tap a built-but-unpublished "supplement" lane → show the "learn more
+        // about this network" panel instead of dropping an A/B pin (mirrors the
+        // web). Checked only in the plain planning tap, after the mode branches.
+        if let info = supplementHit(point, map: map) {
+            store.selectedSupplement = info
+            return
+        }
         let coordinate = map.convert(point, toCoordinateFrom: map)
         store.handleMapTap(coordinate)
+    }
+
+    /// The supplement lane (if any) within ~22 screen points of `point`. Computes
+    /// the minimum screen-space distance from the tap to each candidate polyline's
+    /// segments and returns the nearest within range, else nil.
+    private func supplementHit(_ point: CGPoint, map: MKMapView) -> SupplementInfo? {
+        guard !supplementHits.isEmpty else { return nil }
+        let tapRadius: CGFloat = 22
+        var best = tapRadius
+        var bestHit: SupplementLine?
+        for hit in supplementHits {
+            let screen = hit.polyline.coordinatesArray.map { map.convert($0, toPointTo: map) }
+            guard screen.count >= 2 else { continue }
+            var d = CGFloat.greatestFiniteMagnitude
+            for i in 0..<(screen.count - 1) {
+                d = min(d, pointToSegmentDistance(point, screen[i], screen[i + 1]))
+            }
+            if d <= best { best = d; bestHit = hit }
+        }
+        guard let hit = bestHit else { return nil }
+        return SupplementInfo(name: hit.name, buildNote: hit.buildNote, sourceURL: hit.sourceURL)
     }
 
     /// Long-press in edit mode: on a pin → toggle precise (amber/emerald); on the

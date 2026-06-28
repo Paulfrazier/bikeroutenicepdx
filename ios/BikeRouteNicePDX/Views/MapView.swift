@@ -35,6 +35,15 @@ struct MapView: UIViewRepresentable {
             map.addOverlays(network, level: .aboveRoads)
         }
 
+        // Built-but-unpublished "supplement" lanes (PBOT 2024-2026). Same level +
+        // class bucketing as the network so they render identically; the parallel
+        // `hits` list makes them tappable for the "learn more" panel.
+        let supplement = SupplementNetworkLoader.load()
+        if !supplement.overlays.isEmpty {
+            map.addOverlays(supplement.overlays, level: .aboveRoads)
+        }
+        context.coordinator.supplementHits = supplement.hits
+
         // Tap to drop pins.
         let tap = UITapGestureRecognizer(
             target: context.coordinator,

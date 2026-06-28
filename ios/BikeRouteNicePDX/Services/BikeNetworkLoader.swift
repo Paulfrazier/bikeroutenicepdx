@@ -23,6 +23,10 @@ enum BikeNetworkLoader {
         var byClass: [BikeClass: [MKPolyline]] = [:]
         for object in objects {
             guard let feature = object as? MKGeoJSONFeature else { continue }
+            // Built-but-unpublished "supplement" lanes are drawn (and made
+            // tappable) by SupplementNetworkLoader, which buckets them by class
+            // identically — skip them here so they aren't drawn twice.
+            if isSupplement(feature.properties) { continue }
             let cls = bikeClass(from: feature.properties)
             for geometry in feature.geometry {
                 if let line = geometry as? MKPolyline {
@@ -49,7 +53,8 @@ enum BikeNetworkLoader {
     /// Strip features whose geometry has too few coordinates to form a line.
     /// Returns re-serialized data, or nil if the input isn't the expected shape
     /// (in which case the caller falls back to the raw data).
-    private static func sanitized(_ data: Data) -> Data? {
+    /// Internal (not private) so `SupplementNetworkLoader` reuses the same clean.
+    static func sanitized(_ data: Data) -> Data? {
         guard
             var root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let features = root["features"] as? [[String: Any]]
@@ -81,7 +86,9 @@ enum BikeNetworkLoader {
     /// Parse the feature's `rclass` (or `class`) property (raw JSON Data) into
     /// a BikeClass. Prefers `rclass` so fast unprotected lanes baked to "busy"
     /// in the data render red dashed without a runtime speed lookup.
-    private static func bikeClass(from data: Data?) -> BikeClass {
+    /// Internal (not private) so `SupplementNetworkLoader` buckets supplement
+    /// lanes by the exact same logic.
+    static func bikeClass(from data: Data?) -> BikeClass {
         guard
             let data,
             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -91,5 +98,35 @@ enum BikeNetworkLoader {
             return .lane
         }
         return cls
+    }
+
+    /// True for a built-but-unpublished "supplement" feature (PBOT lanes built
+    /// 2024-2026, not yet in the published GIS). The flag may decode as a Bool
+    /// (`true`) or, defensively, as a numeric `1`.
+    static func isSupplement(_ data: Data?) -> Bool {
+        guard
+            let data,
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return false
+        }
+        if let flag = obj["supplement"] as? Bool { return flag }
+        if let n = obj["supplement"] as? NSNumber { return n.intValue == 1 }
+        return false
+    }
+
+    /// Reader-facing metadata for a supplement feature: the build note, the PBOT
+    /// project URL, and the facility name. Missing fields fall back to empties.
+    static func supplementMeta(from data: Data?) -> (name: String, buildNote: String, sourceURL: String) {
+        guard
+            let data,
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return ("", "", "")
+        }
+        let name = (obj["name"] as? String) ?? ""
+        let buildNote = (obj["build_note"] as? String) ?? ""
+        let sourceURL = (obj["source_url"] as? String) ?? ""
+        return (name, buildNote, sourceURL)
     }
 }

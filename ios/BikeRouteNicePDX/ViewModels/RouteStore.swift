@@ -256,6 +256,12 @@ final class RouteStore {
     /// flash a brief "no street here" hint.
     private(set) var noStreetTick = 0
 
+    // ── Tap a built-but-unpublished "supplement" lane ──────────────────────────
+    /// The supplement lane the user tapped (a PBOT lane built 2024-2026, not yet
+    /// on the published map). Non-nil drives the "learn more about this network"
+    /// sheet in RootView; cleared when the sheet is dismissed.
+    var selectedSupplement: SupplementInfo?
+
     init() {
         // A personal street-rating change (from the manage sheet or tap-to-rate)
         // must recolor the CURRENT route + update its comfort coverage live. The
