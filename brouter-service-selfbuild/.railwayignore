@@ -1,0 +1,5 @@
+# The ~15 MB of BRouter .rd5 tiles are fetched from GitHub at Docker build time
+# (see Dockerfile), NOT shipped as `railway up` build context. This keeps each
+# deploy upload ~90 KB instead of 15 MB so it doesn't time out on slow uplinks.
+# The tiles still live (committed) in segments4/ on the default branch.
+segments4/*.rd5
