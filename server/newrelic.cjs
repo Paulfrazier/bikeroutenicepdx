@@ -13,8 +13,14 @@
  * /search?q=<address> query string). See web/public/privacy.html.
  *
  * Secrets are NOT stored here — `NEW_RELIC_LICENSE_KEY` and `NEW_RELIC_APP_NAME`
- * come from the Railway environment. The agent is loaded before app code via
- * NODE_OPTIONS="--import newrelic/esm-loader.mjs -r newrelic" (Railway env var).
+ * come from the Railway environment.
+ *
+ * Loading: the agent is started by `import newrelic from "newrelic"` placed as the
+ * FIRST import in src/index.ts. Do NOT set a NODE_OPTIONS ESM-loader flag — the
+ * `--import newrelic/esm-loader.mjs -r newrelic` form does NOT work with newrelic
+ * v12 on Node 18 (the esm-loader subpath no longer resolves, so Node exits at
+ * startup with "cannot find module newrelic" and the container crash-loops). The
+ * top-of-file import is the supported load path here.
  */
 exports.config = {
   app_name: [process.env.NEW_RELIC_APP_NAME || 'bikeroutenicepdx-server'],

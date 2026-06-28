@@ -8,11 +8,16 @@
  * Start prod:  npm run build && npm run start
  */
 
+// New Relic must be imported FIRST — before Hono / @hono/node-server — so the
+// agent initializes before the modules it instruments are evaluated. This
+// top-of-file import IS the load mechanism: do NOT add a NODE_OPTIONS ESM-loader
+// flag (the `--import newrelic/esm-loader.mjs` form breaks on newrelic v12 — see
+// server/newrelic.cjs).
+import newrelic from "newrelic";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { serve } from "@hono/node-server";
-import newrelic from "newrelic";
 import { config } from "./config.js";
 import routeHandler from "./routes/route.js";
 import matchHandler from "./routes/match.js";
