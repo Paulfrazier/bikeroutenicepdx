@@ -280,23 +280,35 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     }
 
     /// Fade (or restore) the bike-network overlay's opacity. No-ops if already in
-    /// the requested state; otherwise forces the network renderers to redraw.
+    /// the requested state; otherwise restrokes + redraws the network renderers.
     private func setNetworkFaded(_ faded: Bool, on map: MKMapView) {
         guard networkFaded != faded else { return }
         networkFaded = faded
-        for overlay in map.overlays where overlay is BikeMultiPolyline {
-            map.renderer(for: overlay)?.setNeedsDisplay()
-        }
+        repaintNetwork(on: map)
     }
 
     /// Repaint the bike-network overlays when the user toggles a lane-type group
-    /// in the legend. The renderer reads `store.hiddenLaneGroups` (transparent
-    /// when hidden), so a redraw is all that's needed — no overlay teardown.
+    /// in the legend (hidden groups stroke fully transparent).
     private func syncNetworkVisibility(on map: MKMapView) {
         guard lastHiddenLaneGroups != store.hiddenLaneGroups else { return }
         lastHiddenLaneGroups = store.hiddenLaneGroups
-        for overlay in map.overlays where overlay is BikeMultiPolyline {
-            map.renderer(for: overlay)?.setNeedsDisplay()
+        repaintNetwork(on: map)
+    }
+
+    /// Re-stroke every bike-network renderer from the CURRENT hidden + faded
+    /// state, then redraw. `setNeedsDisplay()` alone re-runs `draw()` but never
+    /// re-runs `rendererFor` — where `strokeColor` is computed — so the cached
+    /// stroke (set once at overlay creation) would stay stale and a legend toggle
+    /// or route-fade would never reach the line. Mutate the live renderer's
+    /// stroke here so the redraw actually changes color/alpha.
+    private func repaintNetwork(on map: MKMapView) {
+        for overlay in map.overlays {
+            guard let multi = overlay as? BikeMultiPolyline,
+                  let renderer = map.renderer(for: overlay) as? MKMultiPolylineRenderer else { continue }
+            let hidden = store.hiddenLaneGroups.contains(multi.bikeClass.group)
+            let alpha: CGFloat = hidden ? 0 : (networkFaded ? 0.35 : 0.85)
+            renderer.strokeColor = multi.bikeClass.color.withAlphaComponent(alpha)
+            renderer.setNeedsDisplay()
         }
     }
 

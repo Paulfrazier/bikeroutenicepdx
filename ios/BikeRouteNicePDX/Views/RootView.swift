@@ -167,6 +167,12 @@ struct RootView: View {
             #if DEBUG
             switch ProcessInfo.processInfo.environment["BRN_DEMO"] {
             case "1": await store.runDemoSnap()
+            case "hide":
+                // Capture the full network first, then hide all groups via the
+                // live legend mutation so a before/after screenshot proves the
+                // overlay actually repaints.
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                store.debugHideAllLaneGroups()
             case "edit": await store.runDemoEdit()
             case "nav":
                 // Seed a route then launch straight into navigation (no touch

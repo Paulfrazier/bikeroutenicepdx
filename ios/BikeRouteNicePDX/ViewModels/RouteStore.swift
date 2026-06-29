@@ -1184,6 +1184,13 @@ final class RouteStore {
     // MARK: - Search
 
     #if DEBUG
+    /// Verification hook: hide every lane-type group via the SAME mutation the
+    /// legend checkboxes drive, exercising the live toggle→updateUIView→repaint
+    /// path without touch injection. Triggered by BRN_DEMO=hide.
+    func debugHideAllLaneGroups() {
+        hiddenLaneGroups = Set(LaneGroup.allCases)
+    }
+
     /// Verification hook: auto-route between sample pins, then splice in a manual
     /// drawn stretch (verbatim) — exercising the manual-segment path without a
     /// finger drag. Triggered by the BRN_DEMO launch env var.
