@@ -22,6 +22,15 @@ struct RootView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
+            // Observing the lane-visibility set here re-renders RootView when a
+            // legend checkbox flips it, which fires MapView's updateUIView so the
+            // network overlay repaints. Without this read nothing in MapView's
+            // ancestry depends on hiddenLaneGroups (only LegendView does), so the
+            // toggle would persist + flip the checkbox but never reach the map —
+            // same Observation→updateUIView bridge the corridor/connector banners
+            // rely on.
+            let _ = store.hiddenLaneGroups
+
             MapView()
                 .ignoresSafeArea()
 
