@@ -154,6 +154,75 @@ if (webMap.size && iosMap.size) {
   }
 }
 
+// ── Comfort-preset → hidden facility-group mapping ────────────────────────────
+// The legend's Calm/Balanced/All dial is derived from the shared 5-group Set, so
+// each preset's hidden facility-groups MUST match across surfaces. Web table:
+// COMFORT_PRESETS in friendliness.ts. iOS: ComfortPreset.hiddenFacilityGroups in
+// MKPolyline+Kind.swift (NOT BikeFriendliness.swift), so read that file directly.
+const IOS_LANEGROUP_FILE = path.join(
+  REPO_ROOT,
+  "ios",
+  "BikeRouteNicePDX",
+  "Extensions",
+  "MKPolyline+Kind.swift"
+);
+
+/** Normalize a preset → sorted comma-joined group keys, for easy comparison. */
+function normPreset(groups: string[]): string {
+  return [...groups].sort().join(",");
+}
+
+/** Web: parse `COMFORT_PRESETS = { calm: ["caution","shared"], ... }`. */
+function extractWebPresets(): Map<string, string> {
+  const block = webSrc.match(/COMFORT_PRESETS[^{]*\{([\s\S]*?)\n\}/);
+  const map = new Map<string, string>();
+  if (!block) {
+    errors.push("could not locate COMFORT_PRESETS in web/src/friendliness.ts");
+    return map;
+  }
+  const re = /(\w+)\s*:\s*\[([^\]]*)\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(block[1])) !== null) {
+    const groups = [...m[2].matchAll(/"(\w+)"/g)].map((g) => g[1]);
+    map.set(m[1], normPreset(groups));
+  }
+  return map;
+}
+
+/** iOS: parse the `hiddenGroups` switch — `case .gentle: return [.painted, ...]`. */
+function extractIosPresets(): Map<string, string> {
+  const src = read(IOS_LANEGROUP_FILE, "iOS MKPolyline+Kind.swift");
+  const fn = src.match(/var hiddenGroups: Set<LaneGroup> \{[\s\S]*?\n {4}\}/);
+  const map = new Map<string, string>();
+  if (!fn) {
+    errors.push("could not locate ComfortPreset.hiddenGroups in MKPolyline+Kind.swift");
+    return map;
+  }
+  const re = /case\s+\.(\w+):\s*return\s*\[([^\]]*)\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(fn[0])) !== null) {
+    const groups = [...m[2].matchAll(/\.(\w+)/g)].map((g) => g[1]);
+    map.set(m[1], normPreset(groups));
+  }
+  return map;
+}
+
+const webPresets = extractWebPresets();
+const iosPresets = extractIosPresets();
+
+if (webPresets.size && iosPresets.size) {
+  const presets = new Set([...webPresets.keys(), ...iosPresets.keys()]);
+  for (const k of presets) {
+    const w = webPresets.get(k);
+    const i = iosPresets.get(k);
+    if (w !== i) {
+      errors.push(
+        `comfort-preset mismatch for "${k}": web=[${w ?? "(absent)"}]  ≠  iOS=[${i ?? "(absent)"}]`,
+      );
+    }
+  }
+}
+
 // ── Street-rating → RouteClass mapping ────────────────────────────────────────
 
 /** Web: parse `RATING_TO_CLASS = { great: "protected", ... }` → rating → class. */
@@ -214,5 +283,5 @@ if (errors.length) {
 }
 
 console.log(
-  `✓ web ↔ iOS friendliness in sync (${CONSTANT_PAIRS.length} constants, ${webMap.size} route-class colors, ${webRatings.size} street-rating classes)`,
+  `✓ web ↔ iOS friendliness in sync (${CONSTANT_PAIRS.length} constants, ${webMap.size} route-class colors, ${webPresets.size} comfort presets, ${webRatings.size} street-rating classes)`,
 );

@@ -897,16 +897,28 @@ button {
 }
 
 /* ── Bike network legend ────────────────────────────────────────────────────── */
-.bike-legend {
+/* The legend + its one-time notice share a bottom-left dock. column-reverse so
+   the notice (later in DOM) floats ABOVE the legend card. The dock is
+   click-through; interactive children re-enable pointer events. */
+.bike-legend-dock {
   position: absolute;
   bottom: 28px; /* clear MapLibre attribution bar */
   left: 8px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.bike-legend {
+  position: relative;
   background: rgba(255, 255, 255, 0.93);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
   padding: 8px 10px;
-  z-index: 10;
   min-width: 178px;
   pointer-events: none; /* let map clicks pass through the swatch area */
 }
@@ -936,9 +948,114 @@ button {
   font-size: 13px;
 }
 
+/* The collapsed/expanded chip label carries the active preset name (or
+   "Custom"); keep it readable rather than the old all-caps overline. */
+.bike-legend__toggle-label {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+}
+
 .bike-legend__chevron {
   margin-left: auto;
   font-size: 12px;
+}
+
+/* The toggle's own chevron sits at the end; the customize chevron is inline at
+   the start, so reset its auto-margin. */
+.bike-legend__customize-toggle .bike-legend__chevron {
+  margin-left: 0;
+  margin-right: 2px;
+}
+
+/* ── Comfort Lens: the compact body ─────────────────────────────────────────── */
+.bike-legend__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* 3-segment comfort dial: Calm | Balanced | All. */
+.bike-legend__seg {
+  pointer-events: auto;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: var(--radius-sm, 6px);
+}
+
+.bike-legend__seg-btn {
+  flex: 1 1 0;
+  min-height: 30px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-sm, 5px);
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.bike-legend__seg-btn--on {
+  background: var(--color-accent, #2e9e48);
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Quiet-streets toggle: its own row, independent of the preset ladder. */
+.bike-legend__quiet {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  cursor: pointer;
+}
+
+.bike-legend__quiet-label {
+  font-size: 12px;
+  color: var(--color-text);
+}
+
+/* One-line summary of the active preset. */
+.bike-legend__summary {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+  max-width: 178px;
+}
+
+/* ── Customize disclosure: holds the full per-group key ──────────────────────── */
+.bike-legend__customize {
+  border-top: 1px solid var(--color-border, rgba(0, 0, 0, 0.1));
+  padding-top: 6px;
+}
+
+.bike-legend__customize-toggle {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 28px;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--color-text-muted);
+}
+
+.bike-legend__customize-body {
+  margin-top: 8px;
 }
 
 /* Caption under the unified key: the route reuses these colors. */
@@ -1043,9 +1160,46 @@ button {
   border-top: 1px solid var(--color-border, rgba(0, 0, 0, 0.1));
 }
 
+/* One-time "we tidied the map" notice; docked above the legend card. */
+.bike-comfort-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 240px;
+  padding: 10px 12px;
+  background: var(--color-accent, #2e9e48);
+  color: #fff;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.bike-comfort-toast__text {
+  flex: 1 1 auto;
+}
+
+.bike-comfort-toast__dismiss {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin: -2px -4px 0 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.bike-comfort-toast__dismiss:hover {
+  opacity: 1;
+}
+
 /* On mobile, move legend up so it doesn't hide under the bottom drawer handle */
 @media (max-width: 767px) {
-  .bike-legend {
+  .bike-legend-dock {
     bottom: 60px;
   }
 }

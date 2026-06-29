@@ -17,6 +17,10 @@ struct RootView: View {
     @State private var showConnectors = false
     // Brief "no street here" hint after a rate long-press misses.
     @State private var showNoStreet = false
+    // One-time "Comfort Lens" intro toast: shown once under the new build to
+    // explain that the map now hides busy roads by default (Medium).
+    @AppStorage("comfortSeen") private var comfortSeen = false
+    @State private var showComfortToast = false
     // Confirm the resolved link roads before saving a tap-built connector.
     @State private var confirmingConnectorSave = false
 
@@ -55,6 +59,21 @@ struct RootView: View {
                     .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
                     .padding(.top, 120)
                     .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            if showComfortToast {
+                Label("Map tidied — busy roads hidden by default. Tap All to show everything.", systemImage: "sparkles")
+                    .font(.subheadline.weight(.medium))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 70)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .onTapGesture { withAnimation { showComfortToast = false } }
             }
         }
         .sheet(isPresented: $showRideSaved) {
@@ -162,6 +181,18 @@ struct RootView: View {
             }
             #endif
             if !tourSeen { showTour = true }
+            // One-time Comfort Lens intro. New users get the first-run tour (which
+            // covers the map already), so only flash this for existing riders — but
+            // always claim the flag so it shows at most once under the new build.
+            if !comfortSeen {
+                comfortSeen = true
+                if tourSeen {
+                    withAnimation { showComfortToast = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                        withAnimation { showComfortToast = false }
+                    }
+                }
+            }
         }
         .task {
             #if DEBUG

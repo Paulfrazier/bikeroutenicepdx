@@ -115,8 +115,14 @@ final class RouteStore {
     /// across launches. Unlike the preference/engine, this does NOT re-route —
     /// it only changes which network lanes are drawn (the route line is never
     /// filtered). Mirrors web `hiddenGroups` (Map.tsx).
+    /// Default for a user who has never set a preference: Medium (hide the
+    /// "caution" group — busy roads with little bike infrastructure). An *absent*
+    /// key → Medium; a stored array (incl. empty = explicit "All") is respected.
+    /// Mirrors web `loadHiddenGroups`.
     var hiddenLaneGroups: Set<LaneGroup> = {
-        let raw = UserDefaults.standard.stringArray(forKey: "hiddenLaneGroups") ?? []
+        guard let raw = UserDefaults.standard.stringArray(forKey: "hiddenLaneGroups") else {
+            return ComfortPreset.medium.hidden
+        }
         return Set(raw.compactMap(LaneGroup.init(rawValue:)))
     }() {
         didSet {
@@ -132,6 +138,21 @@ final class RouteStore {
         } else {
             hiddenLaneGroups.insert(group)
         }
+    }
+
+    // ── Comfort presets ──────────────────────────────────────────────────────
+    // The always-visible legend exposes one comfort dial (Gentle/Medium/All)
+    // derived from `hiddenLaneGroups` (still the canonical Set). The 4 independent
+    // toggles live in Customize.
+
+    /// The active preset, or nil when the hidden Set matches no preset ("Custom").
+    var comfortPreset: ComfortPreset? {
+        ComfortPreset.from(hidden: hiddenLaneGroups)
+    }
+
+    /// Apply a preset.
+    func setComfortPreset(_ preset: ComfortPreset) {
+        hiddenLaneGroups = preset.hidden
     }
 
     // Draw mode

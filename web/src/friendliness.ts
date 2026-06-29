@@ -129,35 +129,77 @@ export const DANGER_CLASS: RouteClass = "busy";
 // ── Lane-type visibility groups (KEEP IN SYNC WITH iOS LaneGroup) ────────────
 // The bike-network overlay can be filtered by lane type. The network render
 // classes (every RouteClass except "quiet", which is a route-only off-network
-// fallback and never appears on the overlay) collapse into 5 user-facing groups
-// so the legend offers ~5 toggles instead of 11. Membership MUST match the iOS
+// fallback and never appears on the overlay) collapse into 4 user-facing groups
+// so the legend offers 4 toggles instead of 11. Membership MUST match the iOS
 // `BikeClass.group` mapping (MKPolyline+Kind.swift) — they are one feature on two
 // surfaces.
 
-/** A toggleable group of bike-network lane types. */
+/** A toggleable group of bike-network lane types. Ordered gentlest → busiest. */
 export type LaneGroupKey =
   | "separated"
   | "painted"
-  | "caution"
-  | "quietStreets"
-  | "shared";
+  | "mostlyCalm"
+  | "caution";
 
 /**
- * Ordered lane-type groups for the legend's visibility toggles. Order mirrors
- * the legend's best→worst reading order. The union of all `classes` is exactly
- * the set of network render classes ("quiet" excluded — route-only).
+ * Ordered lane-type groups for the legend's visibility toggles, gentlest first.
+ * The union of all `classes` is exactly the set of network render classes
+ * ("quiet" excluded — route-only).
+ *  - mostlyCalm = the recommended quiet streets (calm) + enhanced shared
+ *    roadways (shared) — low-traffic streets with light/no bike markings.
+ *  - caution = anything where you're exposed to busy traffic with little bike
+ *    infrastructure: painted lanes on busy/stroad arterials (caution/caution4),
+ *    moderate-traffic shared roadway (calm_mod), and fast unprotected lanes (busy).
  */
 export const NETWORK_LANE_GROUPS: ReadonlyArray<{
   key: LaneGroupKey;
   label: string;
   classes: readonly RouteClass[];
 }> = [
-  { key: "separated",    label: "Protected, greenway & paths", classes: ["protected", "greenway", "path"] },
-  { key: "painted",      label: "Painted bike lanes",          classes: ["buffered", "lane"] },
-  { key: "caution",      label: "Caution — arterial lanes",    classes: ["caution", "caution4"] },
-  { key: "quietStreets", label: "Quiet streets (recommended)", classes: ["calm"] },
-  { key: "shared",       label: "Shared & high-stress",        classes: ["calm_mod", "shared", "busy"] },
+  { key: "separated",  label: "Protected, greenway & paths", classes: ["protected", "greenway", "path"] },
+  { key: "painted",    label: "Painted bike lanes",          classes: ["buffered", "lane"] },
+  { key: "mostlyCalm", label: "Mostly calm streets",         classes: ["calm", "shared"] },
+  { key: "caution",    label: "Caution — busy roads with little bike infrastructure", classes: ["caution", "caution4", "calm_mod", "busy"] },
 ];
+
+// ── Comfort presets (KEEP IN SYNC WITH iOS ComfortPreset) ────────────────────
+// The 4 groups form a comfort ladder (separated < painted < mostlyCalm <
+// caution). A "comfort preset" is one decision picking how far up the ladder to
+// SHOW. Each preset lists the groups it HIDES:
+//   gentle → show only separated (protected/greenway/paths)
+//   medium → show separated + painted + mostlyCalm (hide the caution group)
+//   all    → show everything
+// The legend offers Gentle/Medium/All instead of 4 checkboxes; the raw
+// `hiddenGroups` Set stays the single source of truth (a Set that matches no
+// preset is "Custom"). Mirror in iOS MKPolyline+Kind.swift (ComfortPreset).
+
+export type ComfortPreset = "gentle" | "medium" | "all";
+
+/** Lane-groups each preset hides, ordered gentle→all (least→most shown). */
+export const COMFORT_PRESETS: Record<ComfortPreset, readonly LaneGroupKey[]> = {
+  gentle: ["painted", "mostlyCalm", "caution"],
+  medium: ["caution"],
+  all: [],
+};
+
+/** Build the hidden-group Set for a preset. */
+export function presetToHidden(preset: ComfortPreset): Set<LaneGroupKey> {
+  return new Set<LaneGroupKey>(COMFORT_PRESETS[preset]);
+}
+
+/** Which preset a hidden-group Set represents, or null for a "Custom" Set that
+ * matches no preset. */
+export function hiddenToPreset(
+  hidden: Set<LaneGroupKey>
+): ComfortPreset | null {
+  for (const preset of ["gentle", "medium", "all"] as const) {
+    const expect = COMFORT_PRESETS[preset];
+    if (hidden.size === expect.length && expect.every((g) => hidden.has(g))) {
+      return preset;
+    }
+  }
+  return null;
+}
 
 export interface RouteFriendliness {
   /** Per-route-segment class; length === coords.length - 1. */

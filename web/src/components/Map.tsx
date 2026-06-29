@@ -29,8 +29,14 @@ import maplibregl, {
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { LngLat, RouteResponse, RouteGeometry, Via, ManualSegment } from "../types";
 import { hitTestRoute, nearestVertexIndex, VERTEX_HIT_PX, MAX_VIAS, type Px } from "../geo";
-import { ROUTE_CLASS_COLORS, ROUTE_CLASS_DASHED, NETWORK_LANE_GROUPS } from "../friendliness";
-import type { RouteClass, LaneGroupKey } from "../friendliness";
+import {
+  ROUTE_CLASS_COLORS,
+  ROUTE_CLASS_DASHED,
+  NETWORK_LANE_GROUPS,
+  presetToHidden,
+  hiddenToPreset,
+} from "../friendliness";
+import type { RouteClass, LaneGroupKey, ComfortPreset } from "../friendliness";
 import type { Connector } from "../connectors";
 
 /** Teal "your fix" color — shared by the connector overlay + its legend entry. */
@@ -275,13 +281,18 @@ const ROUTE_SOLID_FILTER: any = ["!", ["in", ["get", "class"], ["literal", [...R
 // layers are filtered — the route line is never touched.
 
 const HIDDEN_GROUPS_KEY = "bikenice.hiddenLaneGroups";
+/** Flag: the one-time "we tidied the map" comfort-preset notice has been shown. */
+const COMFORT_SEEN_KEY = "bikenice.comfortSeen";
 const DASHED_SET = new Set<RouteClass>(ROUTE_CLASS_DASHED);
 
 /** Load the persisted hidden-group set, ignoring unknown/legacy keys. */
 function loadHiddenGroups(): Set<LaneGroupKey> {
   try {
     const raw = localStorage.getItem(HIDDEN_GROUPS_KEY);
-    if (!raw) return new Set();
+    // First visit (no stored value): default to the "Medium" preset, which hides
+    // the "caution" group (busy roads with little bike infrastructure). A PRESENT
+    // value — including an explicit "[]" ("All") — is always honored verbatim.
+    if (raw == null) return presetToHidden("medium");
     const valid = new Set(NETWORK_LANE_GROUPS.map((g) => g.key));
     return new Set(
       (JSON.parse(raw) as string[]).filter((k): k is LaneGroupKey =>
@@ -377,17 +388,43 @@ function LegendRow({ cls }: { cls: string }) {
   );
 }
 
+// ── Comfort Lens metadata ────────────────────────────────────────────────────
+// The three presets the segmented control offers, plus the one-line summary each
+// one reads as. A null active preset ("Custom") falls back to the last entry.
+const PRESET_ORDER: readonly ComfortPreset[] = ["gentle", "medium", "all"];
+const PRESET_LABELS: Record<ComfortPreset, string> = {
+  gentle: "Gentle",
+  medium: "Medium",
+  all: "All",
+};
+const PRESET_SUMMARIES: Record<ComfortPreset, string> = {
+  gentle: "Protected lanes, greenways & paths only.",
+  medium: "Adds painted lanes & mostly-calm streets.",
+  all: "Adds busy roads with little bike infrastructure.",
+};
+
 function BikeNetworkLegend({
   open,
   onToggle,
+  activePreset,
+  onSetPreset,
   hiddenGroups,
   onToggleGroup,
 }: {
   open: boolean;
   onToggle: () => void;
+  activePreset: ComfortPreset | null;
+  onSetPreset: (preset: ComfortPreset) => void;
   hiddenGroups: Set<LaneGroupKey>;
   onToggleGroup: (key: LaneGroupKey) => void;
 }) {
+  // The full per-class key lives behind a disclosure, closed by default.
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const chipLabel = activePreset ? PRESET_LABELS[activePreset] : "Custom";
+  const summary = activePreset
+    ? PRESET_SUMMARIES[activePreset]
+    : "Custom selection.";
+
   return (
     <div className="bike-legend" aria-label="Bike network legend">
       <button
@@ -397,49 +434,90 @@ function BikeNetworkLegend({
         onClick={onToggle}
       >
         <span className="bike-legend__toggle-icon" aria-hidden="true">🚲</span>
-        <span className="bike-legend__toggle-label">Bike Network</span>
+        <span className="bike-legend__toggle-label">{chipLabel}</span>
         <span className="bike-legend__chevron" aria-hidden="true">
           {open ? "▾" : "▸"}
         </span>
       </button>
       {open && (
-      <>
-      <ul className="bike-legend__list">
-        {NETWORK_LANE_GROUPS.map((group) => {
-          const hidden = hiddenGroups.has(group.key);
-          return (
-            <li
-              key={group.key}
-              className={`bike-legend__group${hidden ? " bike-legend__group--off" : ""}`}
+        <div className="bike-legend__body">
+          {/* Primary control: the comfort dial. */}
+          <div
+            className="bike-legend__seg"
+            role="group"
+            aria-label="Comfort level"
+          >
+            {PRESET_ORDER.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                className={`bike-legend__seg-btn${
+                  activePreset === preset ? " bike-legend__seg-btn--on" : ""
+                }`}
+                aria-pressed={activePreset === preset}
+                onClick={() => onSetPreset(preset)}
+              >
+                {PRESET_LABELS[preset]}
+              </button>
+            ))}
+          </div>
+
+          <p className="bike-legend__summary">{summary}</p>
+
+          {/* Disclosure: the full per-group key + static rows + caption. */}
+          <div className="bike-legend__customize">
+            <button
+              type="button"
+              className="bike-legend__customize-toggle"
+              aria-expanded={customizeOpen}
+              onClick={() => setCustomizeOpen((o) => !o)}
             >
-              <label className="bike-legend__group-head">
-                <input
-                  type="checkbox"
-                  className="bike-legend__checkbox"
-                  checked={!hidden}
-                  onChange={() => onToggleGroup(group.key)}
-                />
-                <span className="bike-legend__group-label">{group.label}</span>
-              </label>
-              <ul className="bike-legend__sublist">
-                {group.classes.map((cls) => (
-                  <LegendRow key={cls} cls={cls} />
-                ))}
-              </ul>
-            </li>
-          );
-        })}
-      </ul>
-      <ul className="bike-legend__list bike-legend__list--static">
-        {ROUTE_ONLY_LEGEND.map((cls) => (
-          <LegendRow key={cls} cls={cls} />
-        ))}
-      </ul>
-      <p className="bike-legend__caption">
-        Uncheck a group to hide those lanes from the map. Your route stays drawn
-        in these colors with a white outline.
-      </p>
-      </>
+              <span className="bike-legend__chevron" aria-hidden="true">
+                {customizeOpen ? "▾" : "▸"}
+              </span>
+              Customize layers &amp; key
+            </button>
+            {customizeOpen && (
+              <div className="bike-legend__customize-body">
+                <ul className="bike-legend__list">
+                  {NETWORK_LANE_GROUPS.map((group) => {
+                    const hidden = hiddenGroups.has(group.key);
+                    return (
+                      <li
+                        key={group.key}
+                        className={`bike-legend__group${hidden ? " bike-legend__group--off" : ""}`}
+                      >
+                        <label className="bike-legend__group-head">
+                          <input
+                            type="checkbox"
+                            className="bike-legend__checkbox"
+                            checked={!hidden}
+                            onChange={() => onToggleGroup(group.key)}
+                          />
+                          <span className="bike-legend__group-label">{group.label}</span>
+                        </label>
+                        <ul className="bike-legend__sublist">
+                          {group.classes.map((cls) => (
+                            <LegendRow key={cls} cls={cls} />
+                          ))}
+                        </ul>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <ul className="bike-legend__list bike-legend__list--static">
+                  {ROUTE_ONLY_LEGEND.map((cls) => (
+                    <LegendRow key={cls} cls={cls} />
+                  ))}
+                </ul>
+                <p className="bike-legend__caption">
+                  Uncheck a group to hide those lanes from the map. Your route
+                  stays drawn in these colors with a white outline.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -593,6 +671,21 @@ export function Map({
     if (routeLoading) setLegendOpen(false);
   }, [routeLoading]);
 
+  // One-time "we tidied the map" notice: the overlay now defaults to Medium
+  // (busy roads hidden), so first-time visitors get a dismissible banner pointing
+  // them at the "All" preset. Shown once per device, then the flag is set.
+  const [comfortNoticeOpen, setComfortNoticeOpen] = useState(false);
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem(COMFORT_SEEN_KEY)) {
+        setComfortNoticeOpen(true);
+        localStorage.setItem(COMFORT_SEEN_KEY, "1");
+      }
+    } catch {
+      /* storage unavailable (private mode) — just skip the notice */
+    }
+  }, []);
+
   // Lane-type visibility: which NETWORK_LANE_GROUPS are hidden from the static
   // bike-network overlay (persisted per-device). The route line is never filtered.
   const [hiddenGroups, setHiddenGroups] = useState<Set<LaneGroupKey>>(loadHiddenGroups);
@@ -604,6 +697,17 @@ export function Map({
       saveHiddenGroups(next);
       return next;
     });
+  }, []);
+
+  // Comfort Lens: the legend's primary control is a single comfort preset
+  // (Gentle/Medium/All) derived from the hiddenGroups Set — the Set stays the
+  // single source of truth and the preset is just a view onto it. `activePreset`
+  // is null ("Custom") when the selection matches no preset.
+  const activePreset = hiddenToPreset(hiddenGroups);
+  const setPreset = useCallback((p: ComfortPreset) => {
+    const next = presetToHidden(p);
+    saveHiddenGroups(next);
+    setHiddenGroups(next);
   }, []);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1701,12 +1805,32 @@ export function Map({
         role="application"
         aria-label="Bike route map"
       />
-      <BikeNetworkLegend
-        open={legendOpen}
-        onToggle={() => setLegendOpen((o) => !o)}
-        hiddenGroups={hiddenGroups}
-        onToggleGroup={toggleGroup}
-      />
+      <div className="bike-legend-dock">
+        <BikeNetworkLegend
+          open={legendOpen}
+          onToggle={() => setLegendOpen((o) => !o)}
+          activePreset={activePreset}
+          onSetPreset={setPreset}
+          hiddenGroups={hiddenGroups}
+          onToggleGroup={toggleGroup}
+        />
+        {comfortNoticeOpen && (
+          <div className="bike-comfort-toast" role="status">
+            <span className="bike-comfort-toast__text">
+              We tidied the map — busy roads are hidden by default. Tap{" "}
+              <strong>All</strong> to show everything.
+            </span>
+            <button
+              type="button"
+              className="bike-comfort-toast__dismiss"
+              aria-label="Dismiss"
+              onClick={() => setComfortNoticeOpen(false)}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

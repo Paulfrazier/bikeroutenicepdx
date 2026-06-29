@@ -161,31 +161,28 @@ enum BikeClass: String, CaseIterable {
         switch self {
         case .greenway, .protected, .path: return .separated
         case .buffered, .lane: return .painted
-        case .caution, .caution4: return .caution
-        case .calm: return .quietStreets
-        case .calm_mod, .shared, .busy: return .shared
+        case .calm, .shared: return .mostlyCalm
+        case .caution, .caution4, .calm_mod, .busy: return .caution
         }
     }
 }
 
-/// A toggleable group of bike-network lane types. The user can hide a whole
-/// group from the static network overlay (the route line is never filtered).
-/// Mirrors web `NETWORK_LANE_GROUPS` / `LaneGroupKey` in friendliness.ts —
-/// KEEP IN SYNC (membership, order, and raw values).
+/// A toggleable group of bike-network lane types, ordered gentlest → busiest. The
+/// user can hide a whole group from the static network overlay (the route line is
+/// never filtered). Mirrors web `NETWORK_LANE_GROUPS` / `LaneGroupKey` in
+/// friendliness.ts — KEEP IN SYNC (membership, order, and raw values).
 enum LaneGroup: String, CaseIterable {
     case separated
     case painted
+    case mostlyCalm
     case caution
-    case quietStreets
-    case shared
 
     var label: String {
         switch self {
         case .separated: return "Protected, greenway & paths"
         case .painted: return "Painted bike lanes"
-        case .caution: return "Caution — arterial lanes"
-        case .quietStreets: return "Quiet streets (recommended)"
-        case .shared: return "Shared & high-stress"
+        case .mostlyCalm: return "Mostly calm streets"
+        case .caution: return "Caution — busy roads with little bike infrastructure"
         }
     }
 
@@ -194,10 +191,41 @@ enum LaneGroup: String, CaseIterable {
         switch self {
         case .separated: return [.protected, .greenway, .path]
         case .painted: return [.buffered, .lane]
-        case .caution: return [.caution, .caution4]
-        case .quietStreets: return [.calm]
-        case .shared: return [.calm_mod, .shared, .busy]
+        case .mostlyCalm: return [.calm, .shared]
+        case .caution: return [.caution, .caution4, .calm_mod, .busy]
         }
+    }
+}
+
+/// Comfort presets — one decision (Gentle/Medium/All) picking how far up the
+/// comfort ladder to SHOW, replacing the four hand-toggles on the always-visible
+/// legend. Each preset lists the groups it HIDES:
+///   gentle → show only separated (protected/greenway/paths)
+///   medium → show separated + painted + mostlyCalm (hide the caution group)
+///   all    → show everything
+/// Mirrors web `COMFORT_PRESETS` / `presetToHidden` / `hiddenToPreset`
+/// (friendliness.ts) — KEEP IN SYNC (membership + order). The raw
+/// `hiddenLaneGroups` Set stays canonical; a Set matching no preset is "Custom".
+enum ComfortPreset: String, CaseIterable {
+    case gentle
+    case medium
+    case all
+
+    /// Lane-groups this preset hides.
+    var hiddenGroups: Set<LaneGroup> {
+        switch self {
+        case .gentle: return [.painted, .mostlyCalm, .caution]
+        case .medium: return [.caution]
+        case .all: return []
+        }
+    }
+
+    /// Build the hidden-group Set for a preset.
+    var hidden: Set<LaneGroup> { hiddenGroups }
+
+    /// The preset a hidden-group Set represents, or nil ("Custom") if none match.
+    static func from(hidden: Set<LaneGroup>) -> ComfortPreset? {
+        allCases.first { $0.hiddenGroups == hidden }
     }
 }
 
