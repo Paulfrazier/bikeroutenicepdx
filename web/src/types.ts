@@ -13,6 +13,14 @@ export type LngLat = [number, number];
  */
 export type RoutePreference = "ultra" | "comfort" | "balanced" | "fast";
 
+/**
+ * Which BRouter tile set / profile the server routes against. "prod" = stock
+ * brouter.de tiles; "selfbuild" = locally-built tiles that add door-zone
+ * ("weaklane") avoidance, PBOT quiet-street nudges, and 2024–2026 built lanes
+ * prod can't see. Raw values MUST match iOS RoutingEngine + the server enum.
+ */
+export type RouteEngine = "prod" | "selfbuild";
+
 export interface RouteRequest {
   from: LngLat;
   to: LngLat;
@@ -20,6 +28,8 @@ export interface RouteRequest {
   via?: LngLat[];
   /** Greenway-vs-speed tier. Omitted → server defaults to "comfort". */
   preference?: RoutePreference;
+  /** Routing engine. Omitted → server defaults to "prod"; clients send "selfbuild". */
+  engine?: RouteEngine;
 }
 
 /**

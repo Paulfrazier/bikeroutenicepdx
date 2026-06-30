@@ -18,8 +18,16 @@ struct ControlsBar: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            pinChips
-            actionArea
+            // Draw mode is a "from-scratch canvas" that needs the map: collapse the
+            // whole card to a slim control strip (no pin chips, summary, pickers, or
+            // tool selector) so most of the map is free to draw on. Mirrors the web
+            // compact bottom-drawer strip.
+            if store.isDrawMode {
+                compactDrawControls
+            } else {
+                pinChips
+                actionArea
+            }
         }
         .padding(16)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -166,7 +174,6 @@ struct ControlsBar: View {
                     }
                 }
                 preferencePicker
-                enginePicker
                 // Action row: just the two primary CTAs, equal width via
                 // frame(maxWidth:.infinity), uniform height via controlSize +
                 // shared font. lineLimit keeps both labels on one line.
@@ -228,23 +235,6 @@ struct ControlsBar: View {
         ) {
             ForEach(RoutePreference.allCases) { pref in
                 Text(pref.label).tag(pref)
-            }
-        }
-        .pickerStyle(.segmented)
-    }
-
-    /// Prod↔Self-build engine toggle. Changing it recomputes the current route
-    /// (RouteStore re-routes in its didSet).
-    private var enginePicker: some View {
-        Picker(
-            "Engine",
-            selection: Binding(
-                get: { store.routingEngine },
-                set: { store.routingEngine = $0 }
-            )
-        ) {
-            ForEach(RoutingEngine.allCases) { engine in
-                Text(engine.label).tag(engine)
             }
         }
         .pickerStyle(.segmented)
@@ -431,6 +421,31 @@ struct ControlsBar: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
             .disabled(store.vias.isEmpty)
+        }
+    }
+
+    /// The collapsed Draw-mode strip: a title + "Done" (leaves Draw and connects the
+    /// route to the destination) over the Move/Draw toggle and stroke count + Undo /
+    /// Clear. Replaces the full card while drawing so the map is free. Mirrors the
+    /// web compact bottom-drawer strip.
+    private var compactDrawControls: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Label("Draw route", systemImage: "hand.draw.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    editPanelOpen = false
+                    Task { await store.finishDraw() }
+                } label: {
+                    Label("Done", systemImage: "checkmark")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.green)
+            }
+            drawControlsRow
         }
     }
 

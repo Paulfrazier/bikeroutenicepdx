@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { fetchRoute } from "../api";
-import type { LngLat, RouteResponse, RoutePreference } from "../types";
+import type { LngLat, RouteResponse, RoutePreference, RouteEngine } from "../types";
 
 /**
  * Fetches a route whenever both `from` and `to` are non-null. Optional `vias`
@@ -19,7 +19,8 @@ export function useRoute(
   from: LngLat | null,
   to: LngLat | null,
   vias: LngLat[] = [],
-  preference: RoutePreference = "comfort"
+  preference: RoutePreference = "comfort",
+  engine: RouteEngine = "selfbuild"
 ) {
   const [route, setRoute] = useState<RouteResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -54,6 +55,7 @@ export function useRoute(
         to,
         via: vias.length ? vias : undefined,
         preference,
+        engine,
       })
         .then((data) => {
           if (!cancelled) {
@@ -77,7 +79,7 @@ export function useRoute(
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, viaKey, preference]);
+  }, [from, to, viaKey, preference, engine]);
 
   return { route, loading, error };
 }

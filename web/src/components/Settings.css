@@ -1,0 +1,68 @@
+/* Settings.css — settings FAB + panel.
+ *
+ * Mirrors the ratings/connectors FAB conventions (see .ratings-fab /
+ * .connectors-fab). Reuses the shared .guide-* card chrome from styles.css. */
+
+/* Floating ⚙ button — stacked UNDER the connectors 🔧 FAB. The left FAB stack:
+ * help (16), ratings (16+48), connectors (16+48+48), settings (16+48+48+48). */
+.settings-fab {
+  position: absolute;
+  top: calc(16px + 48px + 48px + 48px + env(safe-area-inset-top, 0px));
+  left: 16px;
+  z-index: 15;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: background var(--transition), transform var(--transition);
+}
+.settings-fab:hover { background: var(--color-surface); transform: scale(1.05); }
+.settings-fab:active { transform: scale(0.96); }
+
+/* Settings panel body (reuses .guide-* card chrome). */
+.settings-section {
+  margin: 0 0 4px;
+}
+.settings-section__title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* Segmented Self-build / Prod toggle. */
+.settings-toggle {
+  display: flex;
+  gap: 6px;
+}
+.settings-toggle__opt {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: var(--radius, 8px);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+.settings-toggle__opt:hover { background: var(--color-surface); }
+.settings-toggle__opt--on {
+  background: var(--color-blue);
+  border-color: var(--color-blue);
+  color: #fff;
+}
+.settings-toggle__opt--on:hover { background: var(--color-blue); }
+
+.settings-hint {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted, #64748b);
+}

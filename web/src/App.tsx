@@ -11,6 +11,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Map, useMapClickHandler } from "./components/Map";
 import { EndpointInputs } from "./components/EndpointInputs";
 import { RouteDrawer, type EditTool } from "./components/RouteDrawer";
+import { DrawControlsBar } from "./components/DrawControlsBar";
 import { Tour, GestureGuide, HelpButton, useFirstRunTour } from "./components/Help";
 import {
   StreetRatingsButton,
@@ -31,6 +32,8 @@ import {
   loadRoutePreference,
   saveRoutePreference,
 } from "./routePreference";
+import { SettingsButton, SettingsPanel } from "./components/Settings";
+import { loadRouteEngine, saveRouteEngine } from "./routeEngine";
 import { MapBoundary } from "./components/MapBoundary";
 import { useRoute } from "./hooks/useRoute";
 import { useFriendliness } from "./hooks/useFriendliness";
@@ -56,6 +59,7 @@ import type {
   ManualSegment,
   CorridorResponse,
   RoutePreference,
+  RouteEngine,
 } from "./types";
 
 // Monotonic id source for waypoints — gives each via a stable identity so
@@ -147,6 +151,7 @@ export default function App() {
   // is global, rendered as a teal overlay, and auto-spliced into routes that pass
   // near both its ends (see activeCoords + connectorSegmentsForRoute).
   const [connectorsPanelOpen, setConnectorsPanelOpen] = useState(false);
+  const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const [connectorDrawMode, setConnectorDrawMode] = useState(false);
   const connectors = useConnectors();
   const connectorsVersion = useConnectorsVersion();
@@ -313,6 +318,14 @@ export default function App() {
     saveRoutePreference(pref);
   }, []);
 
+  // Routing engine (Self-build ↔ Prod). Defaults to self-build; lives in the
+  // Settings menu. Persisted; changing it re-routes.
+  const [engine, setEngine] = useState<RouteEngine>(loadRouteEngine);
+  const handleEngineChange = useCallback((next: RouteEngine) => {
+    setEngine(next);
+    saveRouteEngine(next);
+  }, []);
+
   // While Build is active the waypoints are previewed as straight lines and are
   // NOT routed; Finish flips buildMode off, which lets them feed the router.
   const viaCoords = useMemo(
@@ -323,7 +336,8 @@ export default function App() {
     from,
     to,
     viaCoords,
-    preference
+    preference,
+    engine
   );
   const reshaped = vias.length > 0;
 
@@ -354,9 +368,11 @@ export default function App() {
       return [from, ...vias.map((v) => v.at), to];
     }
     // A fully hand-drawn route (Draw mode) overrides everything: the raw strokes
-    // joined by straight bridges to the pins ARE the route.
+    // joined by straight bridges to the pins ARE the route. While Draw is still
+    // active we DON'T connect to the end pin (no line shoots to the destination
+    // mid-draw); the straight bridge to `to` is added only once Draw is finished.
     if (!nav.navigating && drawnStrokes.length > 0 && from && to) {
-      return assembleDrawnRoute(from, to, drawnStrokes);
+      return assembleDrawnRoute(from, to, drawnStrokes, !drawMode);
     }
     const auto = displayRoute?.geometry.coordinates ?? null;
     if (!auto) return null;
@@ -540,6 +556,43 @@ export default function App() {
     },
     []
   );
+
+  // Dragged a per-segment joint to `newJoint` (the shared end of stroke `si` and
+  // start of stroke `si+1`). Warp both strokes by tapering the move along each:
+  // the dragged end follows fully, the far end stays put — so the freehand shape
+  // is preserved while the join moves. Mirrors the live preview in Map.tsx.
+  const handleJointDrag = useCallback((si: number, newJoint: LngLat) => {
+    setDrawnStrokes((prev) => {
+      const next = prev.slice();
+      const inc = prev[si];
+      if (inc && inc.coords.length >= 2) {
+        const k = inc.coords.length - 1;
+        const old = inc.coords[k];
+        const d0 = newJoint[0] - old[0];
+        const d1 = newJoint[1] - old[1];
+        next[si] = {
+          ...inc,
+          coords: inc.coords.map((c, i) =>
+            i === k ? newJoint : [c[0] + (d0 * i) / k, c[1] + (d1 * i) / k]
+          ),
+        };
+      }
+      const out = prev[si + 1];
+      if (out && out.coords.length >= 2) {
+        const m = out.coords.length - 1;
+        const old = out.coords[0];
+        const d0 = newJoint[0] - old[0];
+        const d1 = newJoint[1] - old[1];
+        next[si + 1] = {
+          ...out,
+          coords: out.coords.map((c, i) =>
+            i === 0 ? newJoint : [c[0] + d0 * (1 - i / m), c[1] + d1 * (1 - i / m)]
+          ),
+        };
+      }
+      return next;
+    });
+  }, []);
 
   // Dragged the start/end marker to fine-tune an endpoint (e.g. onto the real
   // driveway). Waypoints persist, so the route re-routes through them.
@@ -851,6 +904,7 @@ export default function App() {
           drawnStrokes={drawnStrokes}
           onDrawStroke={handleDrawStroke}
           onStrokeNudge={handleStrokeNudge}
+          onJointDrag={handleJointDrag}
           corridorMode={corridorMode}
           connectorDrawMode={connectorDrawMode}
           onDrawConnector={handleDrawConnector}
@@ -871,6 +925,10 @@ export default function App() {
 
         {!nav.navigating && (
           <ConnectorsButton onClick={() => setConnectorsPanelOpen(true)} />
+        )}
+
+        {!nav.navigating && (
+          <SettingsButton onClick={() => setSettingsPanelOpen(true)} />
         )}
 
         {/* ── Rate-a-street pick banner ── */}
@@ -942,7 +1000,28 @@ export default function App() {
         )}
 
         {/* ── Mobile bottom drawer ── */}
-        {!nav.navigating && hasRoute && (
+        {/* Draw & Build are "from-scratch canvas" tools that need the map: while
+            either is active the drawer collapses to a one-row control strip so
+            most of the map is interactive (desktop keeps the full side panel). */}
+        {!nav.navigating && hasRoute && (drawMode || buildMode) && (
+          <div
+            className="bottom-drawer bottom-drawer--compact"
+            role="complementary"
+            aria-label="Draw controls"
+          >
+            <DrawControlsBar
+              mode={drawMode ? "draw" : "build"}
+              count={drawMode ? drawnStrokes.length : vias.length}
+              onUndo={drawMode ? handleUndoStroke : handleUndoWaypoint}
+              onClear={drawMode ? handleClearStrokes : handleClearWaypoints}
+              canRestore={!!preResetSnapshot}
+              onDone={drawMode ? toggleEditPanel : handleFinishBuild}
+              drawPaused={drawPaused}
+              onTogglePause={() => setDrawPaused((p) => !p)}
+            />
+          </div>
+        )}
+        {!nav.navigating && hasRoute && !drawMode && !buildMode && (
           <div
             className={`bottom-drawer ${drawerExpanded ? "bottom-drawer--expanded" : ""}`}
             role="complementary"
@@ -1004,6 +1083,14 @@ export default function App() {
         open={connectorsPanelOpen}
         onClose={() => setConnectorsPanelOpen(false)}
         onDrawOnMap={enterConnectorDraw}
+      />
+
+      {/* ── Settings panel ── */}
+      <SettingsPanel
+        open={settingsPanelOpen}
+        onClose={() => setSettingsPanelOpen(false)}
+        engine={engine}
+        onEngineChange={handleEngineChange}
       />
 
       {/* ── Help overlays ── */}

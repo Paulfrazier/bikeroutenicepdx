@@ -5,11 +5,22 @@ Self-build the BikeRouteNicePDX BRouter segment tiles so the router "sees" the
 backlog (`data/backlog/`) that stock brouter.de tiles lack. Builds **with SRTM1
 elevation** so hilly routes still cost correctly.
 
-**Status: built + validated locally, NOT deployed.** The A/B (below) shows the
-patch changes routing in a way that is a *product call*, not a clear win on the
-existing greenway-% gate — so it's parked like the engine bake-off until we
-decide. Prod `/route` still uses stock brouter.de tiles via the Railway
-`brouter` service.
+**Status: DEPLOYED + live-verified, and now the DEFAULT engine for both clients
+(2026-06-30).** Self-build runs as the `brouter-selfbuild` Railway service
+(`brouter-service-selfbuild/`, committed `segments4/*.rd5` + custom `lookups.dat`),
+reachable via `engine=selfbuild` on `/route`. Web and iOS now both default to it
+(the prod↔self-build toggle moved into each app's Settings menu for testing). The
+A6 work since this doc's original verdict — door-zone "weaklane" avoidance, which
+prod's stock tiles structurally can't do (live A/B: 486 m of door-zone lane on
+prod → 53 m comfort / 0 m ultra) — plus the bug-fix guard suite is why the old
+"not a clear win, do not deploy" call no longer holds. See
+`docs/CHANGE_INVENTORY.md` §C for the authoritative deploy state.
+
+The API server still **defaults a missing `engine` to `prod`** (the safe default
+for any unknown caller); the clients send `selfbuild` explicitly.
+
+> The "Decision needed / do not deploy" notes further down predate this and are
+> kept only as the historical Phase-2 record.
 
 ## Build
 
@@ -82,10 +93,11 @@ greenway-% metric scores it as a regression. Contraflow: SE 16th routes both
 directions (~97 m either way); the surrounding grid gives equal alternates so the
 patch is correctness-insurance there, not a visible detour fix.
 
-**Decision needed:** is "more total bike-infra, less pure greenway" desirable for
-the `comfort` tier? If yes → deploy (below) and/or re-weight the greenway gate to
-credit buffered/protected. If greenway-purity is the goal, keep the patch for the
-`ultra` tier only. Until decided, do not deploy.
+**Decision (resolved 2026-06-30):** "more total bike-infra, less pure greenway"
+*is* desirable — the door-zone (A6) safety win settled it. Self-build is now the
+default for both `comfort` and `ultra`; the greenway-% A/B above predates the A6
+weaklane work and is kept for history. (The original framing — defer, or keep the
+patch for `ultra` only — is left below as the Phase-2 record.)
 
 ## Deploy (when approved)
 

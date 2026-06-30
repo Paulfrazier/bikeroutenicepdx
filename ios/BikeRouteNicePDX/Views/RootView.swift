@@ -15,6 +15,7 @@ struct RootView: View {
     @State private var showHistory = false
     @State private var showRatings = false
     @State private var showConnectors = false
+    @State private var showSettings = false
     // Brief "no street here" hint after a rate long-press misses.
     @State private var showNoStreet = false
     // One-time "Comfort Lens" intro toast: shown once under the new build to
@@ -101,6 +102,9 @@ struct RootView: View {
         }
         .sheet(isPresented: $showConnectors) {
             ConnectorsView()
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
         }
         // Tapped a built-but-unpublished "supplement" lane → "learn more about
         // this network" panel (build note + PBOT source link). Mirrors the web.
@@ -229,6 +233,8 @@ struct RootView: View {
                 .padding(.top, 8)
             connectorsButton
                 .padding(.top, 8)
+            settingsButton
+                .padding(.top, 8)
             Spacer()
             LegendView()
                 .padding(.trailing, 12)
@@ -264,7 +270,7 @@ struct RootView: View {
         if store.isDrawMode {
             banner(
                 icon: "hand.draw",
-                text: "Trace your route with one finger — follow the colored bikeways."
+                text: "Trace strokes with one finger — each continues from the last. Drag a violet handle to adjust a join. Tap Done to connect to your destination."
             )
         } else if store.phase == .snapping {
             banner(icon: "point.topleft.down.curvedto.point.bottomright.up", text: "Snapping to the bike network…")
@@ -484,6 +490,23 @@ struct RootView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("My fixes")
+    }
+
+    /// Opens app settings (routing engine toggle). The ⚙ gear mirrors the web
+    /// settings entry.
+    private var settingsButton: some View {
+        Button {
+            showSettings = true
+        } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.tint)
+                .frame(width: 40, height: 40)
+                .background(.regularMaterial, in: Circle())
+                .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Settings")
     }
 
     /// Opens the saved-rides history (distance / time / greenway %).

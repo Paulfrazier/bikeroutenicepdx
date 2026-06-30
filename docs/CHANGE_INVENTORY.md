@@ -158,7 +158,7 @@ iOS `MapCoordinator.swift` (freehand sketch + connector tap-build),
 | Target | Carries | Status |
 |---|---|---|
 | Prod router `brouter` (app's `prod`) | A2 + A3 + A4 + **A5** | ✅ A4 deployed 2026-06-24 · A5 deployed 2026-06-26 |
-| Self-build router `brouter-selfbuild` (app's `selfbuild`) | A2 + A3 + A4 + A5 + **A6** | ✅ A4 deployed 2026-06-24 · A5 deployed 2026-06-26 · **A6 (weaklane + rebuilt buffer tiles) deployed 2026-06-26** — verified live: home→inner-SE door-zone 486 m (prod) → 53 m comfort / 0 m ultra |
+| Self-build router `brouter-selfbuild` (app's `selfbuild`) | A2 + A3 + A4 + A5 + **A6** | ✅ A4 deployed 2026-06-24 · A5 deployed 2026-06-26 · **A6 (weaklane + rebuilt buffer tiles) deployed 2026-06-26** — verified live: home→inner-SE door-zone 486 m (prod) → 53 m comfort / 0 m ultra · **DEFAULT engine for web + iOS as of 2026-06-30** (toggle moved into each app's Settings menu; server still defaults a missing `engine` to `prod`) |
 | Web (Vercel) | A1 (+ would also ship B1/B2) | ⛔ blocked on mixed tree |
 | iOS (TestFlight) | A1 (+ would also ship B1/B2/B3) | ⛔ blocked on mixed tree |
 | Orphan `brouter-selfbuild` service | stray deploy + a public domain I created | 🧹 to remove |

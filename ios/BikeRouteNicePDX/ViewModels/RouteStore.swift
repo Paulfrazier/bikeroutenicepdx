@@ -30,10 +30,12 @@ struct Via: Identifiable {
 }
 
 /// A finished Draw-mode stroke. In the from-scratch Draw canvas the strokes ARE
-/// the route: each stroke is snapped to roads via `/match`, then the strokes and
-/// the gaps to the start/end pins are joined by STRAIGHT bridges (see
-/// `GeoMath.assembleDrawnRoute`). When any strokes exist they override the
-/// BRouter auto-route for display / distance / coverage / nav.
+/// the route: each stroke is kept VERBATIM (no snapping — exactly as traced), and
+/// the strokes plus the gaps to the start/end pins are joined by STRAIGHT bridges
+/// (see `GeoMath.assembleDrawnRoute`). Strokes chain — each new stroke begins at
+/// the previous stroke's end, and that shared end is a movable joint. When any
+/// strokes exist they override the BRouter auto-route for display / distance /
+/// coverage / nav.
 struct ManualSegment: Identifiable {
     let id: UUID
     var coords: [CLLocationCoordinate2D]
@@ -98,10 +100,12 @@ final class RouteStore {
     }
 
     /// Routing engine ("prod" | "selfbuild"). Persisted across launches.
-    /// Changing it while a route is shown recomputes it.
+    /// Defaults to self-build (door-zone avoidance + PBOT quiet streets + new
+    /// 2024–26 lanes prod can't see). Prod stays available in Settings for
+    /// testing. Changing it while a route is shown recomputes it.
     var routingEngine: RoutingEngine = {
-        let raw = UserDefaults.standard.string(forKey: "routingEngine") ?? RoutingEngine.prod.rawValue
-        return RoutingEngine(rawValue: raw) ?? .prod
+        let raw = UserDefaults.standard.string(forKey: "routingEngine") ?? RoutingEngine.selfbuild.rawValue
+        return RoutingEngine(rawValue: raw) ?? .selfbuild
     }() {
         didSet {
             guard oldValue != routingEngine else { return }
@@ -307,6 +311,14 @@ final class RouteStore {
     var selectedSupplement: SupplementInfo?
 
     init() {
+        // One-time migration: self-build is now the default engine. Existing
+        // installs have "routingEngine" persisted as "prod", so flip them once
+        // (their later toggle choice in Settings then sticks). Fresh installs
+        // already default to self-build above; this just records the flag.
+        if !UserDefaults.standard.bool(forKey: "engineDefaultMigrated_v1") {
+            routingEngine = .selfbuild
+            UserDefaults.standard.set(true, forKey: "engineDefaultMigrated_v1")
+        }
         // A personal street-rating change (from the manage sheet or tap-to-rate)
         // must recolor the CURRENT route + update its comfort coverage live. The
         // classifier already reads the new overrides on its next pass, so we just
@@ -555,10 +567,14 @@ final class RouteStore {
             snapped = await classified(base)
             return
         }
-        // A fully hand-drawn route (Draw strokes) overrides everything.
+        // A fully hand-drawn route (Draw strokes) overrides everything. While Draw
+        // is still active we DON'T connect to the end pin (no line shoots to the
+        // destination mid-draw); the straight bridge to the end is added only once
+        // Draw is finished (web parity: assembleDrawnRoute(..., !drawMode)).
         if !manualSegments.isEmpty, let startC = start?.coordinate, let endC = end?.coordinate {
             let coords = GeoMath.assembleDrawnRoute(
-                from: startC, to: endC, strokes: manualSegments.map(\.coords)
+                from: startC, to: endC, strokes: manualSegments.map(\.coords),
+                connectEnd: !isDrawMode
             )
             guard coords.count >= 2 else { snapped = nil; return }
             var base = SnappedRoute(coordinates: coords, distanceMeters: GeoMath.length(coords))
@@ -965,6 +981,56 @@ final class RouteStore {
         await recomputeDisplay()
     }
 
+    /// Dragged a per-segment joint to `newJoint` (the shared end of stroke `si` and
+    /// start of stroke `si+1`). Warp both strokes by tapering the move along each:
+    /// the dragged end follows fully, the far end stays put — so the freehand shape
+    /// is preserved while the join moves. Mirrors the web `handleJointDrag`.
+    func warpJoint(segmentIndex si: Int, to newJoint: CLLocationCoordinate2D) async {
+        guard manualSegments.indices.contains(si) else { return }
+        // Incoming stroke v0..vk: end (k) follows fully, start fixed.
+        var inc = manualSegments[si].coords
+        if inc.count >= 2 {
+            let k = inc.count - 1
+            let old = inc[k]
+            let dLat = newJoint.latitude - old.latitude
+            let dLng = newJoint.longitude - old.longitude
+            for i in 0...k {
+                if i == k {
+                    inc[i] = newJoint
+                } else {
+                    let f = Double(i) / Double(k)
+                    inc[i] = CLLocationCoordinate2D(
+                        latitude: inc[i].latitude + dLat * f,
+                        longitude: inc[i].longitude + dLng * f)
+                }
+            }
+            manualSegments[si].coords = inc
+        }
+        // Outgoing stroke v0..vm: start (0) follows fully, end fixed.
+        let oi = si + 1
+        if manualSegments.indices.contains(oi) {
+            var out = manualSegments[oi].coords
+            if out.count >= 2 {
+                let m = out.count - 1
+                let old = out[0]
+                let dLat = newJoint.latitude - old.latitude
+                let dLng = newJoint.longitude - old.longitude
+                for i in 0...m {
+                    if i == 0 {
+                        out[i] = newJoint
+                    } else {
+                        let f = 1 - Double(i) / Double(m)
+                        out[i] = CLLocationCoordinate2D(
+                            latitude: out[i].latitude + dLat * f,
+                            longitude: out[i].longitude + dLng * f)
+                    }
+                }
+                manualSegments[oi].coords = out
+            }
+        }
+        await recomputeDisplay()
+    }
+
     /// Long-press on a pin: flip it between snap and precise. No re-route — the
     /// coordinate is unchanged; only the kind (and pin color) changes.
     func toggleViaPrecise(at index: Int) {
@@ -1081,6 +1147,18 @@ final class RouteStore {
         isCorridorMode = false
         preResetSnapshot = nil
         clearCorridorPick()
+    }
+
+    /// Done editing a drawn route: leave Draw mode and reconnect the route to the
+    /// destination — recompute with `connectEnd = true` now that `isDrawMode` is
+    /// false, so the straight bridge to the end pin appears. The strokes persist as
+    /// the route. Mirrors the web Draw "Done" (toggleEditPanel close).
+    func finishDraw() async {
+        isDrawMode = false
+        isDrawPaused = false
+        preResetSnapshot = nil
+        await recomputeDisplay()
+        phase = .routed
     }
 
     /// Clear an in-progress corridor pick (both endpoints, the preview, and any
