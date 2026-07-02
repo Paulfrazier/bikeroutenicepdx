@@ -12,6 +12,8 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     weak var mapView: MKMapView?
     var tapGesture: UITapGestureRecognizer?
     var panGesture: UIPanGestureRecognizer?
+    /// Two-finger map pan, live only while Draw owns one-finger touches.
+    var twoFingerPanGesture: UIPanGestureRecognizer?
     /// Built-but-unpublished "supplement" lanes, with their build note + source
     /// link. A flat list parallel to the rendered overlays (referencing the same
     /// MKPolyline objects) used for screen-space tap hit-testing. Set by MapView.
@@ -41,6 +43,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     /// The violet "pen" marker at the resume point (last vertex of the last Draw
     /// stroke), shown only in Draw mode so the rider sees where drawing continues.
     private var penAnnotation: DrawPenAnnotation?
+    /// Violet joint handles — one per Draw stroke, at its end. Each segment leaves
+    /// one movable joint; dragging it warps the adjacent strokes. Shown only in Draw
+    /// mode. The last joint coincides with (and sits under) the pen marker.
+    private var jointAnnotations: [DrawJointAnnotation] = []
     /// Teal highlight (line + white casing) of the picked "route through a
     /// section" street, shown only while in corridor mode.
     private var corridorOverlays: [MKOverlay] = []
@@ -53,8 +59,9 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     /// by tapping (connector-build mode). Rebuilt wholesale on each tap.
     private var connectorNodeAnnotations: [ConnectorNodeAnnotation] = []
     private var connectorDraftOverlay: ConnectorDraftPolyline?
-    /// Single rubber-banded preview line shown while a hand-edit drag is live.
-    private var editPreviewOverlay: RoutePolyline?
+    /// Single rubber-banded preview line shown while a hand-edit drag is live —
+    /// a RoutePolyline for line drags, a JointWarpPolyline for joint warps.
+    private var editPreviewOverlay: MKPolyline?
     /// True while a route is on screen — fades the bike-network overlay back so
     /// the route reads as the foreground (toggled in sync()/removeRouteOverlays).
     private var networkFaded = false
@@ -68,6 +75,13 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     private var draftOverlay: DraftPolyline?
     private var draftCoords: [CLLocationCoordinate2D] = []
     private var lastScreenPoint: CGPoint?
+
+    // Hold-to-grab (Draw mode): press-and-hold on a joint dot pops it and drags
+    // that joint. Active between the long-press .began and .ended/.cancelled;
+    // while set, the draw pan stands down (a hold-then-drag must warp, not draw).
+    private var penGrabActive = false
+    private var penGrabStartPoint: CGPoint?
+    private var penGrabMoved = false
 
     private static let minScreenStep: CGFloat = 8 // points between captured samples
 
@@ -83,12 +97,13 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     private var editingManualVertex: Int?
     private var isEditing = false
 
-    // Live Draw-mode vertex-nudge state: when a draw-stroke begins on an existing
-    // stroke vertex we nudge that vertex (raw, no re-snap) instead of starting a
-    // fresh stroke. Mirrors the web `startVertexNudge` branch of `onDown`.
-    private var drawNudgeSegID: UUID?
-    private var drawNudgeVertex: Int?
-    private var drawNudgeCoords: [CLLocationCoordinate2D] = []
+    // Live Draw-mode joint-drag state: when a draw pan begins on a per-segment
+    // joint (a stroke's end) we warp the two strokes meeting there instead of
+    // starting a fresh stroke. Mirrors the web `startJointDrag` branch of `onDown`.
+    private var jointDragIndex: Int?                          // stroke whose end is the joint
+    private var jointIncoming: [CLLocationCoordinate2D] = []  // original coords of stroke[si]
+    private var jointOutgoing: [CLLocationCoordinate2D]?      // original coords of stroke[si+1]
+    private var jointLastCoord: CLLocationCoordinate2D?       // last cursor while dragging
 
     private static let vertexGrabPx: CGFloat = 22 // tap radius to grab a vertex
     private static let lineGrabPx: CGFloat = 16   // tap radius to grab a segment
@@ -138,6 +153,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             map.isRotateEnabled = false
             map.isPitchEnabled = false
             panGesture?.isEnabled = false
+            twoFingerPanGesture?.isEnabled = false
             tapGesture?.isEnabled = false
             editPanGesture?.isEnabled = false
             editLongPressGesture?.isEnabled = false
@@ -147,18 +163,23 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             return
         }
 
-        // Lock map interaction while drawing (Draw mode) so our pan gesture owns the
-        // touch. Draw is the only freehand mode now (the old Build+Snap-off sketch
-        // is retired); taps are disabled so a drag isn't read as a waypoint tap.
-        // While Draw is PAUSED ("✋ Move map") the pan gesture stands down so the map
-        // scrolls/zooms normally; taps stay inert (handleTap guards !isDrawMode).
+        // While drawing (Draw mode), one finger is the brush: native scroll is off
+        // so our pan gesture owns single-finger touches, and the two-finger pan
+        // moves the map instead (drawing-app convention; native pinch stays live
+        // via isZoomEnabled). Taps stay on — they extend the route point-to-point
+        // (handleTap's Draw branch). While Draw is PAUSED ("✋ Move map") both draw
+        // gestures stand down so the map scrolls/zooms normally on one finger.
         let freehand = store.isDrawMode && !store.isDrawPaused
         map.isScrollEnabled = !freehand
-        map.isZoomEnabled = !freehand
+        map.isZoomEnabled = true
         map.isRotateEnabled = !freehand
         map.isPitchEnabled = !freehand
         panGesture?.isEnabled = freehand
-        tapGesture?.isEnabled = !freehand
+        twoFingerPanGesture?.isEnabled = freehand
+        tapGesture?.isEnabled = true
+        // Re-enable after nav disables it (long-press = hold-to-grab a joint in
+        // Draw, precise anchors in edit, street rating otherwise).
+        editLongPressGesture?.isEnabled = true
 
         // Hand-edit pan is live when a finished route is on screen, we're not
         // drawing, AND we're in Drag (reshape the line) OR Build (drag a pin to move
@@ -172,6 +193,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         syncAnnotation(&startAnnotation, waypoint: store.start, title: "Start", map: map)
         syncAnnotation(&endAnnotation, waypoint: store.end, title: "End", map: map)
         syncViaAnnotations(map)
+        syncDrawJoints(map)
         syncDrawPen(map)
         syncCorridorPreview(map)
         syncConnectorBuild(map)
@@ -258,7 +280,12 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         camera.centerCoordinate = center
         camera.heading = nav.course
         camera.pitch = 30   // was 55 — gentler tilt so the route ahead stays legible
-        camera.centerCoordinateDistance = 340
+        // Speed-adaptive altitude: pull back on fast straights so more route is
+        // visible, punch back in approaching a maneuver. Smoothed speed (EMA in
+        // the session) keeps this from breathing with GPS jitter.
+        var distance = min(560, max(280, 260 + nav.smoothedSpeed * 28))
+        if nav.distanceToNextManeuver < 120 { distance = min(distance, 300) }
+        camera.centerCoordinateDistance = distance
         map.setCamera(camera, animated: true)
     }
 
@@ -346,6 +373,25 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             rect = rect.union(overlay.boundingMapRect)
         }
         return rect
+    }
+
+    /// Reconcile the per-segment joint handles — one violet dot at each Draw stroke's
+    /// end, shown only in Draw mode. Each segment leaves one movable joint; dragging
+    /// it warps the strokes meeting there. Mirrors the web `draw-vertices` layer
+    /// (now one handle per segment rather than one per vertex).
+    private func syncDrawJoints(_ map: MKMapView) {
+        if !jointAnnotations.isEmpty {
+            map.removeAnnotations(jointAnnotations)
+            jointAnnotations = []
+        }
+        guard store.isDrawMode else { return }
+        for seg in store.manualSegments {
+            guard let end = seg.coords.last else { continue }
+            let annotation = DrawJointAnnotation()
+            annotation.coordinate = end
+            map.addAnnotation(annotation)
+            jointAnnotations.append(annotation)
+        }
     }
 
     /// Reconcile the violet "pen" marker — the resume point (last vertex of the last
@@ -465,8 +511,23 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     // MARK: - Tap to drop pins
 
     @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-        guard !store.isDrawMode, let map = mapView else { return }
+        guard let map = mapView else { return }
         let point = gesture.location(in: map)
+        // Draw mode: a bare tap extends the route with a straight segment from the
+        // pen (last stroke's end, or the start pin on a blank canvas) to the tap.
+        // Reuses addDrawnStroke so undo / joints / pen chaining come for free. A
+        // tap on a joint handle stays inert (it's the warp grab target — jointHit's
+        // grab radius also swallows near-pen taps, mirroring the web); paused Draw
+        // is a pure map-move mode, so taps stay inert there too (web parity).
+        if store.isDrawMode {
+            guard !store.isDrawPaused else { return }
+            if jointHit(point, map: map) != nil { return }
+            guard let pen = store.manualSegments.last?.coords.last
+                    ?? store.start?.coordinate else { return }
+            let tapped = map.convert(point, toCoordinateFrom: map)
+            Task { await store.addDrawnStroke([pen, tapped]) }
+            return
+        }
         // Connector-build mode owns the tap: hit an existing node → remove it;
         // tap anywhere else → append a node (tap order). The map stays interactive
         // so the rider can pan/zoom between taps to place precise link ends.
@@ -545,10 +606,17 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
     /// Long-press in edit mode: on a pin → toggle precise (amber/emerald); on the
     /// bare route line → drop a PRECISE anchor there (no snap) to force the route
-    /// through that point. Elsewhere it's ignored (map handles its own gestures).
+    /// through that point. In Draw mode: hold-to-grab a joint dot (handlePenGrab).
+    /// Elsewhere it's ignored (map handles its own gestures).
     @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began, !store.isDrawMode, nav?.isNavigating != true,
-              let map = mapView else { return }
+        guard nav?.isNavigating != true, let map = mapView else { return }
+        // Draw mode: the whole gesture lifecycle matters (hold pops the dot,
+        // then the continuing drag warps it) — not just .began.
+        if store.isDrawMode {
+            handlePenGrab(gesture, map: map)
+            return
+        }
+        guard gesture.state == .began else { return }
         let point = gesture.location(in: map)
 
         // Outside edit mode a long-press rates the street under the finger (the
@@ -573,6 +641,101 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         Task { await store.insertPreciseVia(at) }
     }
 
+    /// Hold-to-grab (Draw mode): press-and-hold a joint dot — most importantly
+    /// the PEN, whose plain drag now draws — pops it (with a haptic) and drags
+    /// the joint, like rearranging app icons. Reuses the same jointDrag state +
+    /// warp preview as the plain-drag warp; commits only after real movement.
+    private func handlePenGrab(_ gesture: UILongPressGestureRecognizer, map: MKMapView) {
+        let point = gesture.location(in: map)
+        switch gesture.state {
+        case .began:
+            guard !store.isDrawPaused,
+                  let si = jointHit(point, map: map),
+                  store.manualSegments.indices.contains(si) else { return }
+            // A slow near-still drag may have already started a tiny stroke —
+            // discard it (the isEnabled toggle drives handlePan to .cancelled,
+            // which removes the draft) BEFORE penGrabActive blocks that path.
+            if let pan = panGesture, pan.state == .began || pan.state == .changed {
+                pan.isEnabled = false
+                pan.isEnabled = true
+            }
+            penGrabActive = true
+            penGrabMoved = false
+            penGrabStartPoint = point
+            jointDragIndex = si
+            jointIncoming = store.manualSegments[si].coords
+            jointOutgoing = store.manualSegments.indices.contains(si + 1)
+                ? store.manualSegments[si + 1].coords : nil
+            jointLastCoord = jointIncoming.last
+            isEditing = true // freeze sync() so the route isn't rebuilt mid-warp
+            setJointGrabbed(si, grabbed: true, map: map)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            if let c = jointLastCoord { redrawJointWarp(map, cursor: c) }
+        case .changed:
+            guard penGrabActive else { return }
+            if let start = penGrabStartPoint,
+               hypot(point.x - start.x, point.y - start.y) > 6 {
+                penGrabMoved = true
+            }
+            let c = map.convert(point, toCoordinateFrom: map)
+            jointLastCoord = c
+            redrawJointWarp(map, cursor: c)
+        case .ended:
+            guard penGrabActive else { return }
+            penGrabActive = false
+            setJointGrabbed(jointDragIndex, grabbed: false, map: map)
+            let si = jointDragIndex
+            let c = jointLastCoord
+            let moved = penGrabMoved
+            jointDragIndex = nil
+            jointIncoming = []
+            jointOutgoing = nil
+            jointLastCoord = nil
+            penGrabStartPoint = nil
+            isEditing = false
+            if moved, let si, let c {
+                // Keep the warp preview up until the recompute lands (parity
+                // with handlePan's joint commit) — no stale-geometry flash.
+                Task { await store.warpJoint(segmentIndex: si, to: c) }
+            } else if let preview = editPreviewOverlay {
+                // Held but never dragged — nothing to commit.
+                map.removeOverlay(preview)
+                editPreviewOverlay = nil
+            }
+        case .cancelled, .failed:
+            guard penGrabActive else { return }
+            penGrabActive = false
+            setJointGrabbed(jointDragIndex, grabbed: false, map: map)
+            jointDragIndex = nil
+            jointIncoming = []
+            jointOutgoing = nil
+            jointLastCoord = nil
+            penGrabStartPoint = nil
+            isEditing = false
+            if let preview = editPreviewOverlay {
+                map.removeOverlay(preview)
+                editPreviewOverlay = nil
+            }
+        default:
+            break
+        }
+    }
+
+    /// Pop (or relax) the annotation view of joint `si` — the pen marker when the
+    /// grabbed joint is the last one (the pen sits on it), else its violet handle.
+    private func setJointGrabbed(_ si: Int?, grabbed: Bool, map: MKMapView) {
+        guard let si else { return }
+        let annotation: MKAnnotation? = si == store.manualSegments.count - 1
+            ? penAnnotation
+            : (jointAnnotations.indices.contains(si) ? jointAnnotations[si] : nil)
+        guard let annotation, let view = map.view(for: annotation) else { return }
+        UIView.animate(withDuration: 0.15, delay: 0, options: [.curveEaseOut]) {
+            view.transform = grabbed
+                ? CGAffineTransform(scaleX: 1.4, y: 1.4)
+                : .identity
+        }
+    }
+
     // MARK: - Finger draw
 
     /// Draw mode pan. Two behaviours, branched at `.began` (mirrors the web `onDown`
@@ -580,55 +743,71 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     /// re-snap, via `nudgeManualPoint`); anywhere else starts a fresh (resumable)
     /// stroke that's snapped to roads and appended on lift.
     @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
-        guard store.isDrawMode, let map = mapView else { return }
+        // penGrabActive: a hold-to-grab is dragging a joint — the draw pan must
+        // not also start a stroke from the same touch. (Set AFTER the grab
+        // force-cancels this gesture, so the .cancelled cleanup still runs.)
+        guard store.isDrawMode, !penGrabActive, let map = mapView else { return }
         let point = gesture.location(in: map)
 
         switch gesture.state {
         case .began:
-            // Grab a stroke vertex to nudge it; else start a new stroke.
-            if let manual = manualHit(point, map: map),
-               let seg = store.manualSegments.first(where: { $0.id == manual.segID }) {
-                drawNudgeSegID = manual.segID
-                drawNudgeVertex = manual.vertex
-                drawNudgeCoords = seg.coords
-                isEditing = true // freeze sync() so the route isn't rebuilt mid-nudge
-                redrawDrawNudge(map)
+            // Grab an EARLIER per-segment joint to warp it. The LAST joint is
+            // the pen — the draw origin — so a plain drag from it DRAWS
+            // (the "resume where I left off" instinct); moving the last point
+            // is hold-to-grab instead (handlePenGrab). Anywhere else starts a
+            // new (resumable) stroke chained from the previous stroke's end.
+            if let si = jointHit(point, map: map), store.manualSegments.indices.contains(si),
+               si != store.manualSegments.count - 1 {
+                jointDragIndex = si
+                jointIncoming = store.manualSegments[si].coords
+                jointOutgoing = store.manualSegments.indices.contains(si + 1)
+                    ? store.manualSegments[si + 1].coords : nil
+                jointLastCoord = jointIncoming.last
+                isEditing = true // freeze sync() so the route isn't rebuilt mid-warp
+                if let c = jointLastCoord { redrawJointWarp(map, cursor: c) }
             } else {
-                drawNudgeSegID = nil
-                draftCoords = []
+                jointDragIndex = nil
+                // Continuation: a new stroke starts at the previous stroke's end (the
+                // pen) so the strokes chain. Mirrors the web startDrawStroke seeding.
+                if let prevEnd = store.manualSegments.last?.coords.last {
+                    draftCoords = [prevEnd]
+                } else {
+                    draftCoords = []
+                }
                 lastScreenPoint = nil
                 appendIfFarEnough(point, map)
             }
         case .changed:
-            if drawNudgeSegID != nil, let vi = drawNudgeVertex, drawNudgeCoords.indices.contains(vi) {
-                drawNudgeCoords[vi] = map.convert(point, toCoordinateFrom: map)
-                redrawDrawNudge(map)
+            if jointDragIndex != nil {
+                let c = map.convert(point, toCoordinateFrom: map)
+                jointLastCoord = c
+                redrawJointWarp(map, cursor: c)
             } else {
                 appendIfFarEnough(point, map)
                 redrawDraft(map)
             }
         case .ended:
-            if let segID = drawNudgeSegID, let vi = drawNudgeVertex, drawNudgeCoords.indices.contains(vi) {
-                let to = drawNudgeCoords[vi]
-                drawNudgeSegID = nil
-                drawNudgeVertex = nil
-                drawNudgeCoords = []
+            if let si = jointDragIndex, let c = jointLastCoord {
+                jointDragIndex = nil
+                jointIncoming = []
+                jointOutgoing = nil
+                jointLastCoord = nil
                 isEditing = false
-                if let preview = editPreviewOverlay {
-                    map.removeOverlay(preview)
-                    editPreviewOverlay = nil
-                }
-                Task { await store.nudgeManualPoint(segmentID: segID, vertexIndex: vi, to: to) }
+                // Keep the warp preview up until the recompute lands —
+                // syncRouteOverlays clears it when the new route arrives, so there's
+                // no stale-geometry flash.
+                Task { await store.warpJoint(segmentIndex: si, to: c) }
             } else {
                 let coords = draftCoords
                 removeDraft(map)
                 Task { await store.addDrawnStroke(coords) }
             }
         case .cancelled, .failed:
-            if drawNudgeSegID != nil {
-                drawNudgeSegID = nil
-                drawNudgeVertex = nil
-                drawNudgeCoords = []
+            if jointDragIndex != nil {
+                jointDragIndex = nil
+                jointIncoming = []
+                jointOutgoing = nil
+                jointLastCoord = nil
                 isEditing = false
                 if let preview = editPreviewOverlay {
                     map.removeOverlay(preview)
@@ -642,15 +821,86 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         }
     }
 
-    /// Live preview of the single stroke being nudged in Draw mode — a plain blue
-    /// line over the (frozen) colored route, replaced once the re-splice lands.
-    private func redrawDrawNudge(_ map: MKMapView) {
+    /// Two-finger pan while Draw owns one-finger touches. Native scroll is off in
+    /// freehand, so the map is moved manually: shift the on-screen center point
+    /// backwards by the gesture delta and convert through the map's own projection
+    /// (correct at any zoom/latitude, and stable while a simultaneous native pinch
+    /// changes the region, because it's recomputed per event).
+    ///
+    /// The draw pan (maximumNumberOfTouches = 1) IGNORES a second finger — it does
+    /// not cancel — so it's force-cancelled here via the isEnabled toggle idiom,
+    /// whose .cancelled branch discards the draft / restores a joint warp: two
+    /// fingers mean "move the map", and the partial stroke was almost certainly a
+    /// mistake (web parity: Map.tsx cancelDrawStroke/cancelJointDrag).
+    @objc func handleTwoFingerPan(_ gesture: UIPanGestureRecognizer) {
+        guard let map = mapView else { return }
+        switch gesture.state {
+        case .began:
+            if let pan = panGesture, pan.state == .began || pan.state == .changed {
+                pan.isEnabled = false
+                pan.isEnabled = true
+            }
+        case .changed:
+            let t = gesture.translation(in: map)
+            let centerPoint = map.convert(map.centerCoordinate, toPointTo: map)
+            let shifted = CGPoint(x: centerPoint.x - t.x, y: centerPoint.y - t.y)
+            map.centerCoordinate = map.convert(shifted, toCoordinateFrom: map)
+            gesture.setTranslation(.zero, in: map)
+        default:
+            break
+        }
+    }
+
+    /// The warped two-stroke line for a joint dragged to `cursor`: taper each stroke
+    /// by index fraction so the dragged end follows `cursor` fully and the far ends
+    /// stay put. Mirrors the store's `warpJoint` and the web live preview.
+    private func warpedJointLine(cursor: CLLocationCoordinate2D) -> [CLLocationCoordinate2D] {
+        var line: [CLLocationCoordinate2D] = []
+        let inc = jointIncoming
+        if inc.count >= 2 {
+            let k = inc.count - 1
+            let old = inc[k]
+            let dLat = cursor.latitude - old.latitude
+            let dLng = cursor.longitude - old.longitude
+            for i in 0...k {
+                if i == k {
+                    line.append(cursor)
+                } else {
+                    let f = Double(i) / Double(k)
+                    line.append(CLLocationCoordinate2D(
+                        latitude: inc[i].latitude + dLat * f,
+                        longitude: inc[i].longitude + dLng * f))
+                }
+            }
+        }
+        // Outgoing stroke, skipping its first point (it equals the cursor/joint).
+        if let out = jointOutgoing, out.count >= 2 {
+            let m = out.count - 1
+            let old = out[0]
+            let dLat = cursor.latitude - old.latitude
+            let dLng = cursor.longitude - old.longitude
+            for i in 1...m {
+                let f = 1 - Double(i) / Double(m)
+                line.append(CLLocationCoordinate2D(
+                    latitude: out[i].latitude + dLat * f,
+                    longitude: out[i].longitude + dLng * f))
+            }
+        }
+        return line
+    }
+
+    /// Live preview of the two strokes being warped by a joint drag — violet
+    /// dashed (matching the joint handles) over the (frozen) colored route, so a
+    /// warp reads distinctly from a fresh stroke; replaced once the recompute
+    /// lands. Mirrors the web route-drag-line warp styling.
+    private func redrawJointWarp(_ map: MKMapView, cursor: CLLocationCoordinate2D) {
         if let existing = editPreviewOverlay {
             map.removeOverlay(existing)
             editPreviewOverlay = nil
         }
-        guard drawNudgeCoords.count >= 2 else { return }
-        let overlay = RoutePolyline(coordinates: drawNudgeCoords, count: drawNudgeCoords.count)
+        let line = warpedJointLine(cursor: cursor)
+        guard line.count >= 2 else { return }
+        let overlay = JointWarpPolyline(coordinates: line, count: line.count)
         editPreviewOverlay = overlay
         map.addOverlay(overlay, level: .aboveLabels)
     }
@@ -895,6 +1145,21 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         return result
     }
 
+    /// The index of the stroke whose END vertex (its per-segment joint) is within
+    /// grab range of `point`, else nil. Grabbing one warps the strokes meeting there.
+    /// Mirrors the web `jointHitPx`.
+    private func jointHit(_ point: CGPoint, map: MKMapView) -> Int? {
+        var best = Self.vertexGrabPx
+        var result: Int?
+        for (si, seg) in store.manualSegments.enumerated() {
+            guard let end = seg.coords.last else { continue }
+            let p = map.convert(end, toPointTo: map)
+            let d = hypot(point.x - p.x, point.y - p.y)
+            if d <= best { best = d; result = si }
+        }
+        return result
+    }
+
     private enum EditHit {
         case vertex(Int)
         case segment(Int) // index of the segment's first coordinate
@@ -1032,6 +1297,15 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             renderer.lineCap = .round
             renderer.lineJoin = .round
             if polyline.routeClass.dashed { renderer.lineDashPattern = [2, 10] }
+            return renderer
+        case let polyline as JointWarpPolyline:
+            // Joint-warp preview: violet dashed, matching the joint handles.
+            let renderer = MKPolylineRenderer(polyline: polyline)
+            renderer.strokeColor = UIColor(red: 0.545, green: 0.361, blue: 0.965, alpha: 0.95) // #8B5CF6
+            renderer.lineWidth = 5
+            renderer.lineCap = .round
+            renderer.lineJoin = .round
+            renderer.lineDashPattern = [4, 6]
             return renderer
         case let polyline as RoutePolyline:
             let renderer = MKPolylineRenderer(polyline: polyline)
@@ -1176,6 +1450,27 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             return view
         }
 
+        // Draw joint: a violet grab handle at a stroke's end. Non-interactive so
+        // the draw pan owns the touch (the geometric jointHit grabs it). Mirrors the
+        // web draw-vertices handles (#8B5CF6).
+        if annotation is DrawJointAnnotation {
+            let id = "drawJoint"
+            let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
+                ?? MKAnnotationView(annotation: annotation, reuseIdentifier: id)
+            view.annotation = annotation
+            view.transform = .identity // a recycled view may carry a grab pop
+            let size: CGFloat = 16
+            view.frame = CGRect(x: 0, y: 0, width: size, height: size)
+            view.backgroundColor = .clear
+            view.layer.cornerRadius = size / 2
+            view.layer.backgroundColor = UIColor(red: 0.545, green: 0.361, blue: 0.965, alpha: 1).cgColor // #8B5CF6
+            view.layer.borderColor = UIColor.white.cgColor
+            view.layer.borderWidth = 2
+            view.canShowCallout = false
+            view.isUserInteractionEnabled = false
+            return view
+        }
+
         // Draw "pen": a larger violet dot marking the resume point (where the next
         // Draw stroke continues from). Non-interactive so the draw pan owns touches.
         if annotation is DrawPenAnnotation {
@@ -1183,6 +1478,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
                 ?? MKAnnotationView(annotation: annotation, reuseIdentifier: id)
             view.annotation = annotation
+            view.transform = .identity // a recycled view may carry a grab pop
             let size: CGFloat = 18
             view.frame = CGRect(x: 0, y: 0, width: size, height: size)
             view.backgroundColor = .clear
@@ -1268,8 +1564,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
     /// Only let the edit-pan begin when the touch lands on the route line; this
     /// gives it priority over the map's own pan there, while letting the map
-    /// scroll normally everywhere else. Other gestures begin as usual.
+    /// scroll normally everywhere else. The draw pan stands down while a
+    /// hold-to-grab is dragging a joint. Other gestures begin as usual.
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === panGesture { return !penGrabActive }
         guard gestureRecognizer === editPanGesture else { return true }
         guard let map = mapView, let coords = store.snapped?.coordinates, !store.isDrawMode else {
             return false
@@ -1302,6 +1600,11 @@ final class CorridorEndpointAnnotation: MKPointAnnotation {}
 /// The Draw-mode "pen" marker — the resume point (last vertex of the last drawn
 /// stroke). Subclass so `viewFor` renders it as a distinct violet dot.
 final class DrawPenAnnotation: MKPointAnnotation {}
+
+/// A per-segment joint handle (Draw mode) — one violet dot at each stroke's end.
+/// Subclass so `viewFor` renders it as a grab handle. Dragging warps the strokes
+/// meeting there (geometric hit-test in `jointHit`).
+final class DrawJointAnnotation: MKPointAnnotation {}
 
 /// A tapped node of the connector being built (connector-build mode). `isEnd`
 /// marks the first/last node — the link ends — so `viewFor` draws them larger.

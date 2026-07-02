@@ -45,6 +45,15 @@ struct RootView: View {
             }
 
             if nav.isNavigating {
+                // Battery-saver dim: sits under the HUD so its controls stay
+                // tappable; capped opacity keeps the map readable. Tap to wake.
+                if nav.hudDimmed {
+                    Color.black.opacity(0.5)
+                        .ignoresSafeArea()
+                        .onTapGesture { nav.wakeDim() }
+                        .transition(.opacity)
+                        .accessibilityHidden(true)
+                }
                 NavigationHUD { ride in
                     savedRide = ride
                     showRideSaved = ride != nil
@@ -236,10 +245,20 @@ struct RootView: View {
             settingsButton
                 .padding(.top, 8)
             Spacer()
-            LegendView()
-                .padding(.trailing, 12)
-                .padding(.top, 8)
         }
+
+        // The legend floats on its own layer, pinned top-trailing. It must NOT
+        // share the buttons' HStack: five 44pt buttons + the expanded card's
+        // fixed ~212pt exceed an iPhone's width, and the overflowing row used to
+        // inflate the whole chrome stack past the screen — every layer then
+        // rendered centered-and-clipped at both edges (read as "zoomed in" at
+        // launch, since the legend starts expanded until the first route).
+        // Floating it lets the card expand down over the map (briefly covering
+        // the trailing buttons) instead of widening the layout.
+        LegendView()
+            .padding(.trailing, 12)
+            .padding(.top, 8)
+            .frame(maxWidth: .infinity, alignment: .trailing)
 
         topBanner
 

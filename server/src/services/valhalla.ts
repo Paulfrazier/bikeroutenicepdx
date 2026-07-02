@@ -14,6 +14,7 @@
 
 import { config } from "../config.js";
 import { dominantClass, isGreenwayEquivalent } from "./greenway-coverage.js";
+import { spokenClause } from "../voice/instructions.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,6 +33,9 @@ export interface RouteStep {
   maneuver_type: string;
   location: [number, number]; // [lng, lat]
   bicycle_network_class: string | null;
+  /** TTS-ready clause, lowercase-first ("turn left onto Southeast Ankeny
+   * Street"). Optional for backward compatibility — old clients ignore it. */
+  spoken?: string | null;
 }
 
 export interface RouteResult {
@@ -520,14 +524,18 @@ export async function traceRouteSteps(
     for (const m of leg.maneuvers) {
       const stepCoord = legCoords[m.begin_shape_index] ?? legCoords[0];
       const slice = legCoords.slice(m.begin_shape_index, m.end_shape_index + 1);
+      const maneuverType = maneuverTypeName(m.type);
+      const streetName = m.street_names?.[0] ?? null;
+      const cls = dominantClass(slice);
       steps.push({
         instruction: m.instruction,
         distance_m: Math.round(m.length * 1000),
         duration_s: Math.round(m.time),
-        street_name: m.street_names?.[0] ?? null,
-        maneuver_type: maneuverTypeName(m.type),
+        street_name: streetName,
+        maneuver_type: maneuverType,
         location: stepCoord,
-        bicycle_network_class: dominantClass(slice),
+        bicycle_network_class: cls,
+        spoken: spokenClause(maneuverType, streetName, cls),
       });
     }
   }

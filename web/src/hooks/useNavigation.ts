@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LngLat, RouteResponse, RouteStep } from "../types";
 import { fetchRoute } from "../api";
+import { useWakeLock } from "./useWakeLock";
 import { haversineLength, arcLengthAt } from "../geo";
 import {
   distanceToPolyline,
@@ -35,11 +36,19 @@ export interface NavView {
   calmMode: boolean;
   currentStep: RouteStep | null;
   nextStep: RouteStep | null;
+  /** The maneuver after nextStep when it's a turn — drives the "then" chip. */
+  followingStep: RouteStep | null;
   distanceToNext: number;
   distanceRemaining: number;
   timeRemaining: number;
+  /** EMA-smoothed ground speed (m/s) — HUD readout + camera zoom. */
+  speedMps: number;
+  /** Ridden fraction of the route, 0–1 — the HUD progress bar. */
+  progress: number;
+  /** Battery saver: true when the dim overlay should cover the map. */
+  dimmed: boolean;
   /** Chase-camera target, bumped each fix; null when not navigating. */
-  camera: { center: LngLat; bearing: number; version: number } | null;
+  camera: { center: LngLat; bearing: number; zoom: number; version: number } | null;
   /** The route currently being navigated (swapped on reroute). */
   activeRoute: RouteResponse | null;
 }
@@ -59,6 +68,14 @@ interface Session {
   lastReroute: number;
   lastSpeed: number;
   arrived: boolean;
+  /** Last utterance timestamp — drives the long-straight reassurance prompt. */
+  lastSpokenAt: number;
+  /** EMA-smoothed speed for the camera/HUD (raw GPS speed jitters). */
+  smoothedSpeed: number;
+  /** Dim-overlay state machine (hysteresis lives here, not in render). */
+  dimmed: boolean;
+  /** Tap-to-wake: stay undimmed until this timestamp. */
+  dimWakeUntil: number;
 }
 
 function speak(text: string, enabled: boolean) {
@@ -70,6 +87,38 @@ function speak(text: string, enabled: boolean) {
   window.speechSynthesis.speak(u);
 }
 
+/** Step's TTS clause, lowercase-first (server `spoken`, else the instruction). */
+function clauseOf(step: RouteStep): string {
+  const c = step.spoken ?? step.instruction;
+  return c.charAt(0).toLowerCase() + c.slice(1);
+}
+
+function capFirst(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** Quiet-period + upcoming-turn gates for the reassurance prompt (mirrors iOS). */
+const REASSURE_AFTER_MS = 120_000;
+const REASSURE_MIN_AHEAD_M = 400;
+/** A following maneuver within this distance chains into one prompt ("then immediately …"). */
+const CHAIN_WITHIN_M = 40;
+/** Battery-saver dim overlay: dim on long quiet straights, wake near turns
+ * (hysteresis so it doesn't flicker at the boundary). Mirrors iOS. */
+const DIM_AFTER_QUIET_MS = 20_000;
+const DIM_BEYOND_M = 300;
+const UNDIM_WITHIN_M = 220;
+const DIM_TAP_WAKE_MS = 30_000;
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v));
+}
+
+/** Chase-camera zoom: pull back with speed, punch in near the turn. */
+function navZoom(speedMps: number, distanceToNext: number): number {
+  if (distanceToNext < 120) return 17.6;
+  return clamp(17.6 - speedMps * 0.12, 16.3, 17.6);
+}
+
 const INITIAL: NavView = {
   navigating: false,
   arrived: false,
@@ -78,9 +127,13 @@ const INITIAL: NavView = {
   calmMode: false,
   currentStep: null,
   nextStep: null,
+  followingStep: null,
   distanceToNext: 0,
   distanceRemaining: 0,
   timeRemaining: 0,
+  speedMps: 0,
+  progress: 0,
+  dimmed: false,
   camera: null,
   activeRoute: null,
 };
@@ -93,6 +146,9 @@ export function useNavigation() {
   // Live-read toggles (kept in refs so the GPS callback isn't a stale closure).
   const voiceRef = useRef(true);
   const calmRef = useRef(false);
+
+  // Keep the screen on for the duration of the ride.
+  useWakeLock(view.navigating && !view.arrived);
 
   const load = useCallback((route: RouteResponse, to: LngLat) => {
     const coords = route.geometry.coordinates;
@@ -111,6 +167,10 @@ export function useNavigation() {
       lastReroute: 0,
       lastSpeed: 0,
       arrived: false,
+      lastSpokenAt: Date.now(),
+      smoothedSpeed: 0,
+      dimmed: false,
+      dimWakeUntil: 0,
     };
   }, []);
 
@@ -118,6 +178,7 @@ export function useNavigation() {
     const s = sessionRef.current;
     if (!s) return;
     s.lastReroute = Date.now();
+    s.lastSpokenAt = Date.now();
     setView((v) => ({ ...v, rerouting: true }));
     speak("Off route — rerouting.", voiceRef.current);
     try {
@@ -140,6 +201,7 @@ export function useNavigation() {
       const here: LngLat = [pos.coords.longitude, pos.coords.latitude];
       const speed = pos.coords.speed && pos.coords.speed > 0 ? pos.coords.speed : 0;
       s.lastSpeed = speed;
+      s.smoothedSpeed = s.smoothedSpeed === 0 ? speed : s.smoothedSpeed * 0.7 + speed * 0.3;
 
       const arc = arcLengthAt(here, s.coords);
       const offRoute = distanceToPolyline(here, s.coords);
@@ -156,6 +218,11 @@ export function useNavigation() {
       const distanceToNext = nextStep ? Math.max(0, s.stepArcs[idx] - arc) : distanceRemaining;
       const currentIdx = Math.max(0, idx - 1);
       const currentStep = s.steps[currentIdx] ?? null;
+      const followingStep =
+        idx + 1 < s.steps.length && isTurn(s.steps[idx + 1].maneuver_type)
+          ? s.steps[idx + 1]
+          : null;
+      const progress = s.totalLen > 0 ? clamp(arc / s.totalLen, 0, 1) : 0;
 
       // Camera: GPS heading while moving, else bearing along the route.
       let heading =
@@ -173,21 +240,47 @@ export function useNavigation() {
           s.arrived = true;
           speak("You've arrived. Enjoy the ride.", voiceRef.current);
         }
+        s.dimmed = false;
         setView((v) => ({
           ...v,
           arrived: true,
           currentStep,
           nextStep: null,
+          followingStep: null,
           distanceToNext: 0,
           distanceRemaining: 0,
           timeRemaining: 0,
-          camera: { center: here, bearing: heading as number, version: cameraVersion.current },
+          progress: 1,
+          dimmed: false,
+          camera: {
+            center: here,
+            bearing: heading as number,
+            zoom: navZoom(s.smoothedSpeed, 0),
+            version: cameraVersion.current,
+          },
         }));
         return;
       }
 
       announceStepEntry(s, currentIdx);
       evaluateVoice(s, idx, nextStep, distanceToNext);
+
+      // Long-straight reassurance: quiet for a while, no turn coming up, still
+      // on route → confirm the rider hasn't been forgotten. Calm mode skips it.
+      if (
+        !calmRef.current &&
+        offRoute <= 30 &&
+        distanceToNext > REASSURE_MIN_AHEAD_M &&
+        Date.now() - s.lastSpokenAt > REASSURE_AFTER_MS
+      ) {
+        const street = currentStep?.street_name;
+        say(
+          s,
+          street
+            ? `Continue on ${street} for ${spokenDistanceBare(distanceToNext)}.`
+            : `Continue for ${spokenDistanceBare(distanceToNext)}.`
+        );
+      }
 
       // Off-route → reroute (sustained + cooldown).
       if (offRoute > 30) {
@@ -201,14 +294,38 @@ export function useNavigation() {
         s.offRouteSince = null;
       }
 
+      // Battery-saver dim, with hysteresis: dim on a long quiet straight,
+      // wake approaching the turn, off-route, or within the tap-wake window.
+      const now = Date.now();
+      const wakeHeld = now < s.dimWakeUntil;
+      if (s.dimmed) {
+        if (distanceToNext < UNDIM_WITHIN_M || offRoute > 30 || wakeHeld) s.dimmed = false;
+      } else if (
+        !wakeHeld &&
+        distanceToNext > DIM_BEYOND_M &&
+        offRoute <= 30 &&
+        now - s.lastSpokenAt > DIM_AFTER_QUIET_MS
+      ) {
+        s.dimmed = true;
+      }
+
       setView((v) => ({
         ...v,
         currentStep,
         nextStep,
+        followingStep,
         distanceToNext,
         distanceRemaining,
         timeRemaining,
-        camera: { center: here, bearing: heading as number, version: cameraVersion.current },
+        speedMps: s.smoothedSpeed,
+        progress,
+        dimmed: s.dimmed,
+        camera: {
+          center: here,
+          bearing: heading as number,
+          zoom: navZoom(s.smoothedSpeed, distanceToNext),
+          version: cameraVersion.current,
+        },
       }));
     },
     [reroute]
@@ -232,30 +349,46 @@ export function useNavigation() {
         exposed += s.steps[i].distance_m;
         i++;
       }
-      speak(`Heads up — busy street for ${spokenDistanceBare(exposed)}, then back to the bikeway.`, voiceRef.current);
+      say(s, `Heads up — busy street for ${spokenDistanceBare(exposed)}, then back to the bikeway.`);
       return;
     }
     if (!calmRef.current && rank >= 3 && prevRank < 3 && !isTurn(step.maneuver_type)) {
       if (step.bicycle_network_class === "greenway" && step.street_name) {
-        speak(`Now on the ${step.street_name} greenway.`, voiceRef.current);
+        say(s, `Now on the ${step.street_name} greenway.`);
       } else if (step.bicycle_network_class === "protected" || step.bicycle_network_class === "off_street") {
-        speak(`Now on protected bike lane${step.street_name ? ` on ${step.street_name}` : ""}.`, voiceRef.current);
+        say(s, `Now on protected bike lane${step.street_name ? ` on ${step.street_name}` : ""}.`);
       }
     }
   }
 
-  // Staged turn prompts ("prepare" then "now").
+  // Speak and stamp the session's quiet-period clock.
+  function say(s: Session, text: string) {
+    s.lastSpokenAt = Date.now();
+    speak(text, voiceRef.current);
+  }
+
+  // Staged turn prompts ("prepare" then "now"), chaining back-to-back turns.
   function evaluateVoice(s: Session, idx: number, nextStep: RouteStep | null, distanceToNext: number) {
     if (!nextStep || !isTurn(nextStep.maneuver_type)) return;
+    // A maneuver right after this turn joins the same prompt.
+    const following = s.steps[idx + 1];
+    const chained =
+      nextStep.distance_m < CHAIN_WITHIN_M && following && isTurn(following.maneuver_type)
+        ? following
+        : null;
     const prepareAt = Math.min(220, Math.max(120, s.lastSpeed * 12 + 120));
     if (distanceToNext <= prepareAt && !s.spokenPrepare.has(idx)) {
       s.spokenPrepare.add(idx);
-      const lead = nextStep.instruction;
-      speak(`${spokenDistance(distanceToNext)}, ${lead.charAt(0).toLowerCase()}${lead.slice(1)}`, voiceRef.current);
+      say(s, `${spokenDistance(distanceToNext)}, ${clauseOf(nextStep)}`);
     }
     if (distanceToNext <= 30 && !s.spokenNow.has(idx)) {
       s.spokenNow.add(idx);
-      speak(nextStep.instruction, voiceRef.current);
+      let text = capFirst(clauseOf(nextStep));
+      if (chained) {
+        text += `, then immediately ${clauseOf(chained)}`;
+        s.spokenPrepare.add(idx + 1); // its own prepare cue would be redundant
+      }
+      say(s, text);
     }
   }
 
@@ -265,8 +398,14 @@ export function useNavigation() {
       load(route, to);
       cameraVersion.current = 0;
       setView((v) => ({ ...v, navigating: true, arrived: false, rerouting: false, activeRoute: route }));
+      // Prefer the synthesized "Head east on X" opener; else the first turn.
+      const first = route.steps[0];
       const firstTurn = route.steps.find((s) => isTurn(s.maneuver_type));
-      speak(`Starting navigation. ${firstTurn?.instruction ?? "Follow the route."}`, voiceRef.current);
+      const opener =
+        first && first.maneuver_type.startsWith("start")
+          ? capFirst(clauseOf(first))
+          : firstTurn?.instruction ?? "Follow the route.";
+      speak(`Starting navigation. ${opener.replace(/\.?$/, ".")}`, voiceRef.current);
       watchId.current = navigator.geolocation.watchPosition(onPosition, () => {}, {
         enableHighAccuracy: true,
         maximumAge: 1000,
@@ -301,9 +440,19 @@ export function useNavigation() {
     setView((v) => ({ ...v, calmMode: on }));
   }, []);
 
+  /** Tap-to-wake from the battery-saver dim overlay. */
+  const wake = useCallback(() => {
+    const s = sessionRef.current;
+    if (s) {
+      s.dimWakeUntil = Date.now() + DIM_TAP_WAKE_MS;
+      s.dimmed = false;
+    }
+    setView((v) => ({ ...v, dimmed: false }));
+  }, []);
+
   useEffect(() => () => {
     if (watchId.current != null) navigator.geolocation.clearWatch(watchId.current);
   }, []);
 
-  return { ...view, start, stop, setVoiceEnabled, setCalmMode };
+  return { ...view, start, stop, setVoiceEnabled, setCalmMode, wake };
 }

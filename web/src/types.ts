@@ -109,6 +109,9 @@ export interface RouteStep {
   maneuver_type: string;
   location: LngLat;
   bicycle_network_class: string | null;
+  /** TTS-ready clause, lowercase-first ("turn left onto Southeast Ankeny
+   * Street"). Optional — older server responses omit it. */
+  spoken?: string | null;
 }
 
 export interface RouteGeometry {

@@ -20,8 +20,16 @@ interface NavHudProps {
   onEnd: () => void;
 }
 
+/** Show the "then" preview chip once the current turn is this close (m). */
+const THEN_PREVIEW_WITHIN_M = 150;
+
 export function NavHud({ nav, onEnd }: NavHudProps) {
   const pillVariant = networkClassToVariant(nav.currentStep?.bicycle_network_class ?? null);
+  const thenStep =
+    !nav.arrived && nav.followingStep && nav.distanceToNext < THEN_PREVIEW_WITHIN_M
+      ? nav.followingStep
+      : null;
+  const speedMph = Math.round(nav.speedMps * 2.23694);
 
   return (
     <div className="nav-hud">
@@ -36,7 +44,7 @@ export function NavHud({ nav, onEnd }: NavHudProps) {
       ) : (
         <div className="nav-hud__banner">
           <span className="nav-hud__glyph" aria-hidden="true">
-            {maneuverGlyph(nav.nextStep?.maneuver_type ?? "continue-straight")}
+            {maneuverGlyph(nav.nextStep?.maneuver_type ?? "continue")}
           </span>
           <div className="nav-hud__banner-body">
             <span className="nav-hud__distance">
@@ -45,6 +53,13 @@ export function NavHud({ nav, onEnd }: NavHudProps) {
             <span className="nav-hud__instruction">
               {nav.nextStep?.instruction ?? "Continue on the route"}
             </span>
+            {thenStep && (
+              <span className="nav-hud__then">
+                then{" "}
+                <span aria-hidden="true">{maneuverGlyph(thenStep.maneuver_type)}</span>{" "}
+                {thenStep.street_name ?? thenStep.instruction}
+              </span>
+            )}
             {pillVariant !== "default" && (
               <span className={`nav-hud__pill nav-hud__pill--${pillVariant}`}>
                 {PILL_LABELS[pillVariant]}
@@ -55,6 +70,16 @@ export function NavHud({ nav, onEnd }: NavHudProps) {
       )}
 
       <div className="nav-hud__panel">
+        <div
+          className="nav-hud__progress"
+          role="progressbar"
+          aria-valuenow={Math.round(nav.progress * 100)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label="Route progress"
+        >
+          <div className="nav-hud__progress-fill" style={{ width: `${nav.progress * 100}%` }} />
+        </div>
         <div className="nav-hud__stats">
           <div className="nav-hud__stat">
             <span className="nav-hud__stat-value">{fmtEta(nav.timeRemaining)}</span>
@@ -63,6 +88,10 @@ export function NavHud({ nav, onEnd }: NavHudProps) {
           <div className="nav-hud__stat">
             <span className="nav-hud__stat-value">{fmtDistanceImperial(nav.distanceRemaining)}</span>
             <span className="nav-hud__stat-label">to go</span>
+          </div>
+          <div className="nav-hud__stat">
+            <span className="nav-hud__stat-value">{speedMph}</span>
+            <span className="nav-hud__stat-label">mph</span>
           </div>
           <div className="nav-hud__toggles">
             <button

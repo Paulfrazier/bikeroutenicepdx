@@ -50,6 +50,19 @@ final class NavigationLocationProvider: NSObject, CLLocationManagerDelegate {
         manager.stopUpdatingLocation()
         manager.stopUpdatingHeading()
         manager.allowsBackgroundLocationUpdates = false
+        setCruise(false)
+    }
+
+    private var cruising = false
+
+    /// Battery saver: on long on-route straights the session relaxes precision
+    /// (fewer radio wakeups), restoring best-for-navigation as a maneuver
+    /// approaches. Guarded so repeated same-state calls don't touch the manager.
+    func setCruise(_ on: Bool) {
+        guard on != cruising else { return }
+        cruising = on
+        manager.desiredAccuracy = on ? kCLLocationAccuracyNearestTenMeters : kCLLocationAccuracyBestForNavigation
+        manager.distanceFilter = on ? 15 : 5
     }
 
     // MARK: - CLLocationManagerDelegate

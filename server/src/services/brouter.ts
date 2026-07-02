@@ -6,9 +6,12 @@
  * better than Valhalla (~2x greenway coverage on the canonical routes).
  *
  * BRouter has no turn-by-turn maneuvers or map-matching, so:
- *  - steps are synthesized from the geometry, grouped by PBOT class (this drives
- *    the web directions pills + the coverage metric). Street names/turn text are
- *    not available from BRouter and are left null/generic.
+ *  - steps are synthesized from the geometry: real turns detected by bearing
+ *    analysis (turn-detect.ts) with street names recovered from the PBOT
+ *    bike-network index, so guidance stays useful even when Valhalla is down.
+ *    Valhalla trace_route remains the preferred enricher when reachable.
+ *  - the coverage metric is computed from the same per-segment PBOT
+ *    classification as before (independent of step boundaries).
  *  - the finger-draw /match flow stays on Valhalla (see matchTrace).
  */
 
@@ -18,9 +21,17 @@ import type { RouteResult, RouteStep } from "./valhalla.js";
 import {
   classifyPoint,
   isGreenwayEquivalent,
+  nearestWayName,
   CALM_CLASSES,
   type NetworkClass,
 } from "./greenway-coverage.js";
+import { detectTurns, cumulativeArcs, pointAtArc, bearingDeg } from "./turn-detect.js";
+import {
+  composeInstruction,
+  spokenClause,
+  displayStreetName,
+  expandStreetName,
+} from "../voice/instructions.js";
 
 /**
  * preference → BRouter profile. Both bike tiers are our custom profiles in
@@ -155,8 +166,9 @@ export async function getRouteBrouter(
   );
 
   // Coverage is always computed from BRouter's geometry. Steps prefer named
-  // turn-by-turn from Valhalla trace_route; fall back to class-only runs.
-  const fallback = buildSteps(coords);
+  // turn-by-turn from Valhalla trace_route; fall back to geometry-detected
+  // turns with bike-network street names.
+  const fallback = synthesizeSteps(coords, duration_s);
   let steps: RouteStep[] = fallback.steps;
   try {
     const named = await traceRouteSteps(coords);
@@ -184,12 +196,33 @@ function sumLength(coords: [number, number][]): number {
   return t;
 }
 
+const COMPASS_WORDS = [
+  "north",
+  "northeast",
+  "east",
+  "southeast",
+  "south",
+  "southwest",
+  "west",
+  "northwest",
+];
+
+function compassWord(deg: number): string {
+  return COMPASS_WORDS[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+}
+
 /**
- * Synthesize directions steps from the geometry: classify each segment by PBOT
- * class and merge consecutive same-class runs into a step. Also returns the
- * total greenway-equivalent distance for coverage.
+ * Synthesize directions steps from the geometry. Turns come from bearing
+ * analysis (detectTurns), street names from the PBOT bike-network index
+ * (nearestWayName, sampled just past each maneuver with bearing agreement so
+ * cross streets don't win). Coverage (greenway/calm meters) is computed from
+ * the same per-segment PBOT classification as always — step boundaries do not
+ * affect it.
  */
-function buildSteps(coords: [number, number][]): {
+function synthesizeSteps(
+  coords: [number, number][],
+  durationS: number
+): {
   steps: RouteStep[];
   greenwayMeters: number;
   calmMeters: number;
@@ -199,51 +232,126 @@ function buildSteps(coords: [number, number][]): {
   let calmMeters = 0;
   if (coords.length < 2) return { steps, greenwayMeters, calmMeters };
 
-  let runClass: NetworkClass | null = null;
-  let runMeters = 0;
-  let runStart = coords[0];
-  let started = false;
-
-  const flush = (atEnd: boolean) => {
-    if (!started) return;
-    steps.push({
-      instruction: steps.length === 0 ? "Start" : atEnd ? "Arrive" : "Continue",
-      distance_m: Math.round(runMeters),
-      duration_s: 0,
-      street_name: null, // BRouter geojson doesn't expose per-step names
-      maneuver_type: steps.length === 0 ? "start" : atEnd ? "destination" : "continue",
-      location: runStart,
-      bicycle_network_class: runClass,
-    });
-  };
-
+  // Per-segment PBOT classification — identical math to the coverage metric's
+  // original loop; classes are kept so each step can report its dominant class.
+  const segLens = new Array<number>(coords.length - 1).fill(0);
+  const segCls = new Array<NetworkClass | null>(coords.length - 1).fill(null);
   for (let i = 0; i < coords.length - 1; i++) {
     const a = coords[i];
     const b = coords[i + 1];
     const segLen = distMeters(a, b);
     if (segLen === 0) continue;
+    segLens[i] = segLen;
     const mid: [number, number] = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
     const cls =
       classifyPoint(mid[0], mid[1]) ??
       classifyPoint(a[0], a[1]) ??
       classifyPoint(b[0], b[1]);
+    segCls[i] = cls;
     if (isGreenwayEquivalent(cls)) greenwayMeters += segLen;
     if (cls !== null && CALM_CLASSES.has(cls)) calmMeters += segLen;
-
-    if (!started) {
-      started = true;
-      runClass = cls;
-      runMeters = segLen;
-      runStart = a;
-    } else if (cls === runClass) {
-      runMeters += segLen;
-    } else {
-      flush(false);
-      runClass = cls;
-      runMeters = segLen;
-      runStart = a;
-    }
   }
-  flush(true);
+
+  const arcs = cumulativeArcs(coords);
+  const total = arcs[arcs.length - 1];
+
+  /** Length-weighted dominant class over segments [i0, i1). */
+  const stretchClass = (i0: number, i1: number): NetworkClass | null => {
+    const tally = new Map<NetworkClass | null, number>();
+    for (let i = i0; i < i1 && i < segCls.length; i++) {
+      if (segLens[i] === 0) continue;
+      tally.set(segCls[i], (tally.get(segCls[i]) ?? 0) + segLens[i]);
+    }
+    let bestCls: NetworkClass | null = null;
+    let bestLen = -1;
+    for (const [cls, len] of tally) {
+      if (len > bestLen) {
+        bestLen = len;
+        bestCls = cls;
+      }
+    }
+    return bestCls;
+  };
+
+  /** Street name ~20 m past an arc position, matched to the outgoing bearing. */
+  const nameAt = (arc: number): string | null => {
+    const sample = pointAtArc(coords, arcs, Math.min(total, arc + 20));
+    const b0 = pointAtArc(coords, arcs, Math.min(total, arc + 10));
+    const b1 = pointAtArc(coords, arcs, Math.min(total, arc + 30));
+    const brg = b0[0] !== b1[0] || b0[1] !== b1[1] ? bearingDeg(b0, b1) : null;
+    return nearestWayName(sample[0], sample[1], brg);
+  };
+
+  interface Boundary {
+    index: number;
+    arc: number;
+    maneuver: string;
+  }
+  // Boundaries at detected turns AND at PBOT class changes. Class boundaries
+  // (plain "continue" steps) keep each step class-pure, so coverage computed
+  // from steps matches the geometry metric exactly (tests/routes/run.ts treats
+  // steps as the source of truth) and greenway/busy-street entry announcements
+  // fire at the true infra transition, as the old class-run steps did.
+  const turnIndices = new Set<number>();
+  const boundaries: Boundary[] = [{ index: 0, arc: 0, maneuver: "start" }];
+  for (const t of detectTurns(coords)) {
+    turnIndices.add(t.index);
+    boundaries.push({ index: t.index, arc: t.arc, maneuver: t.maneuver_type });
+  }
+  let prevCls: NetworkClass | null = null;
+  let seenFirst = false;
+  for (let i = 0; i < segCls.length; i++) {
+    if (segLens[i] === 0) continue;
+    if (seenFirst && segCls[i] !== prevCls && i > 0 && !turnIndices.has(i)) {
+      boundaries.push({ index: i, arc: arcs[i], maneuver: "continue" });
+    }
+    prevCls = segCls[i];
+    seenFirst = true;
+  }
+  boundaries.sort((a, b) => a.index - b.index);
+
+  for (let k = 0; k < boundaries.length; k++) {
+    const cur = boundaries[k];
+    const next = boundaries[k + 1];
+    const endArc = next ? next.arc : total;
+    const endIndex = next ? next.index : coords.length - 1;
+    const cls = stretchClass(cur.index, endIndex);
+    const name = nameAt(cur.arc);
+
+    let instruction: string;
+    let spoken: string;
+    if (cur.maneuver === "start") {
+      const dir = compassWord(bearingDeg(coords[0], pointAtArc(coords, arcs, Math.min(total, 25))));
+      instruction = name ? `Head ${dir} on ${displayStreetName(name)}` : `Head ${dir}`;
+      spoken = name ? `head ${dir} on ${expandStreetName(name)}` : `head ${dir}`;
+    } else {
+      instruction = composeInstruction(cur.maneuver, name, cls);
+      spoken = spokenClause(cur.maneuver, name, cls);
+    }
+
+    steps.push({
+      instruction,
+      distance_m: Math.round(endArc - cur.arc),
+      duration_s: total > 0 ? Math.round((durationS * (endArc - cur.arc)) / total) : 0,
+      street_name: name ? displayStreetName(name) : null,
+      maneuver_type: cur.maneuver,
+      location: coords[cur.index],
+      bicycle_network_class: cls,
+      spoken,
+    });
+  }
+
+  const last = boundaries[boundaries.length - 1];
+  steps.push({
+    instruction: "Arrive at your destination",
+    distance_m: 0,
+    duration_s: 0,
+    street_name: null,
+    maneuver_type: "destination",
+    location: coords[coords.length - 1],
+    bicycle_network_class: stretchClass(last.index, coords.length - 1),
+    spoken: "arrive at your destination",
+  });
+
   return { steps, greenwayMeters, calmMeters };
 }

@@ -151,24 +151,38 @@ export function spokenDistanceBare(m: number): string {
   return p.startsWith("in ") ? p.slice(3) : p;
 }
 
-/** Maneuver → emoji/arrow glyph for the HUD (mirrors DirectionsPanel). */
+/** Maneuver → emoji/arrow glyph for the HUD (server maneuver_type vocabulary,
+ * mirroring iOS ManeuverStyle.symbol). */
 export function maneuverGlyph(type: string): string {
   const MAP: Record<string, string> = {
-    depart: "🚲",
-    arrive: "🏁",
-    turn: "↩",
-    "turn-left": "←",
-    "turn-right": "→",
-    "turn-slight-left": "↖",
-    "turn-slight-right": "↗",
-    "turn-sharp-left": "↰",
-    "turn-sharp-right": "↱",
-    "continue-straight": "↑",
+    start: "🚲",
+    start_left: "🚲",
+    start_right: "🚲",
+    destination: "🏁",
+    destination_left: "🏁",
+    destination_right: "🏁",
+    left: "←",
+    exit_left: "←",
+    ramp_left: "←",
+    merge_left: "←",
+    sharp_left: "↰",
+    slight_left: "↖",
+    stay_left: "↖",
+    right: "→",
+    exit_right: "→",
+    ramp_right: "→",
+    merge_right: "→",
+    sharp_right: "↱",
+    slight_right: "↗",
+    stay_right: "↗",
+    u_turn_left: "⮌",
+    u_turn_right: "⮎",
+    roundabout_enter: "🔄",
+    roundabout_exit: "🔄",
+    continue: "↑",
+    becomes: "↑",
+    stay_straight: "↑",
     merge: "⤢",
-    fork: "⑃",
-    roundabout: "🔄",
-    rotary: "🔄",
-    "use-lane": "↑",
   };
   return MAP[type] ?? "↑";
 }

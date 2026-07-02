@@ -43,6 +43,9 @@ struct RouteStep: Decodable, Equatable {
     let maneuver_type: String
     let bicycle_network_class: String?
     let location: [Double] // [lng, lat]
+    /// TTS-ready clause, lowercase-first ("turn left onto Southeast Ankeny
+    /// Street"). Optional — older server responses omit it.
+    var spoken: String?
 }
 
 /// Response from POST /route — geometry + totals + turn-by-turn steps.

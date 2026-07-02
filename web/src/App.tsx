@@ -915,6 +915,11 @@ export default function App() {
         />
         </MapBoundary>
 
+        {/* Battery-saver dim: sits under the HUD (z-index) so controls stay
+            live; any tap on it wakes the display for a while. */}
+        {nav.navigating && nav.dimmed && (
+          <div className="nav-dim" onPointerDown={nav.wake} aria-hidden="true" />
+        )}
         {nav.navigating && <NavHud nav={nav} onEnd={nav.stop} />}
 
         {!nav.navigating && <HelpButton onClick={() => setGuideOpen(true)} />}

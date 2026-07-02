@@ -1570,16 +1570,30 @@ button {
 }
 .nav-hud__banner--arrived { background: #16a34a; }
 
+/* Banner text is sized for a handlebar-mounted phone: glanceable at speed. */
 .nav-hud__glyph {
-  font-size: 2.1rem;
+  font-size: 2.6rem;
   line-height: 1;
-  min-width: 44px;
+  min-width: 52px;
   text-align: center;
   font-weight: 700;
 }
 .nav-hud__banner-body { display: flex; flex-direction: column; gap: 2px; }
-.nav-hud__distance { font-size: 1.5rem; font-weight: 800; }
-.nav-hud__instruction { font-size: 0.95rem; font-weight: 500; opacity: 0.95; }
+.nav-hud__distance {
+  font-size: 2.2rem;
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.nav-hud__instruction { font-size: 1.1rem; font-weight: 600; opacity: 0.95; }
+
+/* "then ← SE Ankeny St" — the maneuver right after the imminent one. */
+.nav-hud__then {
+  margin-top: 2px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  opacity: 0.85;
+}
 
 .nav-hud__pill {
   align-self: flex-start;
@@ -1605,6 +1619,20 @@ button {
 }
 @media (prefers-color-scheme: dark) {
   .nav-hud__panel { background: rgba(28, 28, 30, 0.96); color: #f2f2f7; }
+}
+
+/* Thin ridden-fraction bar across the top of the bottom panel. */
+.nav-hud__progress {
+  height: 4px;
+  border-radius: 99px;
+  background: rgba(120, 120, 128, 0.22);
+  overflow: hidden;
+}
+.nav-hud__progress-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: #16a34a;
+  transition: width 0.5s linear;
 }
 
 .nav-hud__stats { display: flex; align-items: center; gap: 16px; }
@@ -1636,6 +1664,22 @@ button {
   cursor: pointer;
 }
 .nav-hud__end:active { transform: translateY(1px); }
+
+/* Battery-saver dim overlay: below the HUD (z-index 50) so its controls stay
+ * tappable; capped opacity keeps the map readable. Tap anywhere to wake. */
+.nav-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.5);
+  transition: opacity 0.6s ease;
+}
+
+/* Dark mode: the banner is already high-contrast green; match the toggles. */
+@media (prefers-color-scheme: dark) {
+  .nav-hud__toggle { background: rgba(120, 120, 128, 0.28); color: #f2f2f7; }
+  .nav-hud__progress { background: rgba(120, 120, 128, 0.35); }
+}
 
 /* Let the map fill the screen while navigating (side panel/drawer are hidden). */
 .app-layout--navigating .map-area { width: 100%; }

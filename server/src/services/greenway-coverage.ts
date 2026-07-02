@@ -75,6 +75,8 @@ const MATCH_TOLERANCE_M = 18;
 interface Segment {
   coords: [number, number][]; // [lng, lat][]
   cls: NetworkClass;
+  /** Street name from the PBOT export ("SE 122ND AVE"), when present. */
+  name: string | null;
   // bbox for prefiltering
   minLng: number;
   minLat: number;
@@ -108,6 +110,11 @@ function loadNetwork(): Segment[] {
       const display = String(f.properties?.["class"] ?? "");
       const cls = DISPLAY_TO_CLASS[display];
       if (!cls) continue;
+      const rawName = f.properties?.["name"];
+      const name =
+        typeof rawName === "string" && rawName.trim().length > 0
+          ? rawName.trim()
+          : null;
 
       const parts: [number, number][][] =
         f.geometry.type === "LineString"
@@ -128,7 +135,7 @@ function loadNetwork(): Segment[] {
           if (lng > maxLng) maxLng = lng;
           if (lat > maxLat) maxLat = lat;
         }
-        out.push({ coords, cls, minLng, minLat, maxLng, maxLat });
+        out.push({ coords, cls, name, minLng, minLat, maxLng, maxLat });
       }
     }
     if (out.length === 0) {
@@ -268,6 +275,64 @@ export function dominantClass(coords: [number, number][]): NetworkClass | null {
 /** True if a class counts toward greenway coverage. */
 export function isGreenwayEquivalent(cls: NetworkClass | null): boolean {
   return cls !== null && GREENWAY_EQUIVALENT.has(cls);
+}
+
+/** Max distance (m) for street-name lookup at a maneuver point. */
+const NAME_TOLERANCE_M = 20;
+/** Required bearing agreement (deg, mod 180) between route and named way. */
+const NAME_BEARING_TOL_DEG = 35;
+
+/**
+ * Street name of the network way under a route point. `bearingDeg` is the
+ * route's local travel bearing there: a candidate way must run roughly
+ * parallel (within NAME_BEARING_TOL_DEG, direction-insensitive) so the cross
+ * street at an intersection can't win. Returns null when nothing named
+ * qualifies — a nameless turn beats a wrong name.
+ */
+export function nearestWayName(
+  lng: number,
+  lat: number,
+  bearingDeg: number | null
+): string | null {
+  const segs = loadNetwork();
+  const padLat = NAME_TOLERANCE_M / M_PER_DEG_LAT;
+  const padLng = NAME_TOLERANCE_M / Math.max(1, metersPerDegLng(lat));
+  const p: [number, number] = [lng, lat];
+
+  let best = Infinity;
+  let bestName: string | null = null;
+
+  for (const s of segs) {
+    if (s.name === null) continue;
+    if (
+      lng < s.minLng - padLng ||
+      lng > s.maxLng + padLng ||
+      lat < s.minLat - padLat ||
+      lat > s.maxLat + padLat
+    ) {
+      continue;
+    }
+    for (let i = 0; i < s.coords.length - 1; i++) {
+      const a = s.coords[i];
+      const b = s.coords[i + 1];
+      const d = pointToSegmentMeters(p, a, b);
+      if (d > NAME_TOLERANCE_M || d >= best) continue;
+      if (bearingDeg !== null) {
+        const mLng = metersPerDegLng(lat);
+        const segBearing =
+          ((Math.atan2((b[0] - a[0]) * mLng, (b[1] - a[1]) * M_PER_DEG_LAT) * 180) /
+            Math.PI +
+            360) %
+          360;
+        let diff = Math.abs(((segBearing - bearingDeg) % 180) + 180) % 180;
+        if (diff > 90) diff = 180 - diff;
+        if (diff > NAME_BEARING_TOL_DEG) continue;
+      }
+      best = d;
+      bestName = s.name;
+    }
+  }
+  return bestName;
 }
 
 // ---------------------------------------------------------------------------

@@ -26,22 +26,39 @@ struct NavigationHUD: View {
 
     // MARK: - Top: next maneuver
 
+    /// Show the "then" preview chip once the current turn is this close (m).
+    private static let thenPreviewWithinM: Double = 150
+
     private var maneuverBanner: some View {
         HStack(spacing: 16) {
             Image(systemName: ManeuverStyle.symbol(nav.nextStep?.maneuver_type ?? "arrow.up"))
-                .font(.system(size: 34, weight: .bold))
+                .font(.system(size: 44, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 52)
+                .frame(width: 60)
 
             VStack(alignment: .leading, spacing: 2) {
+                // Sized for a handlebar-mounted phone: glanceable at speed.
                 Text(nav.isRerouting ? "Rerouting…" : nav.distanceToNextLabel)
-                    .font(.title2.weight(.bold))
+                    .font(.system(size: 44, weight: .heavy))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
                     .foregroundStyle(.white)
                 Text(nav.nextStep?.instruction ?? "Continue on the route")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.95))
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
+                if nav.distanceToNextManeuver < Self.thenPreviewWithinM, let then = nav.followingStep {
+                    HStack(spacing: 5) {
+                        Text("then")
+                        Image(systemName: ManeuverStyle.symbol(then.maneuver_type))
+                        Text(then.street_name ?? then.instruction)
+                            .lineLimit(1)
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.85))
+                }
                 if let pill = ManeuverStyle.pill(nav.currentStep?.bicycle_network_class) {
                     Text(pill.label)
                         .font(.caption2.weight(.bold))
@@ -88,10 +105,25 @@ struct NavigationHUD: View {
 
     private var bottomPanel: some View {
         VStack(spacing: 14) {
+            // Thin ridden-fraction bar.
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.12))
+                    Capsule()
+                        .fill(navGreen)
+                        .frame(width: max(4, geo.size.width * nav.progressFraction))
+                }
+            }
+            .frame(height: 4)
+            .accessibilityLabel("Route progress")
+            .accessibilityValue("\(Int((nav.progressFraction * 100).rounded())) percent")
+
             HStack {
                 stat(nav.etaLabel, "ETA")
                 Spacer()
                 stat(nav.distanceRemainingLabel, "to go")
+                Spacer()
+                stat("\(nav.speedMph)", "mph")
                 Spacer()
                 toggles
             }

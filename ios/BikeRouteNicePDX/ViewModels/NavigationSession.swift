@@ -1,5 +1,6 @@
 import CoreLocation
 import Observation
+import UIKit
 
 /// Live turn-by-turn navigation state. Sibling to `RouteStore` (which stays the
 /// planner): when the rider taps "Start", this snapshots the planned route and
@@ -34,6 +35,11 @@ final class NavigationSession {
     var nextManeuverIndex: Int?
     var currentStepIndex = 0
     var distanceToNextManeuver: Double = 0
+    /// EMA-smoothed ground speed (m/s) — HUD readout + chase-camera zoom
+    /// (raw GPS speed jitters).
+    private(set) var smoothedSpeed: Double = 0
+    /// Battery saver: true when the map dim overlay should show.
+    private(set) var hudDimmed = false
 
     // MARK: - User options
     /// Calm mode: speak only turns and busy-street warnings — skip the routine
@@ -69,6 +75,26 @@ final class NavigationSession {
     private var announcedEntry: Set<Int> = []
     private var offRouteSince: Date?
     private var lastRerouteAt: Date?
+    /// Last utterance — drives the long-straight reassurance prompt.
+    private var lastSpokenAt = Date()
+
+    /// Quiet-period + upcoming-turn gates for reassurance (mirrors web).
+    private static let reassureAfterS: TimeInterval = 120
+    private static let reassureMinAheadM: Double = 400
+    /// A following maneuver within this distance chains into one prompt.
+    private static let chainWithinM: Double = 40
+
+    // MARK: - Battery-saver dim (mirrors web)
+    private static let dimAfterQuietS: TimeInterval = 20
+    private static let dimBeyondM: Double = 300
+    private static let undimWithinM: Double = 220
+    private static let dimTapWakeS: TimeInterval = 30
+    /// Tap-to-wake: stay undimmed until this time.
+    private var dimWakeUntil = Date.distantPast
+
+    // MARK: - Adaptive GPS (cruise on long straights)
+    private static let cruiseBeyondM: Double = 400
+    private static let cruiseMaxOffRouteM: Double = 15
 
     // MARK: - Wiring
 
@@ -96,8 +122,20 @@ final class NavigationSession {
         rideStartedAt = Date()
         arrived = false
         isNavigating = true
+        smoothedSpeed = 0
+        hudDimmed = false
+        dimWakeUntil = .distantPast
+        setScreenWake(true)
         voice.activate()
-        voice.speak("Starting navigation. \(steps.first(where: { isTurn($0.maneuver_type) })?.instruction ?? "Follow the route.")")
+        lastSpokenAt = Date()
+        // Prefer the synthesized "Head east on X" opener; else the first turn.
+        let opener: String
+        if let first = steps.first, first.maneuver_type.hasPrefix("start") {
+            opener = upperFirst(clauseOf(first))
+        } else {
+            opener = steps.first(where: { isTurn($0.maneuver_type) })?.instruction ?? "Follow the route."
+        }
+        voice.speak("Starting navigation. \(opener.hasSuffix(".") ? opener : opener + ".")")
         provider.start()
         liveActivityStart()
     }
@@ -107,6 +145,7 @@ final class NavigationSession {
     @discardableResult
     func stop() -> Ride? {
         let ride = finishRide()
+        setScreenWake(false)
         provider.stop()
         voice.deactivate()
         liveActivityEnd()
@@ -114,6 +153,7 @@ final class NavigationSession {
         isNavigating = false
         arrived = false
         isRerouting = false
+        hudDimmed = false
         // Restore the planned route under the map.
         if let original = originalSnapped { store?.snapped = original }
         originalSnapped = nil
@@ -146,6 +186,7 @@ final class NavigationSession {
         guard isNavigating else { return }
         currentLocation = location.coordinate
         lastSpeed = max(0, location.speed)
+        smoothedSpeed = smoothedSpeed == 0 ? lastSpeed : smoothedSpeed * 0.7 + lastSpeed * 0.3
         if location.course >= 0 && location.speed > 1.0 { course = location.course }
         traceLocations.append(location)
         fixVersion &+= 1
@@ -166,7 +207,10 @@ final class NavigationSession {
             return
         }
         evaluateVoice()
+        evaluateReassurance()
         evaluateOffRoute()
+        evaluateDim()
+        evaluateCruise()
         liveActivityUpdate()
         watchUpdate()
     }
@@ -191,23 +235,57 @@ final class NavigationSession {
 
     // MARK: - Voice staging
 
+    /// Speak and stamp the quiet-period clock (reassurance timing).
+    private func say(_ text: String) {
+        lastSpokenAt = Date()
+        voice.speak(text)
+    }
+
+    /// Step's TTS clause, lowercase-first (server `spoken`, else instruction).
+    private func clauseOf(_ step: RouteStep) -> String {
+        lowerFirst(step.spoken ?? step.instruction)
+    }
+
     private func evaluateVoice() {
         guard let idx = nextManeuverIndex, steps.indices.contains(idx) else { return }
         let step = steps[idx]
         guard isTurn(step.maneuver_type) else { return }
         let d = distanceToNextManeuver
+        // A maneuver right after this turn joins the same prompt.
+        let following: RouteStep? =
+            step.distance_m < Self.chainWithinM && steps.indices.contains(idx + 1)
+                && isTurn(steps[idx + 1].maneuver_type) ? steps[idx + 1] : nil
         // "Prepare" cue — scaled a little to speed so fast riders hear it sooner.
         let prepareAt = min(220, max(120, lastSpeed * 12 + 120))
         if d <= prepareAt, !spokenPrepare.contains(idx) {
             spokenPrepare.insert(idx)
             voice.prepareHaptic()
-            voice.speak("\(VoiceGuide.spokenDistance(d)), \(lowerFirst(step.instruction))")
+            say("\(VoiceGuide.spokenDistance(d)), \(clauseOf(step))")
         }
-        // "Now" cue at the turn.
+        // "Now" cue at the turn, chaining a back-to-back follow-up.
         if d <= 30, !spokenNow.contains(idx) {
             spokenNow.insert(idx)
             voice.turnHaptic()
-            voice.speak(step.instruction)
+            var text = upperFirst(clauseOf(step))
+            if let following {
+                text += ", then immediately \(clauseOf(following))"
+                spokenPrepare.insert(idx + 1) // its own prepare cue would be redundant
+            }
+            say(text)
+        }
+    }
+
+    /// Long-straight reassurance: quiet for a while, no turn coming up, still
+    /// on route → confirm the rider hasn't been forgotten. Calm mode skips it.
+    private func evaluateReassurance() {
+        guard !calmMode, offRouteMeters <= 30,
+              distanceToNextManeuver > Self.reassureMinAheadM,
+              Date().timeIntervalSince(lastSpokenAt) > Self.reassureAfterS else { return }
+        let ahead = VoiceGuide.spokenDistanceBare(distanceToNextManeuver)
+        if let street = currentStep?.street_name {
+            say("Continue on \(street) for \(ahead).")
+        } else {
+            say("Continue for \(ahead).")
         }
     }
 
@@ -226,15 +304,15 @@ final class NavigationSession {
         if rank <= 1, prevRank >= 2 {
             let exposed = exposedBusyDistance(from: index)
             voice.prepareHaptic()
-            voice.speak("Heads up — busy street for \(VoiceGuide.spokenDistanceBare(exposed)), then back to the bikeway.")
+            say("Heads up — busy street for \(VoiceGuide.spokenDistanceBare(exposed)), then back to the bikeway.")
             return
         }
         // Upgrade onto comfortable bike infra → affirm (suppressed in calm mode).
         if !calmMode, rank >= 3, prevRank < 3, !isTurn(step.maneuver_type) {
             if let name = step.street_name, step.bicycle_network_class == "greenway" {
-                voice.speak("Now on the \(name) greenway.")
+                say("Now on the \(name) greenway.")
             } else if step.bicycle_network_class == "protected" || step.bicycle_network_class == "off_street" {
-                voice.speak("Now on protected bike lane\(step.street_name.map { " on \($0)" } ?? "").")
+                say("Now on protected bike lane\(step.street_name.map { " on \($0)" } ?? "").")
             }
         }
     }
@@ -285,7 +363,7 @@ final class NavigationSession {
         guard let store, let from = currentLocation, let end = store.end?.coordinate else { return }
         isRerouting = true
         lastRerouteAt = Date()
-        voice.speak("Off route — rerouting.")
+        say("Off route — rerouting.")
         if let fresh = await store.navReroute(from: from, to: end) {
             load(route: fresh)
             // Re-anchor progress to the fresh geometry immediately.
@@ -299,6 +377,8 @@ final class NavigationSession {
 
     private func handleArrival() {
         arrived = true
+        setScreenWake(false)
+        hudDimmed = false
         nextManeuverIndex = nil
         distanceToNextManeuver = 0
         distanceRemaining = 0
@@ -307,6 +387,60 @@ final class NavigationSession {
         provider.stop()
         liveActivityEnd()
         watchEnd()
+    }
+
+    // MARK: - Battery-saver dim + adaptive GPS
+
+    /// Dim the map on a long quiet straight; wake approaching the turn,
+    /// off-route, rerouting, or within the tap-wake window (hysteresis so it
+    /// doesn't flicker at the boundary). Mirrors web.
+    private func evaluateDim() {
+        let wakeHeld = Date() < dimWakeUntil
+        if hudDimmed {
+            if distanceToNextManeuver < Self.undimWithinM || offRouteMeters > 30
+                || isRerouting || wakeHeld {
+                hudDimmed = false
+            }
+        } else if !wakeHeld,
+                  distanceToNextManeuver > Self.dimBeyondM,
+                  offRouteMeters <= 30,
+                  !isRerouting,
+                  Date().timeIntervalSince(lastSpokenAt) > Self.dimAfterQuietS {
+            hudDimmed = true
+        }
+    }
+
+    /// Tap-to-wake from the dim overlay.
+    func wakeDim() {
+        dimWakeUntil = Date().addingTimeInterval(Self.dimTapWakeS)
+        hudDimmed = false
+    }
+
+    /// Relax GPS precision on long on-route straights (nothing to announce,
+    /// nothing to miss), back to full precision approaching a maneuver or when
+    /// drifting. Thresholds stay conservative so the 30 m off-route detector
+    /// still fires promptly.
+    private func evaluateCruise() {
+        provider.setCruise(
+            distanceToNextManeuver > Self.cruiseBeyondM
+                && offRouteMeters < Self.cruiseMaxOffRouteM
+        )
+    }
+
+    // MARK: - Screen wake
+
+    /// Keep the display on while actively navigating — the map is the rider's
+    /// dashboard. `isIdleTimerDisabled` is app-global, so the invariant is:
+    /// disabled ⇔ (foreground + navigating + not arrived).
+    private func setScreenWake(_ on: Bool) {
+        UIApplication.shared.isIdleTimerDisabled = on
+    }
+
+    /// Re-assert the wake invariant on scene-phase transitions (the app calls
+    /// this): background always releases; returning to foreground re-acquires
+    /// only if a ride is still in progress.
+    func syncScreenWake(foreground: Bool) {
+        setScreenWake(foreground && isNavigating && !arrived)
     }
 
     // MARK: - Ride recording (Phase 6)
@@ -357,6 +491,20 @@ final class NavigationSession {
     var currentStep: RouteStep? { steps.indices.contains(currentStepIndex) ? steps[currentStepIndex] : nil }
     var nextStep: RouteStep? { nextManeuverIndex.flatMap { steps.indices.contains($0) ? steps[$0] : nil } }
 
+    /// The turn after `nextStep` — drives the HUD "then" preview chip.
+    var followingStep: RouteStep? {
+        guard let idx = nextManeuverIndex, steps.indices.contains(idx + 1),
+              isTurn(steps[idx + 1].maneuver_type) else { return nil }
+        return steps[idx + 1]
+    }
+
+    /// Ridden fraction of the route, 0–1 — the HUD progress bar.
+    var progressFraction: Double {
+        totalLength > 0 ? min(1, max(0, arcAlong / totalLength)) : 0
+    }
+
+    var speedMph: Int { Int((smoothedSpeed * 2.23694).rounded()) }
+
     var distanceRemainingLabel: String {
         let miles = distanceRemaining / 1609.344
         if miles < 0.1 { return "\(Int((distanceRemaining * 3.28084).rounded())) ft" }
@@ -387,5 +535,10 @@ final class NavigationSession {
     private func lowerFirst(_ s: String) -> String {
         guard let first = s.first else { return s }
         return first.lowercased() + s.dropFirst()
+    }
+
+    private func upperFirst(_ s: String) -> String {
+        guard let first = s.first else { return s }
+        return first.uppercased() + s.dropFirst()
     }
 }

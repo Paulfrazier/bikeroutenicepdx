@@ -594,7 +594,7 @@ interface MapProps {
    * Live navigation chase-camera target (center + heading), bumped each GPS fix.
    * Null when not navigating. Drives easeTo with a forward pitch.
    */
-  navCamera: { center: LngLat; bearing: number; version: number } | null;
+  navCamera: { center: LngLat; bearing: number; zoom: number; version: number } | null;
 }
 
 /** Minimal HTML escape for untrusted geojson property strings in popups. */
@@ -1787,7 +1787,8 @@ export function Map({
         center: navCamera.center,
         bearing: navCamera.bearing,
         pitch: 55,
-        zoom: 17,
+        // Speed-adaptive: pulled back on fast straights, punched in at turns.
+        zoom: navCamera.zoom,
         duration: 700,
       });
     } else if (wasNavigating.current) {
