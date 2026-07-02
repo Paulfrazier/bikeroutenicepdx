@@ -18,6 +18,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { config } from "../config.js";
+import { clientIp } from "../middleware/rateLimit.js";
 
 const app = new Hono();
 
@@ -67,6 +68,47 @@ function checkRateLimit(ip: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Untrusted-text neutralization
+// ---------------------------------------------------------------------------
+
+// Control chars to strip from user text before embedding it in the issue:
+// everything below 0x20 except newline (\n, 0x0A) and tab (\t, 0x09), plus DEL.
+const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+
+/**
+ * Render untrusted text inside a fenced code block so GitHub-Flavored Markdown
+ * shows it literally in the filed issue — no `@mention` notifications, no
+ * auto-linked/clickable URLs, no markdown links/images/HTML aimed at whoever
+ * reviews the fix queue. The fence is made longer than the longest backtick run
+ * in the text, so the content cannot close the fence early and break out
+ * (CommonMark: an N-backtick fence closes only on a run of ≥N backticks).
+ */
+function fencedLiteral(text: string): string {
+  const longestRun = (text.match(/`+/g) ?? []).reduce(
+    (max, run) => Math.max(max, run.length),
+    0
+  );
+  const fence = "`".repeat(Math.max(3, longestRun + 1));
+  const safe =
+    text.replace(/\r\n?/g, "\n").replace(CONTROL_CHARS, "").trim() || "(none)";
+  return `${fence}\n${safe}\n${fence}`;
+}
+
+/**
+ * Issue titles are plain text (GitHub does not render markdown or fire mentions
+ * there), but still collapse whitespace/control chars and cap length so a note
+ * can't spread across lines or spoof structure in the queue list.
+ */
+function titleSnippet(note: string | undefined, coordsCount: number): string {
+  const cleaned = note
+    ?.replace(CONTROL_CHARS, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 72);
+  return "[fix] " + (cleaned || `connector ${coordsCount} pts`);
+}
+
+// ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
@@ -92,10 +134,8 @@ app.post(
       );
     }
 
-    // Rate limit keyed by the first forwarded IP, falling back to "local"
-    const ip =
-      c.req.header("x-forwarded-for")?.split(",")[0].trim() ?? "local";
-    if (!checkRateLimit(ip)) {
+    // Rate limit keyed by the trusted (right-most) forwarded IP — see clientIp.
+    if (!checkRateLimit(clientIp(c))) {
       return c.json(
         { error: "too many submissions, try later", code: "rate_limited" },
         429
@@ -106,8 +146,7 @@ app.post(
 
     // --- Build the GitHub issue ---
 
-    const title =
-      "[fix] " + (note?.slice(0, 72) || `connector ${coords.length} pts`);
+    const title = titleSnippet(note, coords.length);
 
     const lineString = { type: "LineString", coordinates: coords };
     const featureCollection = {
@@ -118,12 +157,18 @@ app.post(
       JSON.stringify(featureCollection)
     )}`;
 
+    // note/contact are user-controlled — render them as fenced literals so they
+    // cannot inject mentions, links, images, or HTML into the maintainer's repo.
     const issueBody = [
       "## Submitted fix",
       "",
-      `**Note:** ${note?.trim() || "(none)"}`,
+      "**Note:**",
       "",
-      `**Contact:** ${contact?.trim() || "(none)"}`,
+      fencedLiteral(note ?? ""),
+      "",
+      "**Contact:**",
+      "",
+      fencedLiteral(contact ?? ""),
       "",
       "## GeoJSON",
       "",
