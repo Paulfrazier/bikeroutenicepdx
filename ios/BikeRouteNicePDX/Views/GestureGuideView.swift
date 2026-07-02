@@ -44,6 +44,10 @@ struct GestureGuideView: View {
         ]),
         Group(icon: "scribble.variable", tint: .purple, mode: "Draw", hint: "Tap “Draw” first", gestures: [
             Gesture(action: "Drag one finger", result: "Traces a stretch, spliced into the route as-drawn"),
+            Gesture(action: "Tap the map", result: "Extends a straight line from where you left off"),
+            Gesture(action: "Two-finger drag / pinch", result: "Moves and zooms the map while drawing"),
+            Gesture(action: "“Move map” button", result: "One-finger panning while paused"),
+            Gesture(action: "Hold the end dot, then drag", result: "Moves the last point (a quick drag keeps drawing)"),
         ]),
         Group(icon: "point.topleft.down.to.point.bottomright.curvepath", tint: .teal, mode: "Route through a section", hint: "Tap it first", gestures: [
             Gesture(action: "Tap start, then end", result: "Reroutes down that whole stretch of street"),

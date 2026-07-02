@@ -175,17 +175,22 @@ function lineFeature(coords: LngLat[]): GeoJSON.Feature {
   };
 }
 
-/** One Point per drawn-stroke vertex — the draggable handles shown in Draw mode. */
-function strokeVertexFeatures(strokes: ManualSegment[]): GeoJSON.FeatureCollection {
+/** One Point per drawn stroke, at its END coord — the per-segment "joint" grab
+ * handles shown in Draw mode. Each segment leaves exactly one movable joint; the
+ * last one coincides with the pen (resume point). Carries the stroke index. */
+function strokeJointFeatures(strokes: ManualSegment[]): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
-    features: strokes.flatMap((s) =>
-      s.coords.map((c) => ({
+    features: strokes
+      .filter((s) => s.coords.length >= 1)
+      .map((s, i) => ({
         type: "Feature" as const,
-        geometry: { type: "Point" as const, coordinates: c },
-        properties: {},
-      }))
-    ),
+        geometry: {
+          type: "Point" as const,
+          coordinates: s.coords[s.coords.length - 1],
+        },
+        properties: { si: i },
+      })),
   };
 }
 
@@ -573,6 +578,10 @@ interface MapProps {
   onDrawStroke: (coords: LngLat[]) => void;
   /** Raw-nudge a vertex on a drawn stroke (drag, no re-snap). */
   onStrokeNudge: (segId: string, vertexIndex: number, at: LngLat) => void;
+  /** Dragged a per-segment joint (Draw mode) to `at`: warp the strokes meeting
+   * there (stroke index `si` and `si+1`) so the dragged end follows, far ends
+   * stay put. */
+  onJointDrag: (si: number, at: LngLat) => void;
   /** Through ("route through a section") mode is active: waypoint pins are shown
    * and tapping a section pin deletes that section. */
   corridorMode: boolean;
@@ -654,6 +663,7 @@ export function Map({
   drawnStrokes,
   onDrawStroke,
   onStrokeNudge,
+  onJointDrag,
   corridorMode,
   connectorDrawMode,
   onDrawConnector,
@@ -742,6 +752,7 @@ export function Map({
   const onMoveEndpointRef = useRef(onMoveEndpoint);
   const onDrawStrokeRef = useRef(onDrawStroke);
   const onStrokeNudgeRef = useRef(onStrokeNudge);
+  const onJointDragRef = useRef(onJointDrag);
   const onDrawConnectorRef = useRef(onDrawConnector);
   const editingRef = useRef(editing);
   const buildModeRef = useRef(buildMode);
@@ -753,11 +764,23 @@ export function Map({
   const drawnStrokesRef = useRef(drawnStrokes);
   const connectorsRef = useRef(connectors);
   const routeFeaturesRef = useRef(routeFeatures);
+  // Start pin, read by the draw path: it's the pen for a first tap-to-extend.
+  const fromRef = useRef(from);
   // Current lane-type visibility, read by the map `load` handler (which closes
   // over the first render) to apply the persisted state once layers exist.
   const hiddenGroupsRef = useRef(hiddenGroups);
   // Active stroke-vertex drag (raw nudge): which stroke + vertex is moving.
   const manualEditRef = useRef<{ segId: string; vertex: number } | null>(null);
+  // Active per-segment joint drag (Draw mode): the stroke whose end is the joint,
+  // plus the original coords of the two strokes meeting there so the warp can be
+  // recomputed live from the cursor.
+  const jointDragRef = useRef<{
+    si: number;
+    oldJoint: LngLat;
+    incoming: LngLat[];
+    outgoing: LngLat[] | null;
+    last: LngLat;
+  } | null>(null);
   // Freehand-draw stroke in progress (lng/lat points).
   const drawStrokeRef = useRef<LngLat[] | null>(null);
   // Which mode armed the in-progress stroke — captured at down-time so onDrawEnd
@@ -772,6 +795,7 @@ export function Map({
     onMoveEndpointRef.current = onMoveEndpoint;
     onDrawStrokeRef.current = onDrawStroke;
     onStrokeNudgeRef.current = onStrokeNudge;
+    onJointDragRef.current = onJointDrag;
     onDrawConnectorRef.current = onDrawConnector;
     editingRef.current = editing;
     buildModeRef.current = buildMode;
@@ -783,6 +807,7 @@ export function Map({
     drawnStrokesRef.current = drawnStrokes;
     connectorsRef.current = connectors;
     routeFeaturesRef.current = routeFeatures;
+    fromRef.current = from;
     hiddenGroupsRef.current = hiddenGroups;
   });
 
@@ -1061,9 +1086,30 @@ export function Map({
         },
       });
 
-      // ── Drawn-route vertices (Draw mode) — small grab handles ────────────
-      // The drawn strokes are part of the main route line; these violet dots mark
-      // each vertex so the user can grab one to nudge it. Shown only in Draw mode.
+      // Rubber-band preview (Draw mode, desktop): a faint dashed line from the
+      // pen to the cursor, making tap-to-extend discoverable. Mouse-only — the
+      // handler feeds it on mousemove and clears it while a stroke is down.
+      map.addSource("draw-preview", {
+        type: "geojson",
+        data: emptyGeojson(),
+      });
+      map.addLayer({
+        id: "draw-preview-line",
+        type: "line",
+        source: "draw-preview",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#7c3aed",
+          "line-width": 2.5,
+          "line-dasharray": [1.5, 2],
+          "line-opacity": 0.7,
+        },
+      });
+
+      // ── Drawn-route joints (Draw mode) — per-segment grab handles ────────
+      // One violet handle per stroke, at its end. Each segment leaves exactly one
+      // movable joint; dragging it warps the two adjacent strokes (the dragged end
+      // follows, the far ends stay put). Shown only in Draw mode.
       map.addSource("draw-vertices", {
         type: "geojson",
         data: emptyGeojson(),
@@ -1074,10 +1120,10 @@ export function Map({
         source: "draw-vertices",
         layout: { visibility: "none" },
         paint: {
-          "circle-radius": 4,
+          "circle-radius": 7,
           "circle-color": "#8B5CF6",
           "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 1.5,
+          "circle-stroke-width": 2,
         },
       });
 
@@ -1356,9 +1402,39 @@ export function Map({
       suppressClickRef.current = true;
       if (stroke && stroke.length >= 2) {
         // The same gesture feeds a different store, by which mode armed the stroke.
+        // NOTE: a bare tap lands here too once strokes exist — the seed is
+        // [pen, tap] — which IS the hybrid tap-to-extend straight segment.
         if (kind === "connector") onDrawConnectorRef.current(stroke);
         else onDrawStrokeRef.current(stroke);
+      } else if (stroke && stroke.length === 1 && kind === "segment") {
+        // Tap-to-extend on a blank canvas: no stroke to chain from, so the pen
+        // is the start pin — commit the straight segment [start, tap]. Renders
+        // exactly where assembleDrawnRoute's bridge would, but as an undoable
+        // stroke with a joint at the tapped point.
+        const pen = fromRef.current;
+        if (pen) {
+          const a = map.project(pen as LngLatLike);
+          const b = map.project(stroke[0] as LngLatLike);
+          if (Math.hypot(a.x - b.x, a.y - b.y) > DRAG_THRESHOLD_PX) {
+            onDrawStrokeRef.current([pen, stroke[0]]);
+          }
+        }
       }
+    };
+
+    // Abandon an in-progress freehand stroke without committing it (a second
+    // finger landed — the gesture is a map move, and the partial stroke was
+    // almost certainly a mistake). Mirrors onDrawEnd's teardown, minus the commit.
+    const cancelDrawStroke = () => {
+      map.off("mousemove", onDrawMove);
+      map.off("touchmove", onDrawMove);
+      map.off("mouseup", onDrawEnd);
+      map.off("touchend", onDrawEnd);
+      map.dragPan.enable();
+      drawStrokeRef.current = null;
+      (
+        map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
+      )?.setData(emptyGeojson());
     };
 
     // The drawn-stroke vertex within grab range of `p`, else null.
@@ -1380,6 +1456,200 @@ export function Map({
       return result;
     };
 
+    // ── Per-segment joints (Draw mode) ──────────────────────────────────
+    // The stroke whose END vertex is within grab range of `p`, else null. Each
+    // stroke leaves one movable joint at its end; dragging it warps the strokes
+    // meeting there.
+    const jointHitPx = (p: Px): number | null => {
+      let best = VERTEX_HIT_PX;
+      let result: number | null = null;
+      drawnStrokesRef.current.forEach((seg, si) => {
+        if (!seg.coords.length) return;
+        const end = seg.coords[seg.coords.length - 1];
+        const pt = map.project(end as LngLatLike);
+        const d = Math.hypot(p.x - pt.x, p.y - pt.y);
+        if (d <= best) {
+          best = d;
+          result = si;
+        }
+      });
+      return result;
+    };
+
+    // Warp the two strokes meeting at a dragged joint: taper each by index
+    // fraction so the dragged end follows `cursor` fully and the far ends stay
+    // put (shape preserved). Returns the warped incoming/outgoing coord arrays.
+    const warpJoint = (
+      cursor: LngLat
+    ): { warpedIn: LngLat[]; warpedOut: LngLat[] | null } | null => {
+      const jd = jointDragRef.current;
+      if (!jd) return null;
+      const d0 = cursor[0] - jd.oldJoint[0];
+      const d1 = cursor[1] - jd.oldJoint[1];
+      const inc = jd.incoming;
+      const k = inc.length - 1;
+      const warpedIn: LngLat[] = inc.map((c, i) =>
+        i === k ? cursor : [c[0] + (d0 * i) / k, c[1] + (d1 * i) / k]
+      );
+      let warpedOut: LngLat[] | null = null;
+      if (jd.outgoing) {
+        const out = jd.outgoing;
+        const m = out.length - 1;
+        warpedOut = out.map((c, i) =>
+          i === 0
+            ? cursor
+            : [c[0] + d0 * (1 - i / m), c[1] + d1 * (1 - i / m)]
+        );
+      }
+      return { warpedIn, warpedOut };
+    };
+
+    const onJointMove = (
+      e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
+    ) => {
+      const jd = jointDragRef.current;
+      if (!jd) return;
+      const start = dragStartPxRef.current;
+      if (start && !draggedFarRef.current) {
+        const dpx = Math.hypot(e.point.x - start.x, e.point.y - start.y);
+        if (dpx < DRAG_THRESHOLD_PX) return;
+        draggedFarRef.current = true;
+      }
+      const cursor: LngLat = [e.lngLat.lng, e.lngLat.lat];
+      jd.last = cursor;
+      const w = warpJoint(cursor);
+      if (!w) return;
+      const line = w.warpedOut
+        ? [...w.warpedIn, ...w.warpedOut.slice(1)]
+        : w.warpedIn;
+      (
+        map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
+      )?.setData(lineFeature(line));
+    };
+
+    // Grab feedback: while a joint is being warped the preview line reads violet
+    // dashed (vs. the solid blue of a fresh stroke), and a hold-grabbed pen dot
+    // pops — so the two meanings of a press are never ambiguous mid-gesture.
+    const setWarpStyle = (on: boolean) => {
+      if (!map.getLayer("route-drag-line")) return;
+      map.setPaintProperty("route-drag-line", "line-color", on ? "#8B5CF6" : "#2563eb");
+      map.setPaintProperty("route-drag-line", "line-dasharray", on ? [1.2, 1.8] : [1, 0]);
+    };
+    const setPenGrabbed = (on: boolean) => {
+      if (!map.getLayer("draw-pen")) return;
+      map.setPaintProperty("draw-pen", "circle-radius", on ? 12 : 8);
+    };
+
+    const onJointEnd = () => {
+      map.off("mousemove", onJointMove);
+      map.off("touchmove", onJointMove);
+      map.off("mouseup", onJointEnd);
+      map.off("touchend", onJointEnd);
+      map.dragPan.enable();
+      const jd = jointDragRef.current;
+      const moved = draggedFarRef.current;
+      jointDragRef.current = null;
+      dragStartPxRef.current = null;
+      draggedFarRef.current = false;
+      if (!jd) return;
+      setPenGrabbed(false);
+      if (!moved) {
+        // A tap on a joint — no reshape. Drop the preview; the route line stays.
+        setWarpStyle(false);
+        (
+          map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
+        )?.setData(emptyGeojson());
+        return;
+      }
+      // Keep the warped preview (still violet) on screen until the new
+      // routeFeatures arrive (that effect clears route-drag and restores the
+      // drag-line style), so there's no stale-geometry flash.
+      suppressClickRef.current = true;
+      onJointDragRef.current(jd.si, jd.last);
+    };
+
+    // Abandon an in-progress joint drag without committing the warp (a second
+    // finger landed). The route line was never touched — the warp lives only in
+    // the route-drag preview — so teardown is just onJointEnd's no-move path.
+    const cancelJointDrag = () => {
+      map.off("mousemove", onJointMove);
+      map.off("touchmove", onJointMove);
+      map.off("mouseup", onJointEnd);
+      map.off("touchend", onJointEnd);
+      map.dragPan.enable();
+      jointDragRef.current = null;
+      dragStartPxRef.current = null;
+      draggedFarRef.current = false;
+      setWarpStyle(false);
+      setPenGrabbed(false);
+      (
+        map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
+      )?.setData(emptyGeojson());
+    };
+
+    // Shared tail of a joint grab: snapshot the strokes meeting at joint `si`
+    // (incoming + outgoing) so the warp can be recomputed live from the cursor,
+    // prime the violet warp preview, and attach the drag listeners. `px` is
+    // where the press landed (the move threshold measures from there).
+    const beginJointDrag = (si: number, px: Px) => {
+      const strokes = drawnStrokesRef.current;
+      const inc = strokes[si];
+      if (!inc || inc.coords.length < 2) return;
+      const incoming = inc.coords.map((c) => [c[0], c[1]] as LngLat);
+      const next = strokes[si + 1];
+      const outgoing =
+        next && next.coords.length >= 2
+          ? next.coords.map((c) => [c[0], c[1]] as LngLat)
+          : null;
+      const oldJoint = incoming[incoming.length - 1];
+      jointDragRef.current = { si, oldJoint, incoming, outgoing, last: oldJoint };
+      dragStartPxRef.current = px;
+      draggedFarRef.current = false;
+      setWarpStyle(true);
+      const line = outgoing ? [...incoming, ...outgoing.slice(1)] : incoming;
+      (
+        map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
+      )?.setData(lineFeature(line));
+      map.on("mousemove", onJointMove);
+      map.on("touchmove", onJointMove);
+      map.on("mouseup", onJointEnd);
+      map.on("touchend", onJointEnd);
+    };
+
+    // Start dragging the joint at the end of stroke `si` (a plain press on an
+    // EARLIER joint — the pen resolves through startPenPress instead).
+    const startJointDrag = (
+      si: number,
+      e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
+    ) => {
+      const inc = drawnStrokesRef.current[si];
+      if (!inc || inc.coords.length < 2) return;
+      e.preventDefault();
+      map.dragPan.disable();
+      beginJointDrag(si, { x: e.point.x, y: e.point.y });
+    };
+
+    // Shared tail of a stroke start (the press is already captured: default
+    // prevented, dragPan disabled). Seeds the stroke and attaches the listeners.
+    const beginStroke = (kind: "segment" | "connector", here: LngLat) => {
+      drawStrokeKindRef.current = kind;
+      // Continuation: a drawn route's strokes chain — the end of the last stroke
+      // is the start of the next. Seed the new segment at the previous stroke's
+      // end (the pen) so the strokes share that joint. Connector strokes and the
+      // very first stroke just start where the press landed.
+      const strokes = drawnStrokesRef.current;
+      const prev = kind === "segment" ? strokes[strokes.length - 1] : undefined;
+      const anchor = prev && prev.coords.length ? prev.coords[prev.coords.length - 1] : null;
+      drawStrokeRef.current = anchor ? [anchor, here] : [here];
+      (
+        map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
+      )?.setData(lineFeature(drawStrokeRef.current));
+      map.on("mousemove", onDrawMove);
+      map.on("touchmove", onDrawMove);
+      map.on("mouseup", onDrawEnd);
+      map.on("touchend", onDrawEnd);
+    };
+
     // Start capturing a freehand stroke (Draw mode → drawn route; connector mode
     // → saved fix). onDrawEnd routes it to the right store by `kind`.
     const startDrawStroke = (
@@ -1388,15 +1658,60 @@ export function Map({
     ) => {
       e.preventDefault();
       map.dragPan.disable();
-      drawStrokeKindRef.current = kind;
-      drawStrokeRef.current = [[e.lngLat.lng, e.lngLat.lat]];
-      (
-        map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
-      )?.setData(lineFeature(drawStrokeRef.current));
-      map.on("mousemove", onDrawMove);
-      map.on("touchmove", onDrawMove);
-      map.on("mouseup", onDrawEnd);
-      map.on("touchend", onDrawEnd);
+      beginStroke(kind, [e.lngLat.lng, e.lngLat.lat]);
+    };
+
+    // ── Pen press (Draw mode) ────────────────────────────────────────────
+    // The pen (last joint) is both the draw origin and the last point's grab
+    // handle, so a press on it is ambiguous. Resolution: a quick drag DRAWS
+    // (the "resume where I left off" instinct), while holding still for
+    // LONG_PRESS_MS pops the dot and drags the joint instead — like
+    // rearranging app icons. Released early, it's an inert tap (as before).
+    let penPress: Px | null = null;
+    let penTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearPenPress = (reenablePan: boolean) => {
+      if (penTimer) {
+        clearTimeout(penTimer);
+        penTimer = null;
+      }
+      penPress = null;
+      map.off("mousemove", onPenMove);
+      map.off("touchmove", onPenMove);
+      map.off("mouseup", onPenUp);
+      map.off("touchend", onPenUp);
+      if (reenablePan) map.dragPan.enable();
+    };
+    const onPenMove = (
+      e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
+    ) => {
+      if (!penPress) return;
+      const d = Math.hypot(e.point.x - penPress.x, e.point.y - penPress.y);
+      if (d < DRAG_THRESHOLD_PX) return;
+      // Moved before the hold fired — it's a draw. The press stays captured
+      // (dragPan remains disabled) and the stroke chains from the pen.
+      clearPenPress(false);
+      beginStroke("segment", [e.lngLat.lng, e.lngLat.lat]);
+    };
+    const onPenUp = () => clearPenPress(true);
+    const startPenPress = (
+      e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent
+    ) => {
+      e.preventDefault();
+      map.dragPan.disable();
+      const px: Px = { x: e.point.x, y: e.point.y };
+      penPress = px;
+      penTimer = setTimeout(() => {
+        penTimer = null;
+        if (!penPress) return;
+        clearPenPress(false);
+        // Held still — grab the pen joint: pop the dot and warp from here.
+        setPenGrabbed(true);
+        beginJointDrag(drawnStrokesRef.current.length - 1, px);
+      }, LONG_PRESS_MS);
+      map.on("mousemove", onPenMove);
+      map.on("touchmove", onPenMove);
+      map.on("mouseup", onPenUp);
+      map.on("touchend", onPenUp);
     };
 
     // Start a raw nudge of one drawn-stroke vertex. Only that stroke is shown in
@@ -1474,18 +1789,40 @@ export function Map({
     ) => {
       const point: Px = { x: e.point.x, y: e.point.y };
 
+      // Two fingers while drawing = move the map (drawing-app convention).
+      // Discard any in-progress stroke/joint drag and stand down WITHOUT
+      // preventDefault: the mapEvent handler runs before touchPan/touchZoom in
+      // this same DOM event, so re-enabling dragPan here lets MapLibre's native
+      // handlers register BOTH touches and take over pan + pinch mid-gesture.
+      const touches = (e.originalEvent as TouchEvent).touches;
+      if (
+        touches &&
+        touches.length >= 2 &&
+        (connectorDrawModeRef.current ||
+          (drawModeRef.current && !drawPausedRef.current))
+      ) {
+        cancelDrawStroke();
+        clearPenPress(true);
+        if (jointDragRef.current) cancelJointDrag();
+        return;
+      }
+
       // Connector draw: a freehand stroke becomes a saved fix.
       if (connectorDrawModeRef.current) {
         startDrawStroke("connector", e);
         return;
       }
 
-      // Draw mode: grab a stroke vertex to nudge it, else start a (resumable)
-      // stroke — the pen continues from where the last stroke ended. While
-      // paused, fall through so the press pans/zooms the map (default dragPan).
+      // Draw mode: an EARLIER joint grabs on a plain press (warp); the PEN (last
+      // joint) is ambiguous — it's also the draw origin — so it resolves by
+      // time: quick drag draws, hold grabs (startPenPress). Anywhere else starts
+      // a (resumable) stroke chained from the pen. While paused, fall through so
+      // the press pans/zooms the map (default dragPan).
       if (drawModeRef.current && !drawPausedRef.current) {
-        const manual = manualHitPx(point);
-        if (manual) startVertexNudge(manual, e);
+        const joint = jointHitPx(point);
+        const lastIdx = drawnStrokesRef.current.length - 1;
+        if (joint !== null && joint === lastIdx) startPenPress(e);
+        else if (joint !== null) startJointDrag(joint, e);
         else startDrawStroke("segment", e);
         return;
       }
@@ -1524,6 +1861,39 @@ export function Map({
     map.on("mousedown", onDown);
     map.on("touchstart", onDown);
 
+    // Rubber-band preview: pen → cursor while Draw mode idles (no stroke or
+    // joint drag in flight). `previewShowing` gates the clear so an idle mouse
+    // outside Draw mode isn't spamming setData on every move.
+    let previewShowing = false;
+    const onPreviewMove = (e: maplibregl.MapMouseEvent) => {
+      const src = map.getSource("draw-preview") as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      if (!src) return;
+      const idle =
+        drawModeRef.current &&
+        !drawPausedRef.current &&
+        !drawStrokeRef.current &&
+        !jointDragRef.current;
+      if (!idle) {
+        if (previewShowing) {
+          src.setData(emptyGeojson());
+          previewShowing = false;
+        }
+        return;
+      }
+      const strokes = drawnStrokesRef.current;
+      const last = strokes[strokes.length - 1];
+      const pen =
+        last && last.coords.length
+          ? last.coords[last.coords.length - 1]
+          : fromRef.current;
+      if (!pen) return;
+      src.setData(lineFeature([pen, [e.lngLat.lng, e.lngLat.lat]]));
+      previewShowing = true;
+    };
+    map.on("mousemove", onPreviewMove);
+
     // ── Tap to set markers ─────────────────────────────────────────────
     map.on("click", (e) => {
       if (suppressClickRef.current) {
@@ -1549,8 +1919,9 @@ export function Map({
           return;
         }
       }
-      // Draw mode owns the gesture: drawing is a drag and panning-while-paused
-      // is a drag, so a bare tap is inert — never let it drop a from/to pin.
+      // Draw mode owns the gesture: a bare tap extends the route (consumed by
+      // the mousedown→onDrawEnd path, which sets suppressClickRef), and while
+      // paused taps are inert — either way, never let one drop a from/to pin.
       if (drawModeRef.current) return;
       // Tap a built-but-unpublished supplement lane → "learn more" popup instead
       // of dropping an A/B pin. Small pixel box so it's touch-friendly.
@@ -1573,6 +1944,7 @@ export function Map({
     return () => {
       // Make sure a drag-in-progress can't leave the map unpannable.
       if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+      if (penTimer) clearTimeout(penTimer);
       map.off("mousemove", onMove);
       map.off("touchmove", onMove);
       map.off("mouseup", onEnd);
@@ -1581,6 +1953,7 @@ export function Map({
       map.off("touchmove", onDrawMove);
       map.off("mouseup", onDrawEnd);
       map.off("touchend", onDrawEnd);
+      map.off("mousemove", onPreviewMove);
       map.dragPan.enable();
       map.remove();
       mapRef.current = null;
@@ -1606,6 +1979,15 @@ export function Map({
     (
       map.getSource("route-drag") as maplibregl.GeoJSONSource | undefined
     )?.setData(emptyGeojson());
+    // A committed joint warp keeps its violet-dashed preview (and popped pen)
+    // up until this recompute lands — restore the neutral styling with it.
+    if (map.getLayer("route-drag-line")) {
+      map.setPaintProperty("route-drag-line", "line-color", "#2563eb");
+      map.setPaintProperty("route-drag-line", "line-dasharray", [1, 0]);
+    }
+    if (map.getLayer("draw-pen")) {
+      map.setPaintProperty("draw-pen", "circle-radius", 8);
+    }
 
     // Fade the bike network back while a route is displayed so the route owns
     // the foreground (it's drawn in the same colors as the overlay beneath it).
@@ -1651,7 +2033,7 @@ export function Map({
     if (!map || !map.isStyleLoaded()) return;
     (
       map.getSource("draw-vertices") as maplibregl.GeoJSONSource | undefined
-    )?.setData(strokeVertexFeatures(drawnStrokes));
+    )?.setData(strokeJointFeatures(drawnStrokes));
     (
       map.getSource("draw-pen") as maplibregl.GeoJSONSource | undefined
     )?.setData(penFeature(drawnStrokes));
@@ -1701,7 +2083,14 @@ export function Map({
         map.setLayoutProperty(id, "visibility", drawMode ? "visible" : "none");
       }
     }
-  }, [drawMode]);
+    // The rubber-band preview only repaints on mousemove — clear it here so it
+    // can't linger after Draw mode (or a pause) turns the preview off.
+    if (!drawMode || drawPaused) {
+      (
+        map.getSource("draw-preview") as maplibregl.GeoJSONSource | undefined
+      )?.setData(emptyGeojson());
+    }
+  }, [drawMode, drawPaused]);
 
   // ── Corridor preview: highlight the picked section + its tapped endpoints ──
   useEffect(() => {

@@ -11,6 +11,11 @@ struct LegendView: View {
     @State private var expanded = true
     @State private var showCustomize = false
 
+    /// Width of the expanded card's body. The card floats on a full-width layer
+    /// (RootView pins it top-trailing), so its width must be self-imposed — an
+    /// unbounded header would stretch the card across the whole screen.
+    private let bodyWidth: CGFloat = 188
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Button {
@@ -24,7 +29,11 @@ struct LegendView: View {
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.secondary)
                 }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                // Collapsed, the chip hugs its label; expanded, the header fills
+                // exactly the card's body width so the whole top row stays one
+                // big collapse target (an unbounded .infinity here would stretch
+                // the floating card across the full screen).
+                .frame(maxWidth: expanded ? bodyWidth : nil, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -54,7 +63,7 @@ struct LegendView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Customize map layers")
                 }
-                .frame(width: 188, alignment: .leading)
+                .frame(width: bodyWidth, alignment: .leading)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }

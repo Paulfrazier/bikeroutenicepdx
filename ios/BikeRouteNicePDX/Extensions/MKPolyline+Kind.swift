@@ -7,6 +7,12 @@ final class GreenwayPolyline: MKPolyline {}
 final class RoutePolyline: MKPolyline {}
 final class DraftPolyline: MKPolyline {}
 
+/// Live joint-warp preview (Draw mode) — violet dashed, matching the joint
+/// handles, so a warp-in-progress reads distinctly from a fresh stroke draft
+/// (dashed blue) and from the finished route line. Mirrors the web's
+/// route-drag-line warp styling.
+final class JointWarpPolyline: MKPolyline {}
+
 /// A hand-drawn (manual) stretch. Legacy overlay type — Draw strokes now render
 /// as the colored route line, so this is no longer drawn; kept for the renderer's
 /// exhaustive type switch.

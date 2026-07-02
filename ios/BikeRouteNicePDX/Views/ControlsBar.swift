@@ -389,7 +389,7 @@ struct ControlsBar: View {
             return "Starts fresh from your start & end. Tap the map to drop waypoints (joined by straight lines); drag a pin to move it, tap a pin to remove it. Tap Finish to link them into a route."
         }
         if store.isDrawMode {
-            return "Starts fresh from your start & end. Draw the route in strokes (kept exactly as drawn) — lift and continue where you left off. Tap “Move map” to pan/zoom, then resume. Drag a point to adjust."
+            return "Starts fresh from your start & end. One finger draws (kept exactly as drawn); a tap extends a straight line from the pen; two fingers move the map — or tap “Move map”. Drag a dot to adjust it; on the end dot, hold until it pops, then drag."
         }
         if store.isEditMode {
             return "Drag the route on the map to reshape it — it re-snaps to roads."
@@ -449,9 +449,10 @@ struct ControlsBar: View {
         }
     }
 
-    /// Draw-mode controls: a "✋ Move map / ✏️ Draw" pause toggle (pan/zoom ⇄ draw)
-    /// above the stroke count + Undo (drop last stroke, or undo the wipe when empty)
-    /// + Clear. Mirrors the web RouteDrawer toggle + hint.
+    /// Draw-mode controls: a "✋ Move map / ✏️ Draw" pause toggle (one-finger
+    /// pan/zoom ⇄ draw; the discoverable fallback — two-finger pan/pinch works
+    /// even while unpaused) above the stroke count + Undo (drop last stroke, or
+    /// undo the wipe when empty) + Clear. Mirrors the web RouteDrawer toggle + hint.
     private var drawControlsRow: some View {
         VStack(spacing: 8) {
             Button {

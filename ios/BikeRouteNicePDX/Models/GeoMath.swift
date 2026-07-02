@@ -123,19 +123,25 @@ enum GeoMath {
         return coords.last
     }
 
-    /// Assemble a fully hand-drawn route (Draw mode): start pin → each snapped
-    /// stroke in draw order → end pin. Consecutive strokes and the gaps to the pins
-    /// are joined by STRAIGHT bridges (the implicit segments between consecutive
+    /// Assemble a fully hand-drawn route (Draw mode): start pin → each stroke in
+    /// draw order → (optionally) end pin. Consecutive strokes and the gaps to the
+    /// pins are joined by STRAIGHT bridges (the implicit segments between consecutive
     /// points) — nothing is auto-routed. The drawn strokes ARE the route. Mirrors
     /// the web `assembleDrawnRoute` in geo.ts.
+    ///
+    /// `connectEnd` controls whether the destination is appended: while the rider is
+    /// still drawing it's `false`, so the route is just `from → strokes` with no line
+    /// shooting to the end pin. It flips to `true` once Draw is finished (Done), which
+    /// is when the straight bridge to the destination appears.
     static func assembleDrawnRoute(
         from: CLLocationCoordinate2D,
         to: CLLocationCoordinate2D,
-        strokes: [[CLLocationCoordinate2D]]
+        strokes: [[CLLocationCoordinate2D]],
+        connectEnd: Bool = true
     ) -> [CLLocationCoordinate2D] {
         var out: [CLLocationCoordinate2D] = [from]
         for stroke in strokes { out.append(contentsOf: stroke) }
-        out.append(to)
+        if connectEnd { out.append(to) }
         return out
     }
 

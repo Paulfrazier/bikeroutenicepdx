@@ -64,6 +64,23 @@ struct MapView: UIViewRepresentable {
         map.addGestureRecognizer(pan)
         context.coordinator.panGesture = pan
 
+        // Two-finger pan while drawing (drawing-app convention). MKMapView can't
+        // do "two-finger-only scroll" natively — isScrollEnabled is all-or-nothing
+        // and its internal recognizers are private — so while Draw owns one-finger
+        // touches we move the map ourselves from the gesture translation. No
+        // require(toFail:) against the draw pan: that would lag every stroke
+        // start; the overlap is resolved by an explicit cancel in the handler.
+        let twoFingerPan = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(MapCoordinator.handleTwoFingerPan(_:))
+        )
+        twoFingerPan.minimumNumberOfTouches = 2
+        twoFingerPan.maximumNumberOfTouches = 2
+        twoFingerPan.delegate = context.coordinator
+        twoFingerPan.isEnabled = false
+        map.addGestureRecognizer(twoFingerPan)
+        context.coordinator.twoFingerPanGesture = twoFingerPan
+
         // Pan to hand-edit an existing route line — enabled by sync() only when
         // a route exists and we're not drawing. gestureRecognizerShouldBegin
         // gates it so it only grabs the touch when it starts on the line.

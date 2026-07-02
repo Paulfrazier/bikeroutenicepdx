@@ -255,6 +255,10 @@ const GROUPS: Group[] = [
     hint: "Tap “Draw segment” first",
     gestures: [
       { do: "Trace on the map", gets: "Splices your hand-drawn path into the route" },
+      { do: "Tap the map", gets: "Extends a straight line from where you left off" },
+      { do: "Two-finger drag / pinch", gets: "Moves and zooms the map while drawing" },
+      { do: "“Move map” button", gets: "One-finger panning while paused" },
+      { do: "Hold the end dot, then drag", gets: "Moves the last point (a quick drag from it keeps drawing)" },
       { do: "Drag a point", gets: "Nudges a drawn point (kept exactly as-is)" },
     ],
   },

@@ -161,21 +161,27 @@ export function applyManualSegments(
 }
 
 /**
- * Assemble a fully hand-drawn route (Draw mode): start pin → each snapped stroke
- * in draw order → end pin. Consecutive strokes and the gaps to the pins are
+ * Assemble a fully hand-drawn route (Draw mode): start pin → each stroke in draw
+ * order → (optionally) end pin. Consecutive strokes and the gaps to the pins are
  * joined by STRAIGHT bridges (the implicit segments between consecutive points) —
  * nothing is auto-routed. The drawn strokes ARE the route.
+ *
+ * `connectEnd` controls whether the destination is appended: while the user is
+ * still drawing it's `false`, so the route is just `from → strokes` with no line
+ * shooting to the end pin. It flips to `true` once Draw is finished (Done), which
+ * is when the straight bridge to the destination appears.
  */
 export function assembleDrawnRoute(
   from: LngLat,
   to: LngLat,
-  strokes: { coords: LngLat[] }[]
+  strokes: { coords: LngLat[] }[],
+  connectEnd = true
 ): LngLat[] {
   const out: LngLat[] = [from];
   for (const s of strokes) {
     for (const c of s.coords) out.push(c);
   }
-  out.push(to);
+  if (connectEnd) out.push(to);
   return out;
 }
 

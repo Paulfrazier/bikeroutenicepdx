@@ -62,7 +62,7 @@ const TOOLS: { id: Exclude<EditTool, null>; label: string; icon: string; hint: s
   { id: "through", label: "Through", icon: "↦", hint: "Tap the start then the end of a section on the map. Tap a section's pin to remove it." },
   { id: "drag", label: "Drag", icon: "✎", hint: "Drag the route on the map to reshape it — it re-snaps to roads." },
   { id: "build", label: "Build", icon: "📍", hint: "Starts fresh from your start & end. Tap the map to drop waypoints (joined by straight lines); drag a pin to move it, tap a pin to remove it. Press ✓ Finish to link them into a route." },
-  { id: "draw", label: "Draw", icon: "✏️", hint: "Starts fresh from your start & end. Draw the route in strokes (they snap to roads) — lift and continue where you left off. Tap “Move map” to pan/zoom, then resume. Drag a point to adjust." },
+  { id: "draw", label: "Draw", icon: "✏️", hint: "Starts fresh from your start & end. One finger draws a stroke; a tap extends a straight line from the pen; two fingers move the map (or tap “Move map”). Drag a round handle to adjust a join — on the end dot, hold until it pops, then drag. Tap Done to connect to your destination." },
 ];
 
 export function RouteDrawer({
