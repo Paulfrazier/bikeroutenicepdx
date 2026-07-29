@@ -574,8 +574,10 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         }
         // Tap a built-but-unpublished "supplement" lane → show the "learn more
         // about this network" panel instead of dropping an A/B pin (mirrors the
-        // web). Checked only in the plain planning tap, after the mode branches.
-        if let info = supplementHit(point, map: map) {
+        // web). Checked only in the plain planning tap, after the mode branches:
+        // in Through mode the tap belongs to the A→B pick, and the 22pt hit
+        // radius would otherwise make supplement streets impossible to pick.
+        if !store.isCorridorMode, let info = supplementHit(point, map: map) {
             store.selectedSupplement = info
             return
         }

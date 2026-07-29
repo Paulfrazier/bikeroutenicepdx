@@ -585,6 +585,9 @@ interface MapProps {
   /** Through ("route through a section") mode is active: waypoint pins are shown
    * and tapping a section pin deletes that section. */
   corridorMode: boolean;
+  /** Rate-a-street mode is active: a tap resolves the street name for the rating
+   * picker, so it must not be swallowed by the supplement-lane popup. */
+  ratingMode: boolean;
   /** When true, a freehand stroke on the map becomes a saved connector (a fix).
    * Shares the manual-draw gesture; the stroke is routed to onDrawConnector. */
   connectorDrawMode: boolean;
@@ -665,6 +668,7 @@ export function Map({
   onStrokeNudge,
   onJointDrag,
   corridorMode,
+  ratingMode,
   connectorDrawMode,
   onDrawConnector,
   connectors,
@@ -759,6 +763,7 @@ export function Map({
   const drawModeRef = useRef(drawMode);
   const drawPausedRef = useRef(drawPaused);
   const corridorModeRef = useRef(corridorMode);
+  const ratingModeRef = useRef(ratingMode);
   const connectorDrawModeRef = useRef(connectorDrawMode);
   const viasRef = useRef(vias);
   const drawnStrokesRef = useRef(drawnStrokes);
@@ -802,6 +807,7 @@ export function Map({
     drawModeRef.current = drawMode;
     drawPausedRef.current = drawPaused;
     corridorModeRef.current = corridorMode;
+    ratingModeRef.current = ratingMode;
     connectorDrawModeRef.current = connectorDrawMode;
     viasRef.current = vias;
     drawnStrokesRef.current = drawnStrokes;
@@ -1924,19 +1930,23 @@ export function Map({
       // paused taps are inert — either way, never let one drop a from/to pin.
       if (drawModeRef.current) return;
       // Tap a built-but-unpublished supplement lane → "learn more" popup instead
-      // of dropping an A/B pin. Small pixel box so it's touch-friendly.
-      const hit = map
-        .queryRenderedFeatures(
-          [
-            [e.point.x - 5, e.point.y - 5],
-            [e.point.x + 5, e.point.y + 5],
-          ],
-          { layers: ["bike-network-solid"] }
-        )
-        .find((f) => f.properties && f.properties.supplement);
-      if (hit) {
-        showSupplementPopup(map, e.lngLat, hit.properties as Record<string, unknown>);
-        return;
+      // of dropping an A/B pin. Small pixel box so it's touch-friendly. Skipped
+      // when a pick mode owns the tap (Through, Rate a street) — otherwise those
+      // modes are unusable on exactly the streets the popup covers.
+      if (!corridorModeRef.current && !ratingModeRef.current) {
+        const hit = map
+          .queryRenderedFeatures(
+            [
+              [e.point.x - 5, e.point.y - 5],
+              [e.point.x + 5, e.point.y + 5],
+            ],
+            { layers: ["bike-network-solid"] }
+          )
+          .find((f) => f.properties && f.properties.supplement);
+        if (hit) {
+          showSupplementPopup(map, e.lngLat, hit.properties as Record<string, unknown>);
+          return;
+        }
       }
       onMapClickRef.current([e.lngLat.lng, e.lngLat.lat]);
     });

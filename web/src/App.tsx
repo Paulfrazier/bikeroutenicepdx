@@ -906,6 +906,7 @@ export default function App() {
           onStrokeNudge={handleStrokeNudge}
           onJointDrag={handleJointDrag}
           corridorMode={corridorMode}
+          ratingMode={ratingMode}
           connectorDrawMode={connectorDrawMode}
           onDrawConnector={handleDrawConnector}
           connectors={connectors}
