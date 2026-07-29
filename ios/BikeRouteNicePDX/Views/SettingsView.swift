@@ -8,11 +8,31 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(RouteStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    @State private var favoritesOpen = false
 
     var body: some View {
         @Bindable var store = store
         NavigationStack {
             List {
+                Section {
+                    Button {
+                        favoritesOpen = true
+                    } label: {
+                        HStack {
+                            Label("Saved places", systemImage: "star")
+                            Spacer()
+                            Text("\(Favorites.list().count)")
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .tint(.primary)
+                } footer: {
+                    Text("Places you've starred. They appear at the top of every search.")
+                }
+
                 Section {
                     Picker("Engine", selection: $store.routingEngine) {
                         ForEach(RoutingEngine.allCases) { engine in
@@ -32,6 +52,9 @@ struct SettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .sheet(isPresented: $favoritesOpen) {
+                FavoritesView()
             }
         }
     }

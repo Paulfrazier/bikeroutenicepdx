@@ -19,6 +19,9 @@ struct SnappedRoute: Equatable {
     /// Turn-by-turn directions from /route (empty for /match-snapped routes).
     var steps: [RouteStep] = []
 
+    /// Per-stop breakdown for a multi-stop trip. Empty on a plain A→B route.
+    var legs: [RouteLeg] = []
+
     /// Human-readable distance, imperial (Portland).
     var distanceLabel: String {
         let miles = distanceMeters / 1609.344

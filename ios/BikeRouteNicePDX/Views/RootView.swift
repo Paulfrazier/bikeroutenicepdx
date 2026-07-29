@@ -99,7 +99,8 @@ struct RootView: View {
         .sheet(isPresented: $showDirections) {
             DirectionsSheet(
                 steps: store.snapped?.steps ?? [],
-                distanceLabel: store.snapped?.distanceLabel ?? ""
+                distanceLabel: store.snapped?.distanceLabel ?? "",
+                legs: store.snapped?.legs ?? []
             )
             .presentationDetents([.medium, .large])
         }

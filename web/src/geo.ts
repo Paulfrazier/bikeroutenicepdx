@@ -214,6 +214,13 @@ export function pointToSegmentDistancePx(p: Px, a: Px, b: Px): number {
 /** Max number of drag-to-reshape waypoints. Generous — complex routes need many. */
 export const MAX_VIAS = 40;
 
+/**
+ * Max user-declared stops in one trip. Far tighter than MAX_VIAS: every stop is
+ * a leg the rider has to read, and each one costs upstream routing work. Must
+ * match the server's MAX_STOPS and iOS `RouteStore.maxStops`.
+ */
+export const MAX_STOPS = 8;
+
 /** Grab radius (px) around an existing vertex — generous, fingers are fat. */
 export const VERTEX_HIT_PX = 22;
 /** Grab radius (px) around a bare segment, to insert a new vertex. */

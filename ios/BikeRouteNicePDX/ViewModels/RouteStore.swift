@@ -15,18 +15,35 @@ struct Via: Identifiable {
     /// unit. Corridor vias are always `precise` (anchored on the chosen road,
     /// never re-snapped to a parallel greenway).
     var corridorId: UUID?
+    /// What this point MEANS. `.reshape` is an anonymous shaping coordinate the
+    /// rider dragged the line through. `.stop` is a place they're actually
+    /// going: numbered pin, delimits a leg, ordered by list position rather than
+    /// by arc length. Mirrors web `Via.kind`.
+    var kind: ViaKind
+    /// Display name for a stop, from the search result or favorite it came from.
+    var label: String?
 
     init(
         id: UUID = UUID(),
         coordinate: CLLocationCoordinate2D,
         precise: Bool = false,
-        corridorId: UUID? = nil
+        corridorId: UUID? = nil,
+        kind: ViaKind = .reshape,
+        label: String? = nil
     ) {
         self.id = id
         self.coordinate = coordinate
         self.precise = precise
         self.corridorId = corridorId
+        self.kind = kind
+        self.label = label
     }
+}
+
+/// See `Via.kind`. Mirrors the web `"reshape" | "stop"` union.
+enum ViaKind {
+    case reshape
+    case stop
 }
 
 /// A finished Draw-mode stroke. In the from-scratch Draw canvas the strokes ARE
@@ -187,6 +204,27 @@ final class RouteStore {
 
     /// Cap on drag-to-reshape waypoints. Generous — complex routes need many.
     static let maxVias = 40
+
+    /// Cap on user-declared stops in one trip. Far tighter than `maxVias`: each
+    /// stop is a leg the rider has to read, and each costs upstream routing work.
+    /// Must match web `MAX_STOPS` and the server's MAX_STOPS.
+    static let maxStops = 8
+
+    /// The rider's declared stops, in trip order.
+    var stops: [Via] { vias.filter { $0.kind == .stop } }
+
+    /// The tagged wire form of `vias`, or nil when the trip has no stops (so a
+    /// plain A→B request stays byte-identical to what it always was).
+    private var routeWaypoints: [RouteWaypoint]? {
+        guard vias.contains(where: { $0.kind == .stop }) else { return nil }
+        return vias.map {
+            RouteWaypoint(
+                at: [$0.coordinate.longitude, $0.coordinate.latitude],
+                stop: $0.kind == .stop ? true : nil,
+                label: $0.kind == .stop ? $0.label : nil
+            )
+        }
+    }
 
     /// Finished Draw-mode strokes. The strokes ARE the route (assembled with
     /// straight bridges to the pins — see `GeoMath.assembleDrawnRoute`), overriding
@@ -441,7 +479,8 @@ final class RouteStore {
         errorMessage = nil
         do {
             let routed = try await router.route(
-                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue,
+                waypoints: routeWaypoints
             )
             if Task.isCancelled { return }
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
@@ -465,9 +504,33 @@ final class RouteStore {
     /// touch vias / manual segments / `autoRoute` — `NavigationSession` restores
     /// the original planned route when navigation ends. Returns the fresh route,
     /// or nil on failure (the caller keeps guiding on the old line).
-    func navReroute(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) async -> SnappedRoute? {
+    func navReroute(
+        from: CLLocationCoordinate2D,
+        to: CLLocationCoordinate2D,
+        remainingStops: [Via] = []
+    ) async -> SnappedRoute? {
         do {
-            let routed = try await router.route(from: from, to: to, vias: [], preference: routePreference.rawValue, engine: routingEngine.rawValue)
+            // Reshape vias are geometry for the ORIGINAL line and are dropped on
+            // a reroute (the rider has left it). Stops are destinations, not
+            // geometry: dropping them would silently cancel the rest of the
+            // errand, so any the rider hasn't reached yet are routed through.
+            let waypoints: [RouteWaypoint]? = remainingStops.isEmpty
+                ? nil
+                : remainingStops.map {
+                    RouteWaypoint(
+                        at: [$0.coordinate.longitude, $0.coordinate.latitude],
+                        stop: true,
+                        label: $0.label
+                    )
+                }
+            let routed = try await router.route(
+                from: from,
+                to: to,
+                vias: remainingStops.map(\.coordinate),
+                preference: routePreference.rawValue,
+                engine: routingEngine.rawValue,
+                waypoints: waypoints
+            )
             guard routed.coordinates.count >= 2 else { return nil }
             let enriched = await classified(routed)
             snapped = enriched
@@ -608,7 +671,8 @@ final class RouteStore {
         do {
             let routed = try await router.route(
                 from: startC, to: endC, vias: vias.map(\.coordinate),
-                preference: routePreference.rawValue, engine: routingEngine.rawValue
+                preference: routePreference.rawValue, engine: routingEngine.rawValue,
+                waypoints: routeWaypoints
             )
             guard routed.coordinates.count >= 2 else { return }
             autoRoute = routed
@@ -818,7 +882,8 @@ final class RouteStore {
             // Order against the routable auto geometry (not the spliced display).
             let routeCoords = autoRoute?.coordinates ?? preview
             let key = GeoMath.arcLength(of: at, in: routeCoords)
-            let insertAt = vias.filter { GeoMath.arcLength(of: $0.coordinate, in: routeCoords) < key }.count
+            let rawIndex = vias.filter { GeoMath.arcLength(of: $0.coordinate, in: routeCoords) < key }.count
+            let insertAt = clampBetweenStops(rawIndex, key: key, in: routeCoords)
             vias.insert(Via(coordinate: at, precise: false), at: min(insertAt, vias.count))
         }
 
@@ -829,7 +894,8 @@ final class RouteStore {
 
         do {
             let routed = try await router.route(
-                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue,
+                waypoints: routeWaypoints
             )
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             autoRoute = routed
@@ -873,7 +939,8 @@ final class RouteStore {
 
         do {
             let routed = try await router.route(
-                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue,
+                waypoints: routeWaypoints
             )
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             autoRoute = routed
@@ -943,6 +1010,73 @@ final class RouteStore {
     /// Long-press on the line: drop a PRECISE anchor exactly there (no snap) so
     /// the route is forced through that point (e.g. a median crossing), then
     /// re-route. Ordered by arc-length; reverts on failure.
+    // MARK: - Stops (rider-declared places along the trip)
+
+    /// Constrain an arc-length-derived insertion index to the leg it belongs to.
+    ///
+    /// Reshape vias are ordered by arc length; stops are ordered by the rider's
+    /// list. Mixing both in one array only stays consistent if a reshape can
+    /// never cross a stop — otherwise dragging the line near stop 2 could
+    /// re-order the trip. Mirrors web `clampBetweenStops` in App.tsx.
+    private func clampBetweenStops(
+        _ insertAt: Int,
+        key: Double,
+        in routeCoords: [CLLocationCoordinate2D]
+    ) -> Int {
+        var lower = 0
+        var upper = vias.count
+        for (i, via) in vias.enumerated() where via.kind == .stop {
+            if GeoMath.arcLength(of: via.coordinate, in: routeCoords) <= key {
+                lower = i + 1
+            } else {
+                upper = i
+                break
+            }
+        }
+        return max(lower, min(insertAt, upper))
+    }
+
+    /// Append a stop before the destination. A stop is pinned exactly where the
+    /// geocoder put it — an address is never re-snapped onto a nearby bike path.
+    func addStop(_ result: SearchResult) async {
+        guard stops.count < Self.maxStops else { return }
+        vias.append(
+            Via(
+                coordinate: CLLocationCoordinate2D(latitude: result.lat, longitude: result.lng),
+                precise: true,
+                kind: .stop,
+                label: result.name
+            )
+        )
+        await rerouteKeepingPhase()
+    }
+
+    /// Repoint an existing stop at a new place, keeping its position in the trip.
+    func updateStop(id: UUID, to result: SearchResult) async {
+        guard let i = vias.firstIndex(where: { $0.id == id }) else { return }
+        vias[i].coordinate = CLLocationCoordinate2D(latitude: result.lat, longitude: result.lng)
+        vias[i].label = result.name
+        await rerouteKeepingPhase()
+    }
+
+    func removeStop(id: UUID) async {
+        guard vias.contains(where: { $0.id == id && $0.kind == .stop }) else { return }
+        vias.removeAll { $0.id == id }
+        await rerouteKeepingPhase()
+    }
+
+    /// Reorder the stop sequence from a SwiftUI `.onMove`.
+    ///
+    /// Reshape vias are geometry for legs that no longer exist once stops move,
+    /// so they're dropped rather than left anchoring the wrong stretch. Mirrors
+    /// the web `moveStop`.
+    func moveStops(fromOffsets source: IndexSet, toOffset destination: Int) async {
+        var reordered = stops
+        reordered.move(fromOffsets: source, toOffset: destination)
+        vias = reordered
+        await rerouteKeepingPhase()
+    }
+
     func insertPreciseVia(_ at: CLLocationCoordinate2D) async {
         guard vias.count < Self.maxVias,
               let startC = start?.coordinate, let endC = end?.coordinate else { return }
@@ -952,14 +1086,16 @@ final class RouteStore {
         let previousAuto = autoRoute
         let routeCoords = autoRoute?.coordinates ?? snapped?.coordinates ?? []
         let key = GeoMath.arcLength(of: at, in: routeCoords)
-        let insertAt = vias.filter { GeoMath.arcLength(of: $0.coordinate, in: routeCoords) < key }.count
+        let rawIndex = vias.filter { GeoMath.arcLength(of: $0.coordinate, in: routeCoords) < key }.count
+        let insertAt = clampBetweenStops(rawIndex, key: key, in: routeCoords)
         vias.insert(Via(coordinate: at, precise: true), at: min(insertAt, vias.count))
         isManuallyEdited = true
         phase = .routed
 
         do {
             let routed = try await router.route(
-                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue,
+                waypoints: routeWaypoints
             )
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             autoRoute = routed
@@ -1265,7 +1401,8 @@ final class RouteStore {
 
         do {
             let routed = try await router.route(
-                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue
+                from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue,
+                waypoints: routeWaypoints
             )
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             autoRoute = routed

@@ -40,12 +40,16 @@ struct RouteService {
         to: CLLocationCoordinate2D,
         vias: [CLLocationCoordinate2D],
         preference: String? = nil,
-        engine: String? = nil
+        engine: String? = nil,
+        waypoints: [RouteWaypoint]? = nil
     ) async throws -> SnappedRoute {
         let body = RouteRequest(
             from: [from.longitude, from.latitude],
             to: [to.longitude, to.latitude],
             via: vias.map { [$0.longitude, $0.latitude] },
+            // Sent only when the trip has stops; otherwise `via` alone keeps the
+            // request byte-identical to what the server has always received.
+            waypoints: waypoints,
             preference: preference,
             engine: engine
         )
@@ -60,6 +64,7 @@ struct RouteService {
             durationSeconds: response.duration_s
         )
         route.steps = response.steps
+        route.legs = response.legs ?? []
         return route
     }
 }

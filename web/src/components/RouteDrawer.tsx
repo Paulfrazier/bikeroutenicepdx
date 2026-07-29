@@ -13,7 +13,7 @@
 
 import { RouteSummary } from "./RouteSummary";
 import { DirectionsPanel } from "./DirectionsPanel";
-import type { RouteStep } from "../types";
+import type { RouteStep, RouteLeg } from "../types";
 
 /** Which reshape mode is active, or null when the edit panel has none selected. */
 export type EditTool = "through" | "drag" | "build" | "draw" | null;
@@ -54,6 +54,8 @@ interface RouteDrawerProps {
   canRestore: boolean;
   steps: RouteStep[];
   onStepClick: (loc: [number, number]) => void;
+  /** Per-stop breakdown; groups the directions by leg when the trip has stops. */
+  legs?: RouteLeg[];
   /** Mobile collapses directions behind the drawer handle; desktop always shows. */
   showDirections: boolean;
 }
@@ -88,6 +90,7 @@ export function RouteDrawer({
   canRestore,
   steps,
   onStepClick,
+  legs,
   showDirections,
 }: RouteDrawerProps) {
   const activeHint = TOOLS.find((t) => t.id === activeTool)?.hint;
@@ -200,7 +203,7 @@ export function RouteDrawer({
       )}
 
       {showDirections && (
-        <DirectionsPanel steps={steps} onStepClick={onStepClick} />
+        <DirectionsPanel steps={steps} onStepClick={onStepClick} legs={legs} />
       )}
     </>
   );

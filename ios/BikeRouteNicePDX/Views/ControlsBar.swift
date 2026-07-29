@@ -16,6 +16,9 @@ struct ControlsBar: View {
     /// routed trip (mirrors the web endpoint-clear confirm).
     @State private var showClearConfirm = false
 
+    /// The stop-list sheet (reorder / remove). Stops are ADDED from SearchSheet.
+    @State private var showStops = false
+
     var body: some View {
         VStack(spacing: 12) {
             // Draw mode is a "from-scratch canvas" that needs the map: collapse the
@@ -26,9 +29,11 @@ struct ControlsBar: View {
                 compactDrawControls
             } else {
                 pinChips
+                if !store.stops.isEmpty { stopsChip }
                 actionArea
             }
         }
+        .sheet(isPresented: $showStops) { StopsView() }
         .padding(16)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .padding(.horizontal, 12)
@@ -69,6 +74,35 @@ struct ControlsBar: View {
                 icon: "flag.checkered"
             )
         }
+    }
+
+    /// Summary of the trip's stops; tap to reorder or remove them. Only shown
+    /// when at least one exists, so a plain A→B trip's card is unchanged.
+    private var stopsChip: some View {
+        Button {
+            showStops = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "mappin.and.ellipse")
+                Text(store.stops.count == 1 ? "1 stop" : "\(store.stops.count) stops")
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .font(.subheadline.weight(.medium))
+            // #7c3aed violet — matches the numbered stop pins on the map.
+            .foregroundStyle(Color(red: 0.486, green: 0.227, blue: 0.929))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(
+                Color(red: 0.486, green: 0.227, blue: 0.929).opacity(0.12),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func pinChip(title: String, isSet: Bool, color: Color, icon: String) -> some View {

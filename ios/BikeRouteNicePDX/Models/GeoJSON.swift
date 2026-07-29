@@ -10,12 +10,24 @@ struct MatchRequest: Encodable {
     let follow: Bool?
 }
 
+/// One tagged intermediate point on the wire. `stop: true` marks a place the
+/// rider is actually going — it delimits a leg and earns an "arrive at" step;
+/// untagged entries are drag-to-reshape vias. Mirrors web `RouteWaypoint`.
+struct RouteWaypoint: Encodable {
+    let at: [Double] // [lng, lat]
+    let stop: Bool?
+    let label: String?
+}
+
 /// Request body for POST /route. Coordinates are [lng, lat]. `via` carries the
-/// ordered drag-to-reshape pass-through waypoints.
+/// ordered drag-to-reshape pass-through waypoints; `waypoints` is its tagged
+/// superset and supersedes it server-side when present.
 struct RouteRequest: Encodable {
     let from: [Double]
     let to: [Double]
     let via: [[Double]]
+    /// Tagged waypoints (stops + reshape vias). Omitted (nil) → server uses `via`.
+    let waypoints: [RouteWaypoint]?
     /// "comfort" | "balanced" | "fast" — maps to the server's use_roads. Omitted
     /// (nil) lets the server default to comfort.
     let preference: String?
@@ -46,6 +58,21 @@ struct RouteStep: Decodable, Equatable {
     /// TTS-ready clause, lowercase-first ("turn left onto Southeast Ankeny
     /// Street"). Optional — older server responses omit it.
     var spoken: String?
+    /// 0-based leg this step belongs to. Absent on plain A→B routes.
+    var leg_index: Int?
+}
+
+/// One stop-to-stop segment of a multi-stop trip; a trip with 2 stops has 3
+/// legs. Absent unless the request declared stops. Mirrors web `RouteLeg`.
+struct RouteLeg: Decodable, Equatable {
+    let distance_m: Double
+    let duration_s: Double
+    let greenway_coverage: Double
+    let calm_coverage: Double?
+    /// Label of the stop this leg ENDS at. Absent on the final leg.
+    let to_label: String?
+    let coord_start: Int
+    let coord_end: Int
 }
 
 /// Response from POST /route — geometry + totals + turn-by-turn steps.
@@ -58,6 +85,8 @@ struct RouteResponse: Decodable {
     let distance_m: Double
     let duration_s: Double
     let steps: [RouteStep]
+    /// Per-stop breakdown. Absent unless the request declared stops.
+    let legs: [RouteLeg]?
 }
 
 /// Request body for POST /corridor. Tap point A then point B on a street; the

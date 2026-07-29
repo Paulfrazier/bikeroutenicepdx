@@ -36,6 +36,29 @@ export interface RouteStep {
   /** TTS-ready clause, lowercase-first ("turn left onto Southeast Ankeny
    * Street"). Optional for backward compatibility — old clients ignore it. */
   spoken?: string | null;
+  /**
+   * Which leg of a multi-stop trip this step belongs to (0-based). Absent on
+   * plain A→B routes, where there is one leg and grouping is moot.
+   */
+  leg_index?: number;
+}
+
+/**
+ * One stop-to-stop segment of a multi-stop trip. Legs are delimited by the
+ * user's declared stops, so a trip with 2 stops has 3 legs. Emitted only when
+ * the request carried stops — a plain A→B route omits `legs` entirely.
+ */
+export interface RouteLeg {
+  distance_m: number;
+  duration_s: number;
+  greenway_coverage: number;
+  calm_coverage?: number;
+  /** Label of the stop this leg ENDS at. Absent on the final leg (the destination). */
+  to_label?: string;
+  /** Inclusive start index into `geometry.coordinates`. */
+  coord_start: number;
+  /** Inclusive end index into `geometry.coordinates`. */
+  coord_end: number;
 }
 
 export interface RouteResult {
@@ -48,6 +71,8 @@ export interface RouteResult {
    * Tracked separately from greenway_coverage; optional so other engines/
    * synthesizers that don't compute it can omit it. */
   calm_coverage?: number;
+  /** Per-stop breakdown. Absent unless the request declared stops. */
+  legs?: RouteLeg[];
 }
 
 // ---------------------------------------------------------------------------

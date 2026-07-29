@@ -10,7 +10,8 @@
  * Tapping a step fires onStepClick(location) so the map can fly there.
  */
 
-import type { RouteStep } from "../types";
+import { Fragment } from "react";
+import type { RouteStep, RouteLeg } from "../types";
 import { networkClassToVariant } from "../types";
 import type { LngLat } from "../types";
 
@@ -72,13 +73,25 @@ function fmtStepDist(m: number): string {
   return `${(m / 1000).toFixed(1)} km`;
 }
 
+function fmtLegDist(m: number): string {
+  return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`;
+}
+
+function fmtDuration(s: number): string {
+  const mins = Math.round(s / 60);
+  if (mins < 60) return `${mins} min`;
+  return `${Math.floor(mins / 60)} h ${mins % 60} min`;
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 interface DirectionsPanelProps {
   steps: RouteStep[];
   onStepClick: (location: LngLat) => void;
+  /** Per-stop breakdown. When present, steps are grouped under a leg header. */
+  legs?: RouteLeg[];
 }
 
-export function DirectionsPanel({ steps, onStepClick }: DirectionsPanelProps) {
+export function DirectionsPanel({ steps, onStepClick, legs }: DirectionsPanelProps) {
   if (steps.length === 0) {
     return (
       <div className="directions-panel directions-panel--empty">
@@ -89,8 +102,29 @@ export function DirectionsPanel({ steps, onStepClick }: DirectionsPanelProps) {
 
   return (
     <ol className="directions-panel" aria-label="Turn-by-turn directions">
-      {steps.map((step, i) => (
-        <li key={i} className="directions-panel__step">
+      {steps.map((step, i) => {
+        // A header opens each leg. Rendered inside the same <ol> so the list
+        // stays one continuous sequence for screen readers and keyboard order.
+        const leg = step.leg_index;
+        const startsLeg =
+          legs !== undefined &&
+          leg !== undefined &&
+          (i === 0 || steps[i - 1].leg_index !== leg);
+        const legInfo = leg !== undefined ? legs?.[leg] : undefined;
+        return (
+        <Fragment key={i}>
+        {startsLeg && legInfo && (
+          <li className="directions-panel__leg-header">
+            <span className="directions-panel__leg-title">
+              {leg === 0 ? "To" : "Then to"}{" "}
+              {legInfo.to_label ?? "your destination"}
+            </span>
+            <span className="directions-panel__leg-meta">
+              {fmtLegDist(legInfo.distance_m)} · {fmtDuration(legInfo.duration_s)}
+            </span>
+          </li>
+        )}
+        <li className="directions-panel__step">
           <button
             type="button"
             className="directions-panel__step-btn"
@@ -118,7 +152,9 @@ export function DirectionsPanel({ steps, onStepClick }: DirectionsPanelProps) {
             </span>
           </button>
         </li>
-      ))}
+        </Fragment>
+        );
+      })}
     </ol>
   );
 }

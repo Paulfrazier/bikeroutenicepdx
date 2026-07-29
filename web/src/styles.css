@@ -378,14 +378,57 @@ button {
   gap: 8px;
 }
 
+/* Wide enough for "Stop 1" so From/Stop/To labels stay in one column. */
 .endpoint-inputs__label {
-  width: 32px;
+  width: 46px;
   flex-shrink: 0;
   font-size: 12px;
   font-weight: 600;
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+/* Reorder / remove controls on a stop row, in place of the 📍 locate button. */
+.endpoint-inputs__stop-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+}
+
+.endpoint-inputs__stop-btn {
+  width: 20px;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.endpoint-inputs__stop-btn:hover:not(:disabled),
+.endpoint-inputs__stop-btn:focus-visible:not(:disabled) {
+  background: var(--color-green-dim);
+  color: var(--color-green);
+}
+
+.endpoint-inputs__stop-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.endpoint-inputs__stop-btn--remove:hover,
+.endpoint-inputs__stop-btn--remove:focus-visible {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+/* The empty "next stop" slot reads as secondary until it's used. */
+.endpoint-inputs__row--add .endpoint-inputs__label {
+  opacity: 0.5;
 }
 
 .endpoint-inputs__swap-row {
@@ -543,6 +586,33 @@ button {
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+/* ☆/★ save toggle, pinned to the right edge of every dropdown row. Amber to
+   match the saved-places FAB (Favorites.css). */
+.search-bar__star {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity var(--transition), color var(--transition);
+}
+
+.search-bar__star:hover,
+.search-bar__star:focus-visible {
+  opacity: 1;
+  color: #f59e0b;
+}
+
+.search-bar__star--on {
+  color: #f59e0b;
+  opacity: 1;
 }
 
 .search-bar__dropdown-name {
@@ -802,6 +872,34 @@ button {
 
 .directions-panel__step {
   border-bottom: 1px solid var(--color-border);
+}
+
+/* Leg header — opens each stop-to-stop section of a multi-stop trip. Violet to
+   match the numbered stop pins on the map (Map.tsx "route-stops"). */
+.directions-panel__leg-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px 6px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.directions-panel__leg-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #7c3aed;
+}
+
+.directions-panel__leg-meta {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .directions-panel__step-btn {

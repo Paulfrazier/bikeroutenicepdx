@@ -75,6 +75,10 @@ final class NavigationSession {
     private var announcedEntry: Set<Int> = []
     private var offRouteSince: Date?
     private var lastRerouteAt: Date?
+    /// Stops the rider has already arrived at this session. A reroute routes
+    /// through the ones NOT in here, so an errand list survives going off-route
+    /// without sending the rider back to a stop they've already made.
+    private var reachedStopIDs: Set<UUID> = []
     /// Last utterance — drives the long-straight reassurance prompt.
     private var lastSpokenAt = Date()
 
@@ -121,6 +125,7 @@ final class NavigationSession {
         traceLocations = []
         rideStartedAt = Date()
         arrived = false
+        reachedStopIDs = []
         isNavigating = true
         smoothedSpeed = 0
         hudDimmed = false
@@ -202,6 +207,7 @@ final class NavigationSession {
             timeRemaining = durationSeconds * (distanceRemaining / totalLength)
         }
         updateStepProgress()
+        updateReachedStops(loc)
         if !arrived, distanceRemaining < 15 {
             handleArrival()
             return
@@ -213,6 +219,25 @@ final class NavigationSession {
         evaluateCruise()
         liveActivityUpdate()
         watchUpdate()
+    }
+
+    /// Radius within which a stop counts as reached. Generous — the rider parks
+    /// and walks the last few metres, and a stop must never be re-inserted into
+    /// a reroute after they've already been there.
+    private static let stopReachedMeters: Double = 40
+
+    /// Mark stops the rider has arrived at. Only forward progress counts, so a
+    /// stop stays reached even if they wander back past it afterwards.
+    private func updateReachedStops(_ loc: CLLocationCoordinate2D) {
+        guard let store else { return }
+        for stop in store.stops where !reachedStopIDs.contains(stop.id) {
+            if GeoMath.distance(loc, stop.coordinate) <= Self.stopReachedMeters {
+                reachedStopIDs.insert(stop.id)
+                if let label = stop.label {
+                    say("Arriving at \(label).")
+                }
+            }
+        }
     }
 
     /// The next maneuver = first step whose arc-length is meaningfully ahead of us.
@@ -364,7 +389,11 @@ final class NavigationSession {
         isRerouting = true
         lastRerouteAt = Date()
         say("Off route — rerouting.")
-        if let fresh = await store.navReroute(from: from, to: end) {
+        // Stops the rider hasn't reached yet must survive the reroute — dropping
+        // them would silently cancel the rest of the errand. Reshape vias are
+        // NOT carried over: they shaped a line the rider has already left.
+        let remaining = store.stops.filter { !reachedStopIDs.contains($0.id) }
+        if let fresh = await store.navReroute(from: from, to: end, remainingStops: remaining) {
             load(route: fresh)
             // Re-anchor progress to the fresh geometry immediately.
             recomputeProgress()

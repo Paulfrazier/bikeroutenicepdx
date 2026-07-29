@@ -3,11 +3,12 @@
  * Mirrors the ratings/connectors FAB conventions (see .ratings-fab /
  * .connectors-fab). Reuses the shared .guide-* card chrome from styles.css. */
 
-/* Floating ⚙ button — stacked UNDER the connectors 🔧 FAB. The left FAB stack:
- * help (16), ratings (16+48), connectors (16+48+48), settings (16+48+48+48). */
+/* Floating ⚙ button — last in the left FAB stack: help (16), ratings (16+48),
+ * connectors (16+48+48), favorites (16+48+48+48), settings (16+48+48+48+48).
+ * Settings stays terminal, so anything new inserts ABOVE it (and shifts this). */
 .settings-fab {
   position: absolute;
-  top: calc(16px + 48px + 48px + 48px + env(safe-area-inset-top, 0px));
+  top: calc(16px + 48px + 48px + 48px + 48px + env(safe-area-inset-top, 0px));
   left: 16px;
   z-index: 15;
   width: 40px;

@@ -1,0 +1,123 @@
+/* Favorites.css — "Saved places" FAB + manage panel.
+ *
+ * Mirrors the connectors FAB/modal conventions (see Connectors.css). Co-located
+ * so the favorites UI is self-contained. Reuses the shared .guide-* card chrome
+ * from styles.css. Amber accent so the ★ reads as "saved" without competing with
+ * the teal connector overlay or the route colors. */
+
+/* Floating ★ button — stacked UNDER the 🔧 fixes FAB and ABOVE the ⚙ settings
+ * FAB (which Settings.css keeps terminal at 16+48*4). */
+.favorites-fab {
+  position: absolute;
+  top: calc(16px + 48px + 48px + 48px + env(safe-area-inset-top, 0px));
+  left: 16px;
+  z-index: 15;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: #f59e0b;
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: background var(--transition), transform var(--transition);
+}
+.favorites-fab:hover { background: var(--color-surface); transform: scale(1.05); }
+.favorites-fab:active { transform: scale(0.96); }
+/* Dot badge: the user has at least one saved place. */
+.favorites-fab__dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #f59e0b;
+  border: 1.5px solid var(--color-bg);
+}
+
+/* Manage panel body (reuses .guide-* card chrome). */
+.favorites-intro {
+  margin: 0 0 12px;
+  font-size: 0.9rem;
+  color: var(--color-text-muted, #64748b);
+}
+.favorites-empty {
+  margin: 8px 0;
+  font-size: 0.9rem;
+  color: var(--color-text-muted, #64748b);
+}
+.favorites-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.favorites-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.favorites-row:last-child { border-bottom: none; padding-bottom: 0; }
+.favorites-row__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.favorites-row__swatch {
+  flex: 0 0 auto;
+  width: 16px;
+  text-align: center;
+  color: #f59e0b;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+.favorites-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+/* The geocoded address behind the nickname — muted, never edited. */
+.favorites-row__place {
+  margin: 0 0 0 24px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted, #64748b);
+}
+.favorites-row__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-left: 24px;
+}
+.favorites-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.favorites-btn:hover { background: var(--color-surface); }
+.favorites-btn:disabled { opacity: 0.4; cursor: default; }
+.favorites-btn--danger { color: #dc2626; }
+
+/* The dropdown's ☆/★ affordance lives with the other .search-bar__* rules in
+ * styles.css, not here — this file owns the FAB and the manage panel only. */

@@ -5,6 +5,9 @@ import SwiftUI
 struct DirectionsSheet: View {
     let steps: [RouteStep]
     let distanceLabel: String
+    /// Per-stop breakdown; groups the steps under a leg header when the trip has
+    /// stops. Empty on a plain A→B route. Mirrors the web DirectionsPanel.
+    var legs: [RouteLeg] = []
 
     var body: some View {
         NavigationStack {
@@ -15,18 +18,61 @@ struct DirectionsSheet: View {
                         systemImage: "arrow.triangle.turn.up.right.diamond",
                         description: Text("Directions appear once a route is computed.")
                     )
-                } else {
+                } else if legs.isEmpty {
                     List {
                         ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
                             row(step)
                         }
                     }
                     .listStyle(.plain)
+                } else {
+                    List {
+                        ForEach(Array(legs.enumerated()), id: \.offset) { legIndex, leg in
+                            Section {
+                                ForEach(stepsInLeg(legIndex), id: \.offset) { entry in
+                                    row(entry.element)
+                                }
+                            } header: {
+                                legHeader(legIndex, leg)
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
                 }
             }
             .navigationTitle("Directions · \(distanceLabel)")
             .navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    /// Steps belonging to one leg, keeping their global offsets as stable ids.
+    private func stepsInLeg(_ legIndex: Int) -> [(offset: Int, element: RouteStep)] {
+        Array(steps.enumerated())
+            .filter { $0.element.leg_index == legIndex }
+            .map { (offset: $0.offset, element: $0.element) }
+    }
+
+    private func legHeader(_ index: Int, _ leg: RouteLeg) -> some View {
+        HStack {
+            Text(index == 0 ? "To \(legDestination(leg))" : "Then to \(legDestination(leg))")
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(Color(red: 0.486, green: 0.227, blue: 0.929)) // #7c3aed
+            Spacer()
+            Text("\(stepDistance(leg.distance_m)) · \(durationLabel(leg.duration_s))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .textCase(nil)
+    }
+
+    private func legDestination(_ leg: RouteLeg) -> String {
+        leg.to_label ?? "your destination"
+    }
+
+    private func durationLabel(_ seconds: Double) -> String {
+        let min = Int((seconds / 60).rounded())
+        if min < 60 { return "\(min) min" }
+        return "\(min / 60) h \(min % 60) min"
     }
 
     private func row(_ step: RouteStep) -> some View {

@@ -271,6 +271,48 @@ if (webRatings.size && iosRatings.size) {
   }
 }
 
+// ── Multi-stop cap: web ↔ iOS ↔ server ───────────────────────────────────────
+// The max-stops cap is enforced on all three surfaces. If the clients allow
+// more than the server does, the rider builds a trip that then 400s; if they
+// allow fewer, the cap is inconsistent and invisible. Cheap to assert, easy to
+// get wrong — exactly the drift multi-stop invites.
+
+const STOPS_WEB_FILE = path.join(REPO_ROOT, "web", "src", "geo.ts");
+const STOPS_IOS_FILE = path.join(
+  REPO_ROOT,
+  "ios",
+  "BikeRouteNicePDX",
+  "ViewModels",
+  "RouteStore.swift"
+);
+const STOPS_SERVER_FILE = path.join(REPO_ROOT, "server", "src", "routes", "route.ts");
+
+/** First `<decl> NAME = <number>` in `src`, or null when it can't be found. */
+function numericDecl(src: string, name: string): number | null {
+  const m = new RegExp(
+    `(?:const|let|var)\\s+${name}\\s*(?::\\s*\\w+)?\\s*=\\s*(\\d+)`
+  ).exec(src);
+  return m ? Number(m[1]) : null;
+}
+
+const maxStops: Record<string, number | null> = {
+  web: numericDecl(read(STOPS_WEB_FILE, "web geo.ts"), "MAX_STOPS"),
+  iOS: numericDecl(read(STOPS_IOS_FILE, "iOS RouteStore.swift"), "maxStops"),
+  server: numericDecl(read(STOPS_SERVER_FILE, "server route.ts"), "MAX_STOPS"),
+};
+
+for (const [surface, value] of Object.entries(maxStops)) {
+  if (value === null) errors.push(`could not locate the max-stops constant on ${surface}`);
+}
+const stopValues = Object.values(maxStops).filter((v): v is number => v !== null);
+if (stopValues.length === 3 && new Set(stopValues).size > 1) {
+  errors.push(
+    `max-stops mismatch: ${Object.entries(maxStops)
+      .map(([s, v]) => `${s}=${v}`)
+      .join("  ≠  ")}`
+  );
+}
+
 // ── Report ───────────────────────────────────────────────────────────────────
 
 if (errors.length) {
@@ -283,5 +325,5 @@ if (errors.length) {
 }
 
 console.log(
-  `✓ web ↔ iOS friendliness in sync (${CONSTANT_PAIRS.length} constants, ${webMap.size} route-class colors, ${webPresets.size} comfort presets, ${webRatings.size} street-rating classes)`,
+  `✓ web ↔ iOS friendliness in sync (${CONSTANT_PAIRS.length} constants, ${webMap.size} route-class colors, ${webPresets.size} comfort presets, ${webRatings.size} street-rating classes, max-stops=${maxStops.web})`,
 );

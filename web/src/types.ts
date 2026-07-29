@@ -21,11 +21,24 @@ export type RoutePreference = "ultra" | "comfort" | "balanced" | "fast";
  */
 export type RouteEngine = "prod" | "selfbuild";
 
+/**
+ * One tagged intermediate point on the wire. `stop: true` marks a place the
+ * rider is actually going — it delimits a leg and earns an "arrive at" step.
+ * Untagged entries are drag-to-reshape vias.
+ */
+export interface RouteWaypoint {
+  at: LngLat;
+  stop?: boolean;
+  label?: string;
+}
+
 export interface RouteRequest {
   from: LngLat;
   to: LngLat;
   /** Ordered pass-through points (Valhalla "through" waypoints) for reshaping. */
   via?: LngLat[];
+  /** Tagged superset of `via`. When present the server ignores `via`. */
+  waypoints?: RouteWaypoint[];
   /** Greenway-vs-speed tier. Omitted → server defaults to "comfort". */
   preference?: RoutePreference;
   /** Routing engine. Omitted → server defaults to "prod"; clients send "selfbuild". */
@@ -42,6 +55,15 @@ export interface Via {
   id: string;
   at: LngLat;
   precise: boolean;
+  /**
+   * What this point MEANS. "reshape" (the default when absent) is an anonymous
+   * shaping coordinate the user dragged the line through. "stop" is a place
+   * they're actually going: it shows a numbered marker, delimits a leg, and is
+   * ordered by its position in the list rather than by arc length.
+   */
+  kind?: "reshape" | "stop";
+  /** Display name for a stop, from the search result or favorite it came from. */
+  label?: string;
   /**
    * Set when this via belongs to a "route through this section" corridor — a
    * chain of pass-through points sampled along a street the user picked. All
@@ -112,6 +134,23 @@ export interface RouteStep {
   /** TTS-ready clause, lowercase-first ("turn left onto Southeast Ankeny
    * Street"). Optional — older server responses omit it. */
   spoken?: string | null;
+  /** 0-based leg this step belongs to. Absent on plain A→B routes. */
+  leg_index?: number;
+}
+
+/**
+ * One stop-to-stop segment of a multi-stop trip; a trip with 2 stops has 3 legs.
+ * Absent unless the request declared stops.
+ */
+export interface RouteLeg {
+  distance_m: number;
+  duration_s: number;
+  greenway_coverage: number;
+  calm_coverage?: number;
+  /** Label of the stop this leg ENDS at. Absent on the final leg. */
+  to_label?: string;
+  coord_start: number;
+  coord_end: number;
 }
 
 export interface RouteGeometry {
@@ -126,6 +165,8 @@ export interface RouteResponse {
   duration_s: number;
   /** 0–1 fraction of route on off_street | greenway | protected edges */
   greenway_coverage: number;
+  /** Per-stop breakdown. Absent unless the request declared stops. */
+  legs?: RouteLeg[];
 }
 
 // ─── /search ────────────────────────────────────────────────────────────────

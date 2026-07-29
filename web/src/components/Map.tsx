@@ -210,11 +210,31 @@ function penFeature(strokes: ManualSegment[]): GeoJSON.FeatureCollection {
 function waypointFeatures(vias: Via[]): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
-    features: vias.map((v) => ({
-      type: "Feature",
-      geometry: { type: "Point", coordinates: v.at },
-      properties: { precise: v.precise, corridor: !!v.corridorId },
-    })),
+    // Stops get their own always-visible numbered layer (see stopFeatures), so
+    // they must not also draw as an anonymous edit handle.
+    features: vias
+      .filter((v) => v.kind !== "stop")
+      .map((v) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: v.at },
+        properties: { precise: v.precise, corridor: !!v.corridorId },
+      })),
+  };
+}
+
+/** Numbered pins for user-declared stops — visible outside edit mode, unlike
+ * the reshape handles, because a stop is part of the trip rather than an edit. */
+function stopFeatures(vias: Via[]): GeoJSON.FeatureCollection {
+  let n = 0;
+  return {
+    type: "FeatureCollection",
+    features: vias
+      .filter((v) => v.kind === "stop")
+      .map((v) => ({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: v.at },
+        properties: { n: String(++n), label: v.label ?? "" },
+      })),
   };
 }
 
@@ -1182,6 +1202,38 @@ export function Map({
         },
       });
 
+      // ── Stop pins (numbered, always visible) ─────────────────────────────
+      // A stop is a place the rider is going, not an edit handle, so unlike
+      // "route-waypoints" this layer is never hidden with edit mode.
+      map.addSource("route-stops", {
+        type: "geojson",
+        data: emptyGeojson(),
+      });
+      map.addLayer({
+        id: "route-stops",
+        type: "circle",
+        source: "route-stops",
+        paint: {
+          "circle-radius": 11,
+          "circle-color": "#7c3aed",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2.5,
+        },
+      });
+      map.addLayer({
+        id: "route-stops-label",
+        type: "symbol",
+        source: "route-stops",
+        layout: {
+          "text-field": ["get", "n"],
+          "text-font": ["noto_sans_regular"],
+          "text-size": 13,
+          "text-allow-overlap": true,
+          "text-ignore-placement": true,
+        },
+        paint: { "text-color": "#ffffff" },
+      });
+
       // ── Corridor ("route through a section") preview ─────────────────────
       // Shown while the user is picking a section (tap A → tap B). A teal line
       // highlights the resolved street; circles mark the two tapped endpoints.
@@ -1234,6 +1286,11 @@ export function Map({
       let best = VERTEX_HIT_PX;
       let idx: number | null = null;
       viasRef.current.forEach((v, i) => {
+        // Stops are not edit handles. Dragging one would move the pin away from
+        // the address it's labelled with, and a tap would silently delete a
+        // destination — both are panel-row actions instead. This one guard
+        // covers move, delete and precise-toggle, which all route through here.
+        if (v.kind === "stop") return;
         const pt = map.project(v.at as LngLatLike);
         const d = Math.hypot(p.x - pt.x, p.y - pt.y);
         if (d <= best) {
@@ -2022,9 +2079,12 @@ export function Map({
     if (route) {
       const coords = route.geometry.coordinates;
       displayCoordsRef.current = coords;
-      // Fit map to route bounds ONLY for a fresh route (no vias). A reshape
-      // re-route has vias set — refitting then would yank the viewport.
-      if (coords.length > 1 && viasRef.current.length === 0) {
+      // Fit map to route bounds ONLY when nothing has been hand-edited. A
+      // reshape re-route has vias set — refitting then would yank the viewport
+      // mid-drag. Stops are exempt: adding one changes where the trip GOES, so
+      // the new geometry should be brought into view like any fresh route.
+      const handEdited = viasRef.current.some((v) => v.kind !== "stop");
+      if (coords.length > 1 && !handEdited) {
         const bounds = coords.reduce(
           (b, c) => b.extend(c as LngLatLike),
           new maplibregl.LngLatBounds(coords[0] as LngLatLike, coords[0] as LngLatLike)
@@ -2067,6 +2127,10 @@ export function Map({
     (
       map.getSource("route-waypoints") as maplibregl.GeoJSONSource | undefined
     )?.setData(waypointFeatures(vias));
+    // Stop pins live in their own source and follow the same list.
+    (
+      map.getSource("route-stops") as maplibregl.GeoJSONSource | undefined
+    )?.setData(stopFeatures(vias));
   }, [vias]);
 
   // ── Toggle the waypoint handles' visibility with the editing modes ──

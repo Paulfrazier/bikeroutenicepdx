@@ -101,6 +101,59 @@ export function pointAtArc(
   ];
 }
 
+/** Closest point to `p` on segment a→b, computed in a local metric frame. */
+function closestPointOnSegment(
+  p: [number, number],
+  a: [number, number],
+  b: [number, number]
+): [number, number] {
+  const mLng = metersPerDegLng(p[1]);
+  const ax = (a[0] - p[0]) * mLng;
+  const ay = (a[1] - p[1]) * M_PER_DEG_LAT;
+  const bx = (b[0] - p[0]) * mLng;
+  const by = (b[1] - p[1]) * M_PER_DEG_LAT;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  let t = lenSq === 0 ? 0 : (-ax * dx - ay * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+  return [
+    p[0] + (ax + t * dx) / mLng,
+    p[1] + (ay + t * dy) / M_PER_DEG_LAT,
+  ];
+}
+
+/**
+ * Where `target` falls ALONG the polyline, as arc length (m) from the start.
+ *
+ * Mirrors the web's `geo.ts arcLengthAt`, with one addition: `minArc` floors the
+ * search so a sequence of points is resolved monotonically. That matters for
+ * multi-stop routes — on a loop or any self-intersecting route the same
+ * coordinate projects onto two places on the line, and without the floor a later
+ * stop could land before an earlier one and invert the legs.
+ */
+export function arcLengthAt(
+  target: [number, number],
+  coords: [number, number][],
+  arcs: number[],
+  minArc = 0
+): number {
+  if (coords.length < 2) return 0;
+  let bestDist = Infinity;
+  let bestArc = minArc;
+  for (let i = 0; i < coords.length - 1; i++) {
+    // Skip segments that end before the floor — they belong to an earlier stop.
+    if (arcs[i + 1] < minArc) continue;
+    const proj = closestPointOnSegment(target, coords[i], coords[i + 1]);
+    const d = distMeters(target, proj);
+    if (d < bestDist) {
+      bestDist = d;
+      bestArc = Math.max(minArc, arcs[i] + distMeters(coords[i], proj));
+    }
+  }
+  return bestArc;
+}
+
 function classifyTurn(deg: number): string {
   const side = deg < 0 ? "left" : "right";
   const a = Math.abs(deg);

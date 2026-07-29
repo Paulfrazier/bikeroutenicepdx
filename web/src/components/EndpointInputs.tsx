@@ -1,14 +1,21 @@
 /**
- * EndpointInputs.tsx — stacked start/end search bars with:
- *   - Typeahead from /search
- *   - "📍 Use my location" button
- *   - "↕" swap button
- *   - Receives map-click updates via fromMapClick / toMapClick props
+ * EndpointInputs.tsx — the trip's ordered address rows:
+ *
+ *     From
+ *      ↕      (swap)
+ *     Stop 1  … Stop N   (optional, reorder / remove)
+ *     + Add stop
+ *     To
+ *
+ * Each row is a SearchBar with typeahead from /search, saved places, and a
+ * "📍 Use my location" button. Stops are pass-through places the rider is
+ * actually going; the server splits the trip into legs at each one.
  */
 
 import { useCallback } from "react";
 import { SearchBar } from "./SearchBar";
-import type { LngLat, SearchResult } from "../types";
+import { MAX_STOPS } from "../geo";
+import type { LngLat, SearchResult, Via } from "../types";
 
 interface EndpointInputsProps {
   fromLabel: string;
@@ -21,6 +28,12 @@ interface EndpointInputsProps {
   /** True when a route is currently shown — clearing an endpoint will wipe it,
    *  so the ✕ button asks for confirmation first. */
   hasRoute?: boolean;
+  /** Ordered user stops between From and To. */
+  stops: Via[];
+  onAddStop: (result: SearchResult) => void;
+  onUpdateStop: (id: string, result: SearchResult) => void;
+  onRemoveStop: (id: string) => void;
+  onMoveStop: (id: string, delta: number) => void;
 }
 
 export function EndpointInputs({
@@ -32,6 +45,11 @@ export function EndpointInputs({
   fromValue,
   toValue,
   hasRoute = false,
+  stops,
+  onAddStop,
+  onUpdateStop,
+  onRemoveStop,
+  onMoveStop,
 }: EndpointInputsProps) {
   const confirmClearMessage = hasRoute ? "Clear the current route?" : undefined;
   const handleFromSelect = useCallback(
@@ -94,6 +112,72 @@ export function EndpointInputs({
           ↕
         </button>
       </div>
+
+      {stops.map((stop, i) => (
+        <div className="endpoint-inputs__row" key={stop.id}>
+          <label
+            className="endpoint-inputs__label"
+            htmlFor={`search-stop-${stop.id}`}
+          >
+            Stop {i + 1}
+          </label>
+          <SearchBar
+            id={`search-stop-${stop.id}`}
+            value={stop.label ?? ""}
+            placeholder="Add a stop"
+            onSelect={(r) => onUpdateStop(stop.id, r)}
+            onClear={() => onRemoveStop(stop.id)}
+            aria-label={`Stop ${i + 1} address`}
+          />
+          <div className="endpoint-inputs__stop-actions">
+            <button
+              type="button"
+              className="endpoint-inputs__stop-btn"
+              aria-label={`Move stop ${i + 1} up`}
+              disabled={i === 0}
+              onClick={() => onMoveStop(stop.id, -1)}
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              className="endpoint-inputs__stop-btn"
+              aria-label={`Move stop ${i + 1} down`}
+              disabled={i === stops.length - 1}
+              onClick={() => onMoveStop(stop.id, 1)}
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              className="endpoint-inputs__stop-btn endpoint-inputs__stop-btn--remove"
+              aria-label={`Remove stop ${i + 1}`}
+              onClick={() => onRemoveStop(stop.id)}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {stops.length < MAX_STOPS && (
+        <div className="endpoint-inputs__row endpoint-inputs__row--add">
+          <label className="endpoint-inputs__label" htmlFor="search-add-stop">
+            Stop {stops.length + 1}
+          </label>
+          <SearchBar
+            // Remounting on count change clears the box after each add, so the
+            // row is always an empty "next stop" slot.
+            key={`add-stop-${stops.length}`}
+            id="search-add-stop"
+            value=""
+            placeholder="+ Add a stop"
+            onSelect={onAddStop}
+            onClear={() => {}}
+            aria-label="Add a stop"
+          />
+        </div>
+      )}
 
       <div className="endpoint-inputs__row">
         <label className="endpoint-inputs__label" htmlFor="search-to">

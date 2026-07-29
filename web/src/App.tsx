@@ -27,6 +27,7 @@ import {
   useConnectorsVersion,
 } from "./components/Connectors";
 import { addConnector } from "./connectors";
+import { FavoritesButton, FavoritesPanel } from "./components/Favorites";
 import { RoutePreferenceSelector } from "./components/RoutePreferenceSelector";
 import {
   loadRoutePreference,
@@ -51,6 +52,7 @@ import {
   applyManualSegments,
   assembleDrawnRoute,
   MAX_VIAS,
+  MAX_STOPS,
 } from "./geo";
 import { fetchCorridor } from "./api";
 import type {
@@ -60,6 +62,8 @@ import type {
   CorridorResponse,
   RoutePreference,
   RouteEngine,
+  RouteWaypoint,
+  SearchResult,
 } from "./types";
 
 // Monotonic id source for waypoints — gives each via a stable identity so
@@ -73,6 +77,33 @@ const nextCorridorId = () => `corr-${++corridorIdCounter}`;
 // A snapped insert landing within this many meters of an existing waypoint is
 // treated as a duplicate; we keep the raw drop point so two pins never collapse.
 const VIA_DEDUPE_M = 8;
+
+/**
+ * Constrain an arc-length-derived insertion index to the leg it belongs to.
+ *
+ * Reshape vias are ordered by arc length; stops are ordered by the user's list.
+ * Mixing both in one array only stays consistent if a reshape can never cross a
+ * stop — otherwise dragging the line near stop 2 could re-order the trip. This
+ * finds the stops bracketing `key` and clamps the index between them.
+ */
+function clampBetweenStops(
+  prev: Via[],
+  insertAt: number,
+  key: number,
+  routeCoords: LngLat[]
+): number {
+  let lower = 0;
+  let upper = prev.length;
+  for (let i = 0; i < prev.length; i++) {
+    if (prev[i].kind !== "stop") continue;
+    if (arcLengthAt(prev[i].at, routeCoords) <= key) lower = i + 1;
+    else {
+      upper = i;
+      break;
+    }
+  }
+  return Math.max(lower, Math.min(insertAt, upper));
+}
 
 export default function App() {
   // ── Endpoints ──────────────────────────────────────────────────────────────
@@ -151,6 +182,8 @@ export default function App() {
   // is global, rendered as a teal overlay, and auto-spliced into routes that pass
   // near both its ends (see activeCoords + connectorSegmentsForRoute).
   const [connectorsPanelOpen, setConnectorsPanelOpen] = useState(false);
+  // The ★ panel curates saved places; picking one happens in the search dropdown.
+  const [favoritesPanelOpen, setFavoritesPanelOpen] = useState(false);
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const [connectorDrawMode, setConnectorDrawMode] = useState(false);
   const connectors = useConnectors();
@@ -328,18 +361,29 @@ export default function App() {
 
   // While Build is active the waypoints are previewed as straight lines and are
   // NOT routed; Finish flips buildMode off, which lets them feed the router.
-  const viaCoords = useMemo(
-    () => (buildMode ? [] : vias.map((v) => v.at)),
+  const routeWaypoints = useMemo<RouteWaypoint[]>(
+    () =>
+      buildMode
+        ? []
+        : vias.map((v) =>
+            v.kind === "stop"
+              ? { at: v.at, stop: true, label: v.label }
+              : { at: v.at }
+          ),
     [vias, buildMode]
   );
   const { route, loading: routeLoading, error: routeError } = useRoute(
     from,
     to,
-    viaCoords,
+    routeWaypoints,
     preference,
     engine
   );
-  const reshaped = vias.length > 0;
+  /** The user's declared stops, in trip order. */
+  const stops = useMemo(() => vias.filter((v) => v.kind === "stop"), [vias]);
+  // "Reshaped" means hand-edited geometry — a named stop is a destination, not
+  // an edit, so it must not light up the reshape/reset affordances.
+  const reshaped = vias.some((v) => v.kind !== "stop");
 
   // ── Live turn-by-turn navigation (foreground; iOS has the native version) ──
   const nav = useNavigation();
@@ -415,6 +459,10 @@ export default function App() {
       for (const v of prev) {
         if (arcLengthAt(v.at, routeCoords) <= key) insertAt++;
       }
+      // Stops are ordered by the user's list, not by arc length, so a reshape
+      // must land INSIDE the leg it was dragged in — never hop a stop. Clamp to
+      // the window bounded by the stops on either side of the arc position.
+      insertAt = clampBetweenStops(prev, insertAt, key, routeCoords);
       const next = prev.slice();
       next.splice(Math.min(insertAt, next.length), 0, {
         id: nextViaId(),
@@ -758,7 +806,64 @@ export default function App() {
     setFromLabel(toLabel);
     setTo(from);
     setToLabel(fromLabel);
+    // Riding the trip backwards visits everything in reverse — stops included.
+    // (Before stops existed this array was left alone, which was already wrong
+    // for reshape vias; with named stops it would be visibly wrong.)
+    setVias((prev) => prev.slice().reverse());
   }
+
+  // ── Stops (user-declared places along the trip) ────────────────────────────
+  // A stop lives in the same ordered array as reshape vias — see the `kind`
+  // field on Via. Adding one appends before the destination; the router treats
+  // it as a pass-through and the server splits the trip into legs there.
+  const addStop = useCallback((result: SearchResult) => {
+    setVias((prev) => {
+      if (prev.filter((v) => v.kind === "stop").length >= MAX_STOPS) return prev;
+      return [
+        ...prev,
+        {
+          id: nextViaId(),
+          at: [result.lng, result.lat] as LngLat,
+          // Pinned exactly where the geocoder put it — a stop is an address,
+          // never something to re-snap onto a nearby bike path.
+          precise: true,
+          kind: "stop",
+          label: result.name,
+        },
+      ];
+    });
+  }, []);
+
+  const updateStop = useCallback((id: string, result: SearchResult) => {
+    setVias((prev) =>
+      prev.map((v) =>
+        v.id === id
+          ? { ...v, at: [result.lng, result.lat] as LngLat, label: result.name }
+          : v
+      )
+    );
+  }, []);
+
+  const removeStop = useCallback((id: string) => {
+    setVias((prev) => prev.filter((v) => v.id !== id));
+  }, []);
+
+  /** Move a stop within the stop sequence, carrying its leg's reshape vias along. */
+  const moveStop = useCallback((id: string, delta: number) => {
+    setVias((prev) => {
+      const stopIdx = prev.map((v, i) => (v.kind === "stop" ? i : -1)).filter((i) => i >= 0);
+      const pos = stopIdx.findIndex((i) => prev[i].id === id);
+      const target = pos + delta;
+      if (pos === -1 || target < 0 || target >= stopIdx.length) return prev;
+      // Reorder stops only; reshape vias are geometry for a leg that no longer
+      // exists once its stops move, so they're dropped rather than left dangling
+      // in the wrong place.
+      const stopsOnly = stopIdx.map((i) => prev[i]);
+      const [moved] = stopsOnly.splice(pos, 1);
+      stopsOnly.splice(target, 0, moved);
+      return stopsOnly;
+    });
+  }, []);
 
   // ── Help: first-run tour + reopenable gesture guide ────────────────────────
   const [tourOpen, closeTour, replayTour] = useFirstRunTour();
@@ -817,6 +922,11 @@ export default function App() {
           }}
           onSwap={handleSwap}
           hasRoute={hasRoute}
+          stops={stops}
+          onAddStop={addStop}
+          onUpdateStop={updateStop}
+          onRemoveStop={removeStop}
+          onMoveStop={moveStop}
         />
 
         <RoutePreferenceSelector
@@ -859,6 +969,7 @@ export default function App() {
               onTogglePause={() => setDrawPaused((p) => !p)}
               canRestore={!!preResetSnapshot}
               steps={drawnStrokes.length > 0 ? [] : route.steps}
+              legs={drawnStrokes.length > 0 ? undefined : route.legs}
               onStepClick={handleStepClick}
               showDirections
             />
@@ -931,6 +1042,10 @@ export default function App() {
 
         {!nav.navigating && (
           <ConnectorsButton onClick={() => setConnectorsPanelOpen(true)} />
+        )}
+
+        {!nav.navigating && (
+          <FavoritesButton onClick={() => setFavoritesPanelOpen(true)} />
         )}
 
         {!nav.navigating && (
@@ -1069,6 +1184,7 @@ export default function App() {
                 onTogglePause={() => setDrawPaused((p) => !p)}
                 canRestore={!!preResetSnapshot}
                 steps={drawnStrokes.length > 0 ? [] : route.steps}
+              legs={drawnStrokes.length > 0 ? undefined : route.legs}
                 onStepClick={handleStepClick}
                 showDirections={drawerExpanded}
               />
@@ -1089,6 +1205,12 @@ export default function App() {
         open={connectorsPanelOpen}
         onClose={() => setConnectorsPanelOpen(false)}
         onDrawOnMap={enterConnectorDraw}
+      />
+
+      {/* ── Saved places panel ── */}
+      <FavoritesPanel
+        open={favoritesPanelOpen}
+        onClose={() => setFavoritesPanelOpen(false)}
       />
 
       {/* ── Settings panel ── */}

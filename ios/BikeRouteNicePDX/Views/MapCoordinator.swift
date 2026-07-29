@@ -475,12 +475,21 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             map.removeAnnotations(viaAnnotations)
             viaAnnotations = []
         }
-        guard store.isEditMode || store.isBuildMode || store.isCorridorMode else { return }
+        // Stops are part of the trip, not an edit, so they show in every mode —
+        // unlike reshape handles, which only appear while editing.
+        var stopNumber = 0
+        let editing = store.isEditMode || store.isBuildMode || store.isCorridorMode
         for via in store.vias {
+            if via.kind == .stop {
+                stopNumber += 1
+            } else if !editing {
+                continue
+            }
             let annotation = ViaAnnotation()
             annotation.coordinate = via.coordinate
             annotation.precise = via.precise
             annotation.corridor = via.corridorId != nil
+            annotation.stopNumber = via.kind == .stop ? stopNumber : nil
             map.addAnnotation(annotation)
             viaAnnotations.append(annotation)
         }
@@ -1082,6 +1091,12 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
         var best = Self.vertexGrabPx
         var idx: Int?
         for (i, via) in store.vias.enumerated() {
+            // Stops are not edit handles. Dragging one would move the pin away
+            // from the address it's labelled with, and a tap would silently
+            // delete a destination — both are stop-list actions instead. This
+            // one guard covers move, delete and precise-toggle, which all route
+            // through here. Mirrors the web `nearestViaIndexPx` guard.
+            if via.kind == .stop { continue }
             let p = map.convert(via.coordinate, toPointTo: map)
             let d = hypot(point.x - p.x, point.y - p.y)
             if d <= best { best = d; idx = i }
@@ -1403,6 +1418,41 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
         if annotation is MKUserLocation { return nil }
 
+        // Stop pin: a larger violet numbered disc. Distinct from the reshape
+        // handles below so a destination never reads as an edit handle, and it
+        // uses its own reuse identifier so a recycled view can't inherit handle
+        // styling (or a stale number label).
+        if let via = annotation as? ViaAnnotation, let number = via.stopNumber {
+            let id = "stop"
+            let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
+                ?? MKAnnotationView(annotation: annotation, reuseIdentifier: id)
+            view.annotation = annotation
+            let size: CGFloat = 24
+            view.frame = CGRect(x: 0, y: 0, width: size, height: size)
+            view.backgroundColor = .clear
+            view.layer.cornerRadius = size / 2
+            // #7c3aed violet — matches the web "route-stops" layer.
+            view.layer.backgroundColor = UIColor(red: 0.486, green: 0.227, blue: 0.929, alpha: 1).cgColor
+            view.layer.borderColor = UIColor.white.cgColor
+            view.layer.borderWidth = 2.5
+            view.canShowCallout = false
+            view.isUserInteractionEnabled = false
+
+            let labelTag = 991
+            let label = view.viewWithTag(labelTag) as? UILabel ?? {
+                let l = UILabel(frame: CGRect(x: 0, y: 0, width: size, height: size))
+                l.tag = labelTag
+                l.textAlignment = .center
+                l.textColor = .white
+                l.font = .systemFont(ofSize: 13, weight: .bold)
+                view.addSubview(l)
+                return l
+            }()
+            label.frame = CGRect(x: 0, y: 0, width: size, height: size)
+            label.text = "\(number)"
+            return view
+        }
+
         // Waypoint handle: a small emerald dot with a white ring. Non-interactive
         // so touches pass through to the edit-pan / tap gestures on the line.
         if let via = annotation as? ViaAnnotation {
@@ -1593,6 +1643,10 @@ final class ViaAnnotation: MKPointAnnotation {
     /// True when this handle belongs to a "route through a section" corridor —
     /// rendered teal (like the web) to read as part of a picked section.
     var corridor = false
+    /// 1-based position when this is a rider-declared STOP rather than a reshape
+    /// handle — rendered as a larger violet numbered pin (mirrors the web
+    /// "route-stops" layer) and always visible, not just while editing.
+    var stopNumber: Int?
 }
 
 /// A tapped endpoint (A or B) of a "route through a section" pick. Subclass so

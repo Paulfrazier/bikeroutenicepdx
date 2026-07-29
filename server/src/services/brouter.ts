@@ -17,7 +17,7 @@
 
 import { config } from "../config.js";
 import { ValhallaError, traceRouteSteps } from "./valhalla.js";
-import type { RouteResult, RouteStep } from "./valhalla.js";
+import type { RouteResult, RouteStep, RouteLeg } from "./valhalla.js";
 import {
   classifyPoint,
   isGreenwayEquivalent,
@@ -25,7 +25,13 @@ import {
   CALM_CLASSES,
   type NetworkClass,
 } from "./greenway-coverage.js";
-import { detectTurns, cumulativeArcs, pointAtArc, bearingDeg } from "./turn-detect.js";
+import {
+  detectTurns,
+  cumulativeArcs,
+  pointAtArc,
+  bearingDeg,
+  arcLengthAt,
+} from "./turn-detect.js";
 import {
   composeInstruction,
   spokenClause,
@@ -148,12 +154,25 @@ export async function fetchBrouterGeometry(
   return { coords, distance_m, duration_s };
 }
 
+/**
+ * A user-declared stop in a multi-stop trip. Distinct from a drag-to-reshape
+ * via: a stop is somewhere the rider is actually going, so it delimits a leg and
+ * gets its own "arrive at" announcement. The coordinate must also appear in
+ * `vias` (in the same order) — that's what BRouter routes through; `stops` only
+ * says which of those points are meaningful to the rider.
+ */
+export interface RouteStop {
+  at: [number, number]; // [lng, lat]
+  label?: string;
+}
+
 export async function getRouteBrouter(
   from: [number, number], // [lng, lat]
   to: [number, number], // [lng, lat]
   vias: [number, number][] = [],
   preference: string = "comfort",
-  engine: string = "prod"
+  engine: string = "prod",
+  stops: RouteStop[] = []
 ): Promise<RouteResult> {
   const profile = PROFILE_BY_PREFERENCE[preference] ?? "safety";
   const { coords, distance_m, duration_s } = await fetchBrouterGeometry(
@@ -165,10 +184,26 @@ export async function getRouteBrouter(
     resolveBrouterUrl(engine)
   );
 
+  const arcs = cumulativeArcs(coords);
+  const totalArc = arcs[arcs.length - 1];
+
+  // Where each stop falls along the returned line. Resolved monotonically so a
+  // loop trip (from === to) can't invert its legs. A stop is a pass-through
+  // point, so the line provably runs through/beside it — projection is exact
+  // enough that per-leg distance matches the same arc model the per-step
+  // distances already use.
+  const stopArcs: number[] = [];
+  let floor = 0;
+  for (const s of stops) {
+    const arc = Math.min(arcLengthAt(s.at, coords, arcs, floor), totalArc);
+    stopArcs.push(arc);
+    floor = arc;
+  }
+
   // Coverage is always computed from BRouter's geometry. Steps prefer named
   // turn-by-turn from Valhalla trace_route; fall back to geometry-detected
   // turns with bike-network street names.
-  const fallback = synthesizeSteps(coords, duration_s);
+  const fallback = synthesizeSteps(coords, duration_s, stopArcs);
   let steps: RouteStep[] = fallback.steps;
   try {
     const named = await traceRouteSteps(coords);
@@ -178,9 +213,13 @@ export async function getRouteBrouter(
   }
   const totalForCoverage = distance_m > 0 ? distance_m : sumLength(coords);
 
-  return {
+  const result: RouteResult = {
     geometry: { type: "LineString", coordinates: coords },
-    steps,
+    // Grouping runs over whichever step source won, so Valhalla-named and
+    // synthesized steps get identical leg semantics.
+    steps: stopArcs.length
+      ? applyLegs(steps, coords, arcs, stopArcs, stops)
+      : steps,
     distance_m,
     duration_s,
     greenway_coverage:
@@ -188,6 +227,144 @@ export async function getRouteBrouter(
     calm_coverage:
       totalForCoverage > 0 ? fallback.calmMeters / totalForCoverage : 0,
   };
+
+  if (stopArcs.length) {
+    result.legs = buildLegs(
+      coords,
+      arcs,
+      stopArcs,
+      stops,
+      distance_m,
+      duration_s,
+      fallback.legGreenwayMeters,
+      fallback.legCalmMeters
+    );
+  }
+
+  return result;
+}
+
+/** First vertex index at or after arc position `arc`. */
+function vertexIndexAtArc(arcs: number[], arc: number): number {
+  let lo = 0;
+  let hi = arcs.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (arcs[mid] < arc) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/**
+ * Stamp `leg_index` on every step and splice in a zero-length "Arrive at X"
+ * step at each stop, mirroring the terminal "Arrive at your destination".
+ *
+ * Steps are matched to legs by arc position rather than by index, so this works
+ * for Valhalla-named steps (which have no relationship to BRouter's vertices)
+ * exactly as it does for synthesized ones.
+ */
+function applyLegs(
+  steps: RouteStep[],
+  coords: [number, number][],
+  arcs: number[],
+  stopArcs: number[],
+  stops: RouteStop[]
+): RouteStep[] {
+  const out: RouteStep[] = [];
+  let leg = 0;
+  let floor = 0;
+  for (const step of steps) {
+    const arc = arcLengthAt(step.location, coords, arcs, floor);
+    floor = arc;
+    // Close out every leg this step has moved past (a leg can be empty if two
+    // stops resolve to nearly the same point).
+    while (leg < stopArcs.length && arc > stopArcs[leg] + 1) {
+      out.push(arriveStep(stops[leg], coords, arcs, stopArcs[leg], leg));
+      leg++;
+    }
+    out.push({ ...step, leg_index: leg });
+  }
+  // Any stops after the last step (shouldn't happen, but keeps legs complete).
+  while (leg < stopArcs.length) {
+    out.push(arriveStep(stops[leg], coords, arcs, stopArcs[leg], leg));
+    leg++;
+  }
+  return out;
+}
+
+function arriveStep(
+  stop: RouteStop,
+  coords: [number, number][],
+  arcs: number[],
+  arc: number,
+  legIndex: number
+): RouteStep {
+  const label = stop.label?.trim();
+  const where = label ? ` at ${label}` : "";
+  return {
+    instruction: `Arrive${where}`,
+    distance_m: 0,
+    duration_s: 0,
+    street_name: label ?? null,
+    maneuver_type: "waypoint",
+    location: pointAtArc(coords, arcs, arc),
+    bicycle_network_class: null,
+    spoken: `arrive${where ? ` at ${label}` : ""}`,
+    leg_index: legIndex,
+  };
+}
+
+/**
+ * Per-leg distance/duration/coverage. Distance and duration are apportioned from
+ * BRouter's authoritative totals by arc share — the same model `synthesizeSteps`
+ * already uses for per-step duration — with the final leg absorbing the rounding
+ * remainder so the legs always sum to the trip total exactly.
+ */
+function buildLegs(
+  coords: [number, number][],
+  arcs: number[],
+  stopArcs: number[],
+  stops: RouteStop[],
+  totalDistance: number,
+  totalDuration: number,
+  legGreenwayMeters: number[],
+  legCalmMeters: number[]
+): RouteLeg[] {
+  const totalArc = arcs[arcs.length - 1];
+  const bounds = [0, ...stopArcs, totalArc];
+  const legs: RouteLeg[] = [];
+  let distUsed = 0;
+  let durUsed = 0;
+
+  for (let i = 0; i < bounds.length - 1; i++) {
+    const startArc = bounds[i];
+    const endArc = bounds[i + 1];
+    const isLast = i === bounds.length - 2;
+    const share = totalArc > 0 ? (endArc - startArc) / totalArc : 0;
+    const distance_m = isLast
+      ? Math.max(0, totalDistance - distUsed)
+      : Math.round(totalDistance * share);
+    const duration_s = isLast
+      ? Math.max(0, totalDuration - durUsed)
+      : Math.round(totalDuration * share);
+    distUsed += distance_m;
+    durUsed += duration_s;
+
+    const spanMeters = endArc - startArc;
+    legs.push({
+      distance_m,
+      duration_s,
+      greenway_coverage:
+        spanMeters > 0 ? (legGreenwayMeters[i] ?? 0) / spanMeters : 0,
+      calm_coverage: spanMeters > 0 ? (legCalmMeters[i] ?? 0) / spanMeters : 0,
+      // The last leg ends at the destination, which has no stop label.
+      ...(isLast ? {} : { to_label: stops[i]?.label }),
+      coord_start: vertexIndexAtArc(arcs, startArc),
+      coord_end: isLast ? coords.length - 1 : vertexIndexAtArc(arcs, endArc),
+    });
+  }
+  return legs;
 }
 
 function sumLength(coords: [number, number][]): number {
@@ -221,21 +398,35 @@ function compassWord(deg: number): string {
  */
 function synthesizeSteps(
   coords: [number, number][],
-  durationS: number
+  durationS: number,
+  stopArcs: number[] = []
 ): {
   steps: RouteStep[];
   greenwayMeters: number;
   calmMeters: number;
+  /** Greenway metres per leg (index-aligned with `stopArcs.length + 1` legs). */
+  legGreenwayMeters: number[];
+  legCalmMeters: number[];
 } {
   const steps: RouteStep[] = [];
   let greenwayMeters = 0;
   let calmMeters = 0;
-  if (coords.length < 2) return { steps, greenwayMeters, calmMeters };
+  const legCount = stopArcs.length + 1;
+  const legGreenwayMeters = new Array<number>(legCount).fill(0);
+  const legCalmMeters = new Array<number>(legCount).fill(0);
+  if (coords.length < 2)
+    return { steps, greenwayMeters, calmMeters, legGreenwayMeters, legCalmMeters };
+
+  const arcs = cumulativeArcs(coords);
+  const total = arcs[arcs.length - 1];
 
   // Per-segment PBOT classification — identical math to the coverage metric's
   // original loop; classes are kept so each step can report its dominant class.
+  // Per-leg coverage rides along in the same pass (the classifyPoint calls are
+  // the expensive part; re-walking the geometry to split them would double it).
   const segLens = new Array<number>(coords.length - 1).fill(0);
   const segCls = new Array<NetworkClass | null>(coords.length - 1).fill(null);
+  let segLeg = 0;
   for (let i = 0; i < coords.length - 1; i++) {
     const a = coords[i];
     const b = coords[i + 1];
@@ -248,12 +439,18 @@ function synthesizeSteps(
       classifyPoint(a[0], a[1]) ??
       classifyPoint(b[0], b[1]);
     segCls[i] = cls;
-    if (isGreenwayEquivalent(cls)) greenwayMeters += segLen;
-    if (cls !== null && CALM_CLASSES.has(cls)) calmMeters += segLen;
+    // Attribute the segment to whichever leg contains its midpoint.
+    const midArc = arcs[i] + segLen / 2;
+    while (segLeg < stopArcs.length && midArc > stopArcs[segLeg]) segLeg++;
+    if (isGreenwayEquivalent(cls)) {
+      greenwayMeters += segLen;
+      legGreenwayMeters[segLeg] += segLen;
+    }
+    if (cls !== null && CALM_CLASSES.has(cls)) {
+      calmMeters += segLen;
+      legCalmMeters[segLeg] += segLen;
+    }
   }
-
-  const arcs = cumulativeArcs(coords);
-  const total = arcs[arcs.length - 1];
 
   /** Length-weighted dominant class over segments [i0, i1). */
   const stretchClass = (i0: number, i1: number): NetworkClass | null => {
@@ -308,6 +505,15 @@ function synthesizeSteps(
     prevCls = segCls[i];
     seenFirst = true;
   }
+  // A leg must never start mid-step: force a boundary at every stop so the
+  // first instruction after a stop describes leaving it, not a stretch that
+  // straddles it. `applyLegs` then has a clean step to attach the new leg to.
+  for (const arc of stopArcs) {
+    const index = vertexIndexAtArc(arcs, arc);
+    if (index > 0 && index < coords.length - 1 && !turnIndices.has(index)) {
+      boundaries.push({ index, arc, maneuver: "depart" });
+    }
+  }
   boundaries.sort((a, b) => a.index - b.index);
 
   for (let k = 0; k < boundaries.length; k++) {
@@ -320,8 +526,15 @@ function synthesizeSteps(
 
     let instruction: string;
     let spoken: string;
-    if (cur.maneuver === "start") {
-      const dir = compassWord(bearingDeg(coords[0], pointAtArc(coords, arcs, Math.min(total, 25))));
+    // "depart" is the first step of a leg after a stop — same heading phrasing
+    // as the trip start, since the rider is setting off again from standstill.
+    if (cur.maneuver === "start" || cur.maneuver === "depart") {
+      const dir = compassWord(
+        bearingDeg(
+          coords[cur.index],
+          pointAtArc(coords, arcs, Math.min(total, cur.arc + 25))
+        )
+      );
       instruction = name ? `Head ${dir} on ${displayStreetName(name)}` : `Head ${dir}`;
       spoken = name ? `head ${dir} on ${expandStreetName(name)}` : `head ${dir}`;
     } else {
@@ -353,5 +566,5 @@ function synthesizeSteps(
     spoken: "arrive at your destination",
   });
 
-  return { steps, greenwayMeters, calmMeters };
+  return { steps, greenwayMeters, calmMeters, legGreenwayMeters, legCalmMeters };
 }
