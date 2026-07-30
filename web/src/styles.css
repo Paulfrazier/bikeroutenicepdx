@@ -378,10 +378,14 @@ button {
   gap: 8px;
 }
 
-/* Wide enough for "Stop 1" so From/Stop/To labels stay in one column. */
+/* Wide enough for "Stop 1" so From/Stop/To labels stay in one column. Never
+   wraps: once the stop list gained a scrollbar, its few pixels were enough to
+   break "Stop 2" onto a second line and knock that row taller than its
+   neighbours. */
 .endpoint-inputs__label {
   width: 46px;
   flex-shrink: 0;
+  white-space: nowrap;
   font-size: 12px;
   font-weight: 600;
   color: var(--color-text-muted);
@@ -389,46 +393,76 @@ button {
   letter-spacing: 0.5px;
 }
 
-/* Reorder / remove controls on a stop row, in place of the 📍 locate button. */
-.endpoint-inputs__stop-actions {
+/* The stop block scrolls on its own once it gets long, so the To row stays in
+   view no matter how many stops there are — the destination is the row the
+   rider most needs to see, and it sits BELOW the stops.
+
+   Capped in rows (~2.5rem each), not vh: on mobile the panel is a top strip
+   hard-capped at 280px, so ANY viewport-relative cap is bigger than the space
+   that actually exists and never engages. Mobile's budget after the header,
+   From, To and the preference dial is about two rows; desktop has the full
+   column height and can afford six. */
+.endpoint-inputs__stops {
   display: flex;
-  flex-shrink: 0;
-  gap: 2px;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 5rem;
+  overflow-y: auto;
+  /* Room for the row menu's focus ring, which the overflow would clip. */
+  margin: 0 -4px;
+  padding: 0 4px;
 }
 
-.endpoint-inputs__stop-btn {
-  width: 20px;
-  padding: 2px 0;
-  font-size: 12px;
-  line-height: 1;
+@media (min-width: 768px) {
+  .endpoint-inputs__stops {
+    max-height: 15rem;
+  }
+}
+
+/* Backs out of the click-summoned empty stop row. */
+.endpoint-inputs__cancel-btn {
+  font-size: 14px;
+  padding: 4px 8px;
+  flex-shrink: 0;
   color: var(--color-text-muted);
-  border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  cursor: pointer;
   transition: background var(--transition), color var(--transition);
 }
 
-.endpoint-inputs__stop-btn:hover:not(:disabled),
-.endpoint-inputs__stop-btn:focus-visible:not(:disabled) {
-  background: var(--color-green-dim);
-  color: var(--color-green);
-}
-
-.endpoint-inputs__stop-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.endpoint-inputs__stop-btn--remove:hover,
-.endpoint-inputs__stop-btn--remove:focus-visible {
+.endpoint-inputs__cancel-btn:hover,
+.endpoint-inputs__cancel-btn:focus-visible {
   background: #fee2e2;
   color: #dc2626;
 }
 
-/* The empty "next stop" slot reads as secondary until it's used. */
-.endpoint-inputs__row--add .endpoint-inputs__label {
-  opacity: 0.5;
+/* Full-width so it reads as "extend the trip", not a fourth icon in the row. */
+.endpoint-inputs__add-stop {
+  margin-top: 4px;
+  /* Line up with the search boxes, past the label column and its 8px gap. */
+  margin-left: 54px;
+  padding: 8px 12px;
+  align-self: flex-start;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-green);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.endpoint-inputs__add-stop:hover,
+.endpoint-inputs__add-stop:focus-visible {
+  background: var(--color-green-dim);
+  border-color: var(--color-green);
+  border-style: solid;
+}
+
+.endpoint-inputs__cap-note {
+  margin: 4px 0 0 54px;
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 
 .endpoint-inputs__swap-row {
@@ -468,6 +502,83 @@ button {
   background: var(--color-green-dim);
   outline: 2px solid var(--color-green);
   outline-offset: 2px;
+}
+
+/* ── Row menu (⋯ on a trip row) ────────────────────────────────────────────── */
+.row-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.row-menu__trigger {
+  /* 32px wide against the old 20px stop buttons, and the row's own height
+     carries it the rest of the way to a comfortable target. */
+  width: 32px;
+  padding: 6px 0;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--color-text-muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.row-menu__trigger:hover,
+.row-menu__trigger[aria-expanded="true"],
+.row-menu__trigger:focus-visible {
+  background: var(--color-green-dim);
+  color: var(--color-green);
+  border-color: var(--color-border);
+}
+
+.row-menu__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  min-width: 200px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+}
+
+.row-menu__item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--color-text);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.row-menu__item:hover:not(:disabled),
+.row-menu__item:focus-visible:not(:disabled) {
+  background: var(--color-green-dim);
+}
+
+.row-menu__item:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.row-menu__item--destructive {
+  color: #dc2626;
+}
+
+.row-menu__item--destructive:hover:not(:disabled),
+.row-menu__item--destructive:focus-visible:not(:disabled) {
+  background: #fee2e2;
 }
 
 /* ── Search bar ────────────────────────────────────────────────────────────── */

@@ -41,6 +41,14 @@ interface SearchBarProps {
    * existing route). Undefined = clear immediately.
    */
   confirmClearMessage?: string;
+  /**
+   * Focus the input on mount. Used by the "+ Add a stop" row, which only
+   * appears in response to a click — so the rider is already typing-ready and
+   * an extra tap to reach the box would be pure friction.
+   */
+  autoFocus?: boolean;
+  /** Fired when focus leaves an empty box, so a pending row can dismiss itself. */
+  onBlurEmpty?: () => void;
 }
 
 export function SearchBar({
@@ -51,6 +59,8 @@ export function SearchBar({
   id,
   "aria-label": ariaLabel,
   confirmClearMessage,
+  autoFocus = false,
+  onBlurEmpty,
 }: SearchBarProps) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
@@ -135,6 +145,13 @@ export function SearchBar({
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    // Escape on an empty box backs out of the row entirely, even with no
+    // dropdown showing — that's the way out of a pending "+ Add a stop" row.
+    if (e.key === "Escape" && !draft.trim() && onBlurEmpty) {
+      setOpen(false);
+      onBlurEmpty();
+      return;
+    }
     if (!showDropdown) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -167,12 +184,19 @@ export function SearchBar({
     return prev ? "Results" : null;
   }
 
-  // Close on outside click
+  // Close on outside click. This — rather than the input's own blur event — is
+  // also where `onBlurEmpty` fires: blur lands before a dropdown row's click
+  // does, so dismissing on blur would eat the very pick the user was making.
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const onBlurEmptyRef = useRef(onBlurEmpty);
+  onBlurEmptyRef.current = onBlurEmpty;
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
         setOpen(false);
+        if (!draftRef.current.trim()) onBlurEmptyRef.current?.();
       }
     }
     document.addEventListener("mousedown", handleClick);
@@ -192,6 +216,8 @@ export function SearchBar({
         onFocus={() => setOpen(true)}
         onKeyDown={handleKeyDown}
         autoComplete="off"
+        // eslint-disable-next-line jsx-a11y/no-autofocus -- click-summoned row
+        autoFocus={autoFocus}
         aria-label={ariaLabel ?? placeholder}
         aria-autocomplete="list"
         aria-controls={showDropdown ? listId : undefined}

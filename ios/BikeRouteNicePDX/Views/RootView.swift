@@ -4,7 +4,10 @@ import SwiftUI
 struct RootView: View {
     @Environment(RouteStore.self) private var store
     @Environment(NavigationSession.self) private var nav
-    @State private var showSearch = false
+    /// Non-nil while the search sheet is up, and its value IS what the search is
+    /// for — set by whichever trip row the rider tapped. Replaces a plain
+    /// `showSearch` bool, which forced the sheet to guess (or ask) its target.
+    @State private var searchTarget: SearchTarget?
     @State private var showDirections = false
     @State private var savedRide: Ride?
     @State private var showRideSaved = false
@@ -100,8 +103,8 @@ struct RootView: View {
                     .presentationDetents([.medium])
             }
         }
-        .sheet(isPresented: $showSearch) {
-            SearchSheet()
+        .sheet(item: $searchTarget) { target in
+            SearchSheet(target: target)
                 .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $showDirections) {
@@ -231,6 +234,7 @@ struct RootView: View {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 store.debugHideAllLaneGroups()
             case "edit": await store.runDemoEdit()
+            case "stops": await store.runDemoStops()
             case "nav":
                 // Seed a route then launch straight into navigation (no touch
                 // injection in the sim). Pair with a --gpx ride playback.
@@ -362,7 +366,7 @@ struct RootView: View {
             // claimed for node-dropping), so hide the planner bar while building one
             // — its "tap to set start" hint would otherwise mislead.
             if !store.isConnectorDrawMode {
-                ControlsBar(showSearch: $showSearch, showDirections: $showDirections)
+                ControlsBar(searchTarget: $searchTarget, showDirections: $showDirections)
             }
         }
     }

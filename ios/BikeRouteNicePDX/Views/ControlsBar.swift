@@ -4,7 +4,9 @@ import SwiftUI
 struct ControlsBar: View {
     @Environment(RouteStore.self) private var store
     @Environment(NavigationSession.self) private var nav
-    @Binding var showSearch: Bool
+    /// Which trip row a search is for. Setting it opens `SearchSheet`; the sheet
+    /// no longer asks the rider to classify the place itself.
+    @Binding var searchTarget: SearchTarget?
     @Binding var showDirections: Bool
 
     /// Whether the grouped reshape-mode selector (Drag/Draw/Through) is shown.
@@ -16,7 +18,9 @@ struct ControlsBar: View {
     /// routed trip (mirrors the web endpoint-clear confirm).
     @State private var showClearConfirm = false
 
-    /// The stop-list sheet (reorder / remove). Stops are ADDED from SearchSheet.
+    /// The drag-reorder sheet, reached from a stop row's ⋯ menu. Stops are added
+    /// and removed inline in `TripListView`; this exists only because SwiftUI's
+    /// `.onMove` needs a `List` with an `EditButton` to drag within.
     @State private var showStops = false
 
     var body: some View {
@@ -28,8 +32,10 @@ struct ControlsBar: View {
             if store.isDrawMode {
                 compactDrawControls
             } else {
-                pinChips
-                if !store.stops.isEmpty { stopsChip }
+                TripListView(
+                    searchTarget: $searchTarget,
+                    onReorder: { showStops = true }
+                )
                 actionArea
             }
         }
@@ -55,79 +61,6 @@ struct ControlsBar: View {
             default: editPanelOpen = false
             }
         }
-    }
-
-    // MARK: - Pin chips
-
-    private var pinChips: some View {
-        HStack(spacing: 10) {
-            pinChip(
-                title: store.start?.label ?? "Set start",
-                isSet: store.start != nil,
-                color: .green,
-                icon: "figure.outdoor.cycle"
-            )
-            pinChip(
-                title: store.end?.label ?? "Set destination",
-                isSet: store.end != nil,
-                color: .red,
-                icon: "flag.checkered"
-            )
-        }
-    }
-
-    /// Summary of the trip's stops; tap to reorder or remove them. Only shown
-    /// when at least one exists, so a plain A→B trip's card is unchanged.
-    private var stopsChip: some View {
-        Button {
-            showStops = true
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "mappin.and.ellipse")
-                Text(store.stops.count == 1 ? "1 stop" : "\(store.stops.count) stops")
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-            .font(.subheadline.weight(.medium))
-            // #7c3aed violet — matches the numbered stop pins on the map.
-            .foregroundStyle(Color(red: 0.486, green: 0.227, blue: 0.929))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .background(
-                Color(red: 0.486, green: 0.227, blue: 0.929).opacity(0.12),
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func pinChip(title: String, isSet: Bool, color: Color, icon: String) -> some View {
-        Button {
-            showSearch = true
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .foregroundStyle(isSet ? color : .secondary)
-                Text(title)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-                    .foregroundStyle(isSet ? .primary : .secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .padding(.horizontal, 12)
-            .background(
-                Capsule().fill(Color.primary.opacity(0.06))
-            )
-            .overlay(
-                Capsule().stroke(isSet ? color.opacity(0.5) : .clear, lineWidth: 1.5)
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Action area

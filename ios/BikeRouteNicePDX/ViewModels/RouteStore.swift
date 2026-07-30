@@ -1091,6 +1091,48 @@ final class RouteStore {
         await rerouteKeepingPhase()
     }
 
+    /// Move one stop a single place earlier or later in the trip.
+    ///
+    /// Backs the "Move up" / "Move down" menu items on a trip row. `moveStops`
+    /// stays for `StopsView`'s drag-reorder, which speaks `IndexSet`.
+    func moveStop(id: UUID, delta: Int) async {
+        var reordered = stops
+        guard let pos = reordered.firstIndex(where: { $0.id == id }) else { return }
+        let target = pos + delta
+        guard target >= 0, target < reordered.count else { return }
+        reordered.swapAt(pos, target)
+        // Same trade as `moveStops`: reshape vias anchor legs that no longer
+        // exist once stops move, so they go rather than mis-anchor.
+        vias = reordered
+        await rerouteKeepingPhase()
+    }
+
+    /// Trade places between a stop and the destination: the stop becomes the
+    /// trip's finish, and the old finish becomes a stop in the slot the promoted
+    /// one left.
+    ///
+    /// A swap (rather than "promote and append the old end") is what lets ONE
+    /// primitive back both directions of role editing — the destination row's
+    /// "Make this a stop" is just this called with the last stop. Every other
+    /// stop keeps its position, so the move is predictable and undoing it is the
+    /// same gesture again. Mirrors the web `promoteStopToDestination`.
+    func promoteStopToDestination(id: UUID) async {
+        guard let i = vias.firstIndex(where: { $0.id == id && $0.kind == .stop }),
+              let currentEnd = end else { return }
+        let promoted = vias[i]
+        vias[i].coordinate = currentEnd.coordinate
+        vias[i].label = currentEnd.label
+        // Assign `end` directly rather than via `setPin`: that schedules its own
+        // auto-route and drops the edit modes, and this is one edit, not two.
+        end = Waypoint(
+            coordinate: promoted.coordinate,
+            label: promoted.label ?? "Stop",
+            kind: .end
+        )
+        snapped = nil
+        await rerouteKeepingPhase()
+    }
+
     func insertPreciseVia(_ at: CLLocationCoordinate2D) async {
         guard vias.count < Self.maxVias,
               let startC = start?.coordinate, let endC = end?.coordinate else { return }
@@ -1458,6 +1500,26 @@ final class RouteStore {
         ]))
         await recomputeDisplay()
         phase = .routed
+    }
+
+    /// Verification hook: seed a two-stop errand so `TripListView` can be
+    /// screenshotted with real stop rows. Triggered by BRN_DEMO=stops.
+    func runDemoStops() async {
+        let startC = CLLocationCoordinate2D(latitude: 45.5497, longitude: -122.6434)
+        let endC = CLLocationCoordinate2D(latitude: 45.5230, longitude: -122.6270)
+        setPin(startC, kind: .start, label: "Home")
+        setPin(endC, kind: .end, label: "Laurelhurst Park")
+        vias = [
+            Via(
+                coordinate: CLLocationCoordinate2D(latitude: 45.5583, longitude: -122.6400),
+                precise: true, kind: .stop, label: "New Seasons"
+            ),
+            Via(
+                coordinate: CLLocationCoordinate2D(latitude: 45.5233, longitude: -122.6816),
+                precise: true, kind: .stop, label: "Powell's City of Books"
+            ),
+        ]
+        await rerouteKeepingPhase()
     }
 
     /// Verification hook: run the demo, then raw-nudge the manual segment's

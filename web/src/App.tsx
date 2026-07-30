@@ -848,6 +848,33 @@ export default function App() {
     setVias((prev) => prev.filter((v) => v.id !== id));
   }, []);
 
+  /**
+   * Trade places between a stop and the destination: the stop becomes the trip's
+   * finish, and the old finish becomes a stop in the slot the promoted one left.
+   *
+   * A swap (rather than "promote and append the old end") is what makes the role
+   * of a row editable in both directions from one primitive — the destination
+   * row's "Make this a stop" is just this called with the LAST stop. Every other
+   * stop keeps its position, so the move is predictable and undoing it is the
+   * same gesture again.
+   */
+  const promoteStopToDestination = useCallback(
+    (id: string) => {
+      const i = vias.findIndex((v) => v.id === id && v.kind === "stop");
+      if (i === -1 || !to) return;
+      const promoted = vias[i];
+      // Read from `vias` rather than a functional updater: this has to move two
+      // pieces of state at once, and setTo() inside a setVias() updater would
+      // fire twice under StrictMode.
+      const next = vias.slice();
+      next[i] = { ...promoted, at: to, label: toLabel || undefined };
+      setVias(next);
+      setTo(promoted.at);
+      setToLabel(promoted.label ?? "");
+    },
+    [vias, to, toLabel]
+  );
+
   /** Move a stop within the stop sequence, carrying its leg's reshape vias along. */
   const moveStop = useCallback((id: string, delta: number) => {
     setVias((prev) => {
@@ -940,14 +967,20 @@ export default function App() {
           onToChange={(lngLat, name) => {
             setTo(lngLat);
             setToLabel(name);
+            // Keep the map's tap cycle in step with the form. Without this,
+            // picking a destination by search left clickCount at 1, so the next
+            // map tap re-set the destination instead of starting a fresh trip.
+            clickCount.current = lngLat ? 2 : from ? 1 : 0;
           }}
           onSwap={handleSwap}
           hasRoute={hasRoute}
+          hasDestination={!!to}
           stops={stops}
           onAddStop={addStop}
           onUpdateStop={updateStop}
           onRemoveStop={removeStop}
           onMoveStop={moveStop}
+          onPromoteStop={promoteStopToDestination}
         />
 
         <RoutePreferenceSelector

@@ -1,21 +1,40 @@
 import SwiftUI
 import CoreLocation
 
-/// Search for a place and assign it to the start or end pin.
+/// Where a picked place goes.
+///
+/// This is passed IN by whichever trip row the rider tapped — it is deliberately
+/// not something `SearchSheet` asks about. Making the rider classify a place
+/// ("is this a stop or the finish?") from a segmented control before they'd even
+/// seen the search results was the friction this whole flow exists to remove.
+///
+/// `.stop` appends to the trip's stop list rather than replacing a pin, so it
+/// isn't a `WaypointKind` (which models pins).
+enum SearchTarget: Hashable, Identifiable {
+    case start
+    case stop
+    /// Repoint an existing stop, keeping its place in the trip order.
+    case editStop(UUID)
+    case end
+
+    var id: String {
+        switch self {
+        case .start: return "start"
+        case .stop: return "stop"
+        case .editStop(let id): return "editStop-\(id.uuidString)"
+        case .end: return "end"
+        }
+    }
+}
+
+/// Search for a place and assign it to whichever trip row summoned this sheet.
 struct SearchSheet: View {
     @Environment(RouteStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
-    /// Where a picked place goes. `.stop` appends to the trip's stop list rather
-    /// than replacing a pin, so it isn't a `WaypointKind` (which models pins).
-    private enum SearchTarget: Hashable {
-        case start
-        case stop
-        case end
-    }
+    let target: SearchTarget
 
     @State private var query = ""
-    @State private var target: SearchTarget = .start
     @State private var searchTask: Task<Void, Never>?
     /// Local mirror of the Favorites store, refreshed on the change notification.
     @State private var favorites: [FavoritePlace] = Favorites.list()
@@ -23,18 +42,6 @@ struct SearchSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("Pin", selection: $target) {
-                    Text("Start").tag(SearchTarget.start)
-                    // Only offered once both ends exist — a stop between nothing
-                    // and nothing is meaningless, and the cap is enforced here.
-                    if canAddStop {
-                        Text("Stop").tag(SearchTarget.stop)
-                    }
-                    Text("Destination").tag(SearchTarget.end)
-                }
-                .pickerStyle(.segmented)
-                .padding(16)
-
                 List {
                     // Saved places sit above everything: matched locally by
                     // nickname, so "Home" is reachable without the geocoder.
@@ -82,17 +89,6 @@ struct SearchSheet: View {
                 debounceSearch(newValue)
             }
             .onAppear {
-                // Default to whichever pin is still unset; once the trip is
-                // complete, a search is almost always adding a stop.
-                if store.start == nil {
-                    target = .start
-                } else if store.end == nil {
-                    target = .end
-                } else if canAddStop {
-                    target = .stop
-                } else {
-                    target = .end
-                }
                 favorites = Favorites.list()
             }
             .onReceive(NotificationCenter.default.publisher(for: .favoritesChanged)) { _ in
@@ -101,21 +97,21 @@ struct SearchSheet: View {
         }
     }
 
-    /// A stop only makes sense once both ends exist, and only under the cap.
-    private var canAddStop: Bool {
-        store.start != nil && store.end != nil && store.stops.count < RouteStore.maxStops
-    }
-
     private var targetNoun: String {
         switch target {
         case .start: return "start"
         case .stop: return "next stop"
+        case .editStop: return "stop"
         case .end: return "destination"
         }
     }
 
     private var navTitle: String {
-        target == .stop ? "Add a stop" : "Set \(targetNoun)"
+        switch target {
+        case .stop: return "Add a stop"
+        case .editStop: return "Change stop"
+        default: return "Set \(targetNoun)"
+        }
     }
 
     /// Recents are shown when the user hasn't typed a meaningful query yet.
@@ -206,6 +202,8 @@ struct SearchSheet: View {
         switch target {
         case .stop:
             Task { await store.addStop(result) }
+        case .editStop(let id):
+            Task { await store.updateStop(id: id, to: result) }
         case .start, .end:
             let coordinate = CLLocationCoordinate2D(latitude: result.lat, longitude: result.lng)
             store.setPin(coordinate, kind: target == .start ? .start : .end, label: result.name)
