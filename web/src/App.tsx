@@ -880,6 +880,8 @@ export default function App() {
   const handleStartNav = useCallback(() => {
     if (!to) return;
     if (drawnStrokes.length > 0 && activeCoords && activeCoords.length >= 2) {
+      // A hand-drawn route carries no server legs to slice, so it stays a
+      // single leg straight to `to` — the whole-route path, unchanged.
       nav.start(
         {
           geometry: { type: "LineString", coordinates: activeCoords },
@@ -888,12 +890,31 @@ export default function App() {
           duration_s: route?.duration_s ?? 0,
           greenway_coverage: friendliness?.coverage ?? 0,
         },
-        to
+        to,
+        { toLabel }
       );
       return;
     }
-    if (route) nav.start(route, to);
-  }, [route, to, nav, drawnStrokes, activeCoords, displayDistanceM, friendliness]);
+    // Stops make navigation leg-scoped: it guides to each one in turn, and an
+    // off-route reroute targets the CURRENT leg rather than the final
+    // destination (which used to silently drop the rest of the errand).
+    if (route) {
+      nav.start(route, to, {
+        stops: vias.filter((v) => v.kind === "stop"),
+        toLabel,
+      });
+    }
+  }, [
+    route,
+    to,
+    toLabel,
+    vias,
+    nav,
+    drawnStrokes,
+    activeCoords,
+    displayDistanceM,
+    friendliness,
+  ]);
 
   return (
     <div className={`app-layout ${nav.navigating ? "app-layout--navigating" : ""}`}>

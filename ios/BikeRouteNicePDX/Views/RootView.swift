@@ -1,3 +1,4 @@
+import CoreLocation
 import SwiftUI
 
 struct RootView: View {
@@ -24,6 +25,9 @@ struct RootView: View {
     @State private var showComfortToast = false
     // Confirm the resolved link roads before saving a tap-built connector.
     @State private var confirmingConnectorSave = false
+    // An interrupted multi-stop trip, offered for resume on launch.
+    @State private var resumableTrip: TripProgress?
+    @State private var restoringTrip = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -42,6 +46,10 @@ struct RootView: View {
             // Planner chrome — hidden while navigating so the HUD owns the screen.
             if !nav.isNavigating {
                 plannerChrome
+            }
+
+            if !nav.isNavigating, let trip = resumableTrip {
+                resumeTripBanner(trip)
             }
 
             if nav.isNavigating {
@@ -209,6 +217,10 @@ struct RootView: View {
             }
         }
         .task {
+            // An errand interrupted by the app being killed at a stop. Stale and
+            // older-schema records are filtered out by the store itself.
+            resumableTrip = TripProgressStore.load()
+
             #if DEBUG
             switch ProcessInfo.processInfo.environment["BRN_DEMO"] {
             case "1": await store.runDemoSnap()
@@ -227,6 +239,76 @@ struct RootView: View {
             default: break
             }
             #endif
+        }
+    }
+
+    /// Offer to pick up a multi-stop errand that was interrupted — the app
+    /// killed while the rider was inside the shop.
+    ///
+    /// Resuming rebuilds a *fresh* trip from where they're standing now to the
+    /// stops they hadn't reached yet, which is exactly what Continue would have
+    /// done at the stop. Sits in the thumb zone, like every other commit action.
+    private func resumeTripBanner(_ trip: TripProgress) -> some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.trianglehead.clockwise")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(trip.currentLegLabel.map { "Resume trip to \($0)?" } ?? "Resume your trip?")
+                        .font(.subheadline.weight(.bold))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(remainingStopsLabel(trip))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Button("Resume") { resumeTrip(trip) }
+                    .font(.subheadline.weight(.semibold))
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
+                    .disabled(restoringTrip)
+                Button {
+                    TripProgressStore.clear()
+                    resumableTrip = nil
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss resume offer")
+            }
+            .padding(14)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 100)
+        }
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    /// "2 stops + destination left" — what actually remains to be ridden.
+    private func remainingStopsLabel(_ trip: TripProgress) -> String {
+        let left = max(0, trip.stops.count - trip.legIndex)
+        if left == 0 { return "Destination left" }
+        return "\(left) stop\(left == 1 ? "" : "s") + destination left"
+    }
+
+    private func resumeTrip(_ trip: TripProgress) {
+        guard let origin = CLLocationManager().location?.coordinate ?? store.start?.coordinate
+        else { return }
+        restoringTrip = true
+        Task {
+            let ok = await store.restoreTrip(trip, from: origin)
+            restoringTrip = false
+            guard ok else { return }
+            TripProgressStore.clear()
+            resumableTrip = nil
+            nav.start()
         }
     }
 

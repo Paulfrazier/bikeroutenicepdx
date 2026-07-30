@@ -12,16 +12,16 @@ struct NavigationHUD: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if nav.arrived {
-                arrivalCard
-            } else {
-                maneuverBanner
+            switch nav.navPhase {
+            case .arrived: arrivalCard
+            case .pausedAtStop: legPauseCard
+            case .guiding: maneuverBanner
             }
             Spacer()
             bottomPanel
         }
         .animation(.easeInOut(duration: 0.2), value: nav.nextStep?.instruction)
-        .animation(.easeInOut(duration: 0.2), value: nav.arrived)
+        .animation(.easeInOut(duration: 0.2), value: nav.navPhase)
     }
 
     // MARK: - Top: next maneuver
@@ -101,6 +101,36 @@ struct NavigationHUD: View {
         .padding(.top, 8)
     }
 
+    // MARK: - Leg pause (multi-stop)
+
+    /// Informational only — Continue / Skip live in the thumb zone below.
+    private var legPauseCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "mappin.circle.fill")
+                .font(.system(size: 34))
+                .foregroundStyle(.white)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(nav.legLabel.map { "Arrived at \($0)" } ?? "Arrived at your stop")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(nav.resumeFailed
+                    ? "Couldn't fetch the next leg. Try again when you have signal."
+                    : "Take your time — guidance is paused.")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(18)
+        .background(navGreen, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+    }
+
     // MARK: - Bottom: trip stats + controls
 
     private var bottomPanel: some View {
@@ -118,6 +148,20 @@ struct NavigationHUD: View {
             .accessibilityLabel("Route progress")
             .accessibilityValue("\(Int((nav.progressFraction * 100).rounded())) percent")
 
+            // On a multi-stop trip the stats above describe the CURRENT leg, so
+            // say which leg that is.
+            if let legLabel = nav.legProgressLabel {
+                HStack {
+                    Text(legLabel)
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 3)
+                        .background(navGreen.opacity(0.15), in: Capsule())
+                        .foregroundStyle(navGreen)
+                    Spacer(minLength: 0)
+                }
+            }
+
             HStack {
                 stat(nav.etaLabel, "ETA")
                 Spacer()
@@ -127,22 +171,82 @@ struct NavigationHUD: View {
                 Spacer()
                 toggles
             }
-            Button(role: .destructive) {
-                onEnd(nav.stop())
-            } label: {
-                Text(nav.arrived ? "Done" : "End")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(nav.arrived ? .green : .red)
+            legControls
         }
         .padding(16)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
         .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+    }
+
+    /// Commit actions, kept in the thumb zone at the bottom of the screen rather
+    /// than in the banner up top.
+    @ViewBuilder
+    private var legControls: some View {
+        switch nav.navPhase {
+        case .pausedAtStop:
+            VStack(spacing: 10) {
+                Button {
+                    Task { await nav.resume() }
+                } label: {
+                    Text(nav.nextLegLabel.map { "Continue to \($0)" } ?? "Continue")
+                        .font(.headline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(navGreen)
+                .disabled(nav.isRerouting)
+
+                HStack(spacing: 10) {
+                    Button("Skip stop") {
+                        Task { await nav.skipStop() }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .disabled(nav.isRerouting)
+
+                    Button("End trip", role: .destructive) {
+                        onEnd(nav.stop())
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                }
+                .font(.headline)
+                .lineLimit(1)
+                .buttonStyle(.bordered)
+            }
+        case .guiding, .arrived:
+            VStack(spacing: 10) {
+                // Backstop for locking up short of the stop, where the arrival
+                // radius alone would never hand over a Continue button.
+                if nav.showManualArrival {
+                    Button {
+                        nav.declareArrival()
+                    } label: {
+                        Text("I'm here")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(navGreen)
+                }
+                Button(role: .destructive) {
+                    onEnd(nav.stop())
+                } label: {
+                    Text(nav.arrived ? "Done" : "End")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(nav.arrived ? .green : .red)
+            }
+        }
     }
 
     private var toggles: some View {

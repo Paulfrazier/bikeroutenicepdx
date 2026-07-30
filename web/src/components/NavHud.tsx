@@ -16,6 +16,9 @@ interface NavHudProps {
   nav: NavView & {
     setVoiceEnabled: (on: boolean) => void;
     setCalmMode: (on: boolean) => void;
+    resume: () => void | Promise<void>;
+    skipStop: () => void | Promise<void>;
+    declareArrival: () => void;
   };
   onEnd: () => void;
 }
@@ -26,19 +29,36 @@ const THEN_PREVIEW_WITHIN_M = 150;
 export function NavHud({ nav, onEnd }: NavHudProps) {
   const pillVariant = networkClassToVariant(nav.currentStep?.bicycle_network_class ?? null);
   const thenStep =
-    !nav.arrived && nav.followingStep && nav.distanceToNext < THEN_PREVIEW_WITHIN_M
+    nav.phase === "guiding" &&
+    nav.followingStep &&
+    nav.distanceToNext < THEN_PREVIEW_WITHIN_M
       ? nav.followingStep
       : null;
   const speedMph = Math.round(nav.speedMps * 2.23694);
 
   return (
     <div className="nav-hud">
-      {nav.arrived ? (
+      {nav.phase === "arrived" ? (
         <div className="nav-hud__banner nav-hud__banner--arrived">
           <span className="nav-hud__glyph" aria-hidden="true">🏁</span>
           <div className="nav-hud__banner-body">
             <span className="nav-hud__distance">You've arrived</span>
             <span className="nav-hud__instruction">Nice ride.</span>
+          </div>
+        </div>
+      ) : nav.phase === "pausedAtStop" ? (
+        /* Informational only — Continue / Skip live in the thumb zone below. */
+        <div className="nav-hud__banner nav-hud__banner--arrived">
+          <span className="nav-hud__glyph" aria-hidden="true">📍</span>
+          <div className="nav-hud__banner-body">
+            <span className="nav-hud__distance">
+              {nav.legLabel ? `Arrived at ${nav.legLabel}` : "Arrived at your stop"}
+            </span>
+            <span className="nav-hud__instruction">
+              {nav.resumeFailed
+                ? "Couldn't fetch the next leg. Try again when you have signal."
+                : "Take your time — guidance is paused."}
+            </span>
           </div>
         </div>
       ) : (
@@ -80,6 +100,10 @@ export function NavHud({ nav, onEnd }: NavHudProps) {
         >
           <div className="nav-hud__progress-fill" style={{ width: `${nav.progress * 100}%` }} />
         </div>
+        {/* On a multi-stop trip the stats below describe the CURRENT leg. */}
+        {nav.legProgressLabel && (
+          <span className="nav-hud__leg-chip">{nav.legProgressLabel}</span>
+        )}
         <div className="nav-hud__stats">
           <div className="nav-hud__stat">
             <span className="nav-hud__stat-value">{fmtEta(nav.timeRemaining)}</span>
@@ -115,9 +139,51 @@ export function NavHud({ nav, onEnd }: NavHudProps) {
             </button>
           </div>
         </div>
-        <button type="button" className="nav-hud__end" onClick={onEnd}>
-          {nav.arrived ? "Done" : "End"}
-        </button>
+        {/* Commit actions in the thumb zone, not up in the banner. */}
+        {nav.phase === "pausedAtStop" ? (
+          <div className="nav-hud__leg-actions">
+            <button
+              type="button"
+              className="nav-hud__continue"
+              onClick={() => void nav.resume()}
+              disabled={nav.rerouting}
+            >
+              {nav.rerouting
+                ? "Routing…"
+                : nav.nextLegLabel
+                  ? `Continue to ${nav.nextLegLabel}`
+                  : "Continue"}
+            </button>
+            <div className="nav-hud__leg-actions-row">
+              <button
+                type="button"
+                className="nav-hud__leg-secondary"
+                onClick={() => void nav.skipStop()}
+                disabled={nav.rerouting}
+              >
+                Skip stop
+              </button>
+              <button type="button" className="nav-hud__end" onClick={onEnd}>
+                End trip
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {nav.showManualArrival && (
+              <button
+                type="button"
+                className="nav-hud__leg-secondary nav-hud__im-here"
+                onClick={() => nav.declareArrival()}
+              >
+                I'm here
+              </button>
+            )}
+            <button type="button" className="nav-hud__end" onClick={onEnd}>
+              {nav.arrived ? "Done" : "End"}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

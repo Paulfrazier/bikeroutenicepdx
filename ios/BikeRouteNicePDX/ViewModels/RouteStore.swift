@@ -506,30 +506,22 @@ final class RouteStore {
     /// or nil on failure (the caller keeps guiding on the old line).
     func navReroute(
         from: CLLocationCoordinate2D,
-        to: CLLocationCoordinate2D,
-        remainingStops: [Via] = []
+        to: CLLocationCoordinate2D
     ) async -> SnappedRoute? {
         do {
-            // Reshape vias are geometry for the ORIGINAL line and are dropped on
-            // a reroute (the rider has left it). Stops are destinations, not
-            // geometry: dropping them would silently cancel the rest of the
-            // errand, so any the rider hasn't reached yet are routed through.
-            let waypoints: [RouteWaypoint]? = remainingStops.isEmpty
-                ? nil
-                : remainingStops.map {
-                    RouteWaypoint(
-                        at: [$0.coordinate.longitude, $0.coordinate.latitude],
-                        stop: true,
-                        label: $0.label
-                    )
-                }
+            // No vias, no waypoints. `to` is the current *leg's* destination —
+            // navigation is scoped to one leg at a time, so nothing downstream
+            // is left to thread through, and the rest of the errand lives in
+            // `NavigationSession`'s trip snapshot rather than in this request.
+            // Reshape vias are dropped for the older reason: they are geometry
+            // for the ORIGINAL line, which the rider has left.
             let routed = try await router.route(
                 from: from,
                 to: to,
-                vias: remainingStops.map(\.coordinate),
+                vias: [],
                 preference: routePreference.rawValue,
                 engine: routingEngine.rawValue,
-                waypoints: waypoints
+                waypoints: nil
             )
             guard routed.coordinates.count >= 2 else { return nil }
             let enriched = await classified(routed)
@@ -1049,6 +1041,28 @@ final class RouteStore {
             )
         )
         await rerouteKeepingPhase()
+    }
+
+    /// Rebuild an interrupted multi-stop trip from its saved resume record.
+    ///
+    /// Only the stops the rider had NOT yet reached are restored, so resuming is
+    /// just a fresh trip from wherever they're standing to whatever is left —
+    /// there is no partial mid-trip state to reconstruct, and the re-plan is the
+    /// same one `NavigationSession.resume()` would have done at the stop.
+    /// Returns false if it couldn't be re-planned (e.g. routing failed offline).
+    @discardableResult
+    func restoreTrip(_ progress: TripProgress, from origin: CLLocationCoordinate2D) async -> Bool {
+        start = Waypoint(coordinate: origin, label: "Current location", kind: .start)
+        end = Waypoint(
+            coordinate: progress.end.coordinate,
+            label: progress.end.label ?? "Destination",
+            kind: .end
+        )
+        vias = progress.stops.dropFirst(max(0, progress.legIndex)).prefix(Self.maxStops).map {
+            Via(coordinate: $0.coordinate, precise: true, kind: .stop, label: $0.label)
+        }
+        await rerouteKeepingPhase()
+        return snapped != nil
     }
 
     /// Repoint an existing stop at a new place, keeping its position in the trip.

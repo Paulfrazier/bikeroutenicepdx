@@ -313,6 +313,76 @@ if (stopValues.length === 3 && new Set(stopValues).size > 1) {
   );
 }
 
+// ── Navigation arrival / off-route thresholds ────────────────────────────────
+//
+// These govern when a leg counts as reached and when guidance decides the rider
+// has left the line. They drift silently and expensively: before they were
+// named, iOS's 40 m stop radius overlapped its 30 m off-route radius, so parking
+// beside a stop announced an arrival and a reroute in the same breath. Both
+// surfaces must agree on all four.
+
+const NAV_WEB_FILE = path.join(REPO_ROOT, "web", "src", "hooks", "useNavigation.ts");
+const NAV_IOS_FILE = path.join(
+  REPO_ROOT,
+  "ios",
+  "BikeRouteNicePDX",
+  "ViewModels",
+  "NavigationSession.swift"
+);
+
+/** `static let name: Double = 30` — the Swift form of a tunable constant. */
+function swiftNumericDecl(src: string, name: string): number | null {
+  const m = new RegExp(
+    `(?:static\\s+)?let\\s+${name}\\s*(?::\\s*[\\w.]+)?\\s*=\\s*(\\d+(?:\\.\\d+)?)`
+  ).exec(src);
+  return m ? Number(m[1]) : null;
+}
+
+const navWebSrc = read(NAV_WEB_FILE, "web useNavigation.ts");
+const navIosSrc = read(NAV_IOS_FILE, "iOS NavigationSession.swift");
+
+/** [human name, web const, iOS const] */
+const NAV_THRESHOLDS: ReadonlyArray<readonly [string, string, string]> = [
+  ["terminal arrival radius", "ARRIVED_METERS", "arrivedMeters"],
+  ["leg arrival radius", "LEG_ARRIVED_METERS", "legArrivedMeters"],
+  ["off-route threshold", "OFF_ROUTE_METERS", "offRouteThresholdM"],
+  ["manual-arrival range", "MANUAL_ARRIVAL_WITHIN_M", "manualArrivalWithinM"],
+];
+
+for (const [label, webName, iosName] of NAV_THRESHOLDS) {
+  const w = numericDecl(navWebSrc, webName);
+  const i = swiftNumericDecl(navIosSrc, iosName);
+  if (w === null) {
+    errors.push(`could not locate ${webName} (${label}) in web useNavigation.ts`);
+    continue;
+  }
+  if (i === null) {
+    errors.push(`could not locate ${iosName} (${label}) in iOS NavigationSession.swift`);
+    continue;
+  }
+  if (w !== i) {
+    errors.push(`${label} mismatch: web ${webName}=${w}  ≠  iOS ${iosName}=${i}`);
+  }
+}
+
+// The leg radius must stay strictly more generous than terminal arrival, and
+// must NOT reach past the off-route threshold — that overlap is the original bug.
+const legArrival = numericDecl(navWebSrc, "LEG_ARRIVED_METERS");
+const terminalArrival = numericDecl(navWebSrc, "ARRIVED_METERS");
+const offRoute = numericDecl(navWebSrc, "OFF_ROUTE_METERS");
+if (legArrival !== null && terminalArrival !== null && legArrival <= terminalArrival) {
+  errors.push(
+    `leg arrival radius (${legArrival}m) must exceed terminal arrival (${terminalArrival}m) — ` +
+      `a rider who parks short of a stop otherwise never gets a Continue button`
+  );
+}
+if (legArrival !== null && offRoute !== null && legArrival > offRoute) {
+  errors.push(
+    `leg arrival radius (${legArrival}m) must not exceed the off-route threshold (${offRoute}m) — ` +
+      `that overlap announces an arrival and a reroute in the same tick`
+  );
+}
+
 // ── Report ───────────────────────────────────────────────────────────────────
 
 if (errors.length) {
@@ -325,5 +395,5 @@ if (errors.length) {
 }
 
 console.log(
-  `✓ web ↔ iOS friendliness in sync (${CONSTANT_PAIRS.length} constants, ${webMap.size} route-class colors, ${webPresets.size} comfort presets, ${webRatings.size} street-rating classes, max-stops=${maxStops.web})`,
+  `✓ web ↔ iOS friendliness in sync (${CONSTANT_PAIRS.length} constants, ${webMap.size} route-class colors, ${webPresets.size} comfort presets, ${webRatings.size} street-rating classes, max-stops=${maxStops.web}, ${NAV_THRESHOLDS.length} nav thresholds)`,
 );

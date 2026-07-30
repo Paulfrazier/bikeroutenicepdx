@@ -14,10 +14,16 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { LngLat, RouteResponse, RouteStep } from "../types";
+import type { LngLat, RouteLeg, RouteResponse, RouteStep, Via } from "../types";
 import { fetchRoute } from "../api";
 import { useWakeLock } from "./useWakeLock";
 import { haversineLength, arcLengthAt } from "../geo";
+import {
+  CURRENT_VERSION,
+  clearTripProgress,
+  saveTripProgress,
+  type TripPlace,
+} from "../tripProgress";
 import {
   distanceToPolyline,
   computeStepArcs,
@@ -28,9 +34,47 @@ import {
   spokenDistanceBare,
 } from "../navigation";
 
+/**
+ * Where the rider is in a trip.
+ *
+ * "arrived" is terminal. "pausedAtStop" is the leg boundary on a multi-stop
+ * trip: guidance is suspended (GPS watch released, voice quiet, wake lock
+ * dropped) but the session stays alive so Continue can resume it.
+ *
+ * Deliberately an enum rather than a second boolean beside `arrived`: `arrived`
+ * is load-bearing control flow here too (it gates arrival re-entry and the wake
+ * lock), so a pause that left it false would re-fire arrival on every fix and
+ * pin the screen on for the whole stop. Mirrors iOS `NavPhase`.
+ */
+export type NavPhase = "guiding" | "pausedAtStop" | "arrived";
+
+/**
+ * Arrival + off-route thresholds. Named (and asserted in
+ * `scripts/check-parity.ts`) because they are shared with iOS, and because
+ * leaving them as inline literals is how the old stop radius came to overlap
+ * the off-route radius unnoticed.
+ */
+export const ARRIVED_METERS = 15;
+/** Leg arrival at an intermediate stop — generous, see iOS `legArrivedMeters`. */
+export const LEG_ARRIVED_METERS = 30;
+export const OFF_ROUTE_METERS = 30;
+/** Offer the manual "I'm here" affordance inside this range of the leg end. */
+export const MANUAL_ARRIVAL_WITHIN_M = 150;
+
 export interface NavView {
   navigating: boolean;
   arrived: boolean;
+  phase: NavPhase;
+  /** Name of the current leg's destination, when it has one. */
+  legLabel: string | null;
+  /** Name of the next leg's destination — the "Continue to X" label. */
+  nextLegLabel: string | null;
+  /** "Stop 1 of 2" / "Final leg"; null on a plain A→B trip. */
+  legProgressLabel: string | null;
+  /** Whether to show the manual "I'm here" button. */
+  showManualArrival: boolean;
+  /** A Continue that couldn't fetch the next leg (offline at the shop). */
+  resumeFailed: boolean;
   rerouting: boolean;
   voiceEnabled: boolean;
   calmMode: boolean;
@@ -59,7 +103,21 @@ interface Session {
   stepArcs: number[];
   totalLen: number;
   durationS: number;
+  /** The trip's FINAL destination. Kept for the resume record — navigation
+   * itself never targets it except on the last leg. */
   to: LngLat;
+  toLabel?: string;
+  // ── Trip snapshot, taken at start() ───────────────────────────────────────
+  // Reading live planner state mid-trip would let an edit corrupt leg indexing.
+  /** Intermediate stops, in visiting order. */
+  tripStops: Via[];
+  /** Which leg we're on. Leg i ends at tripStops[i]; the last ends at `to`. */
+  legIndex: number;
+  /** Where the current leg ends — the only thing navigation ever targets. */
+  legDestination: LngLat;
+  legLabel: string | null;
+  /** Epoch ms the ride began — the resume record's staleness clock. */
+  startedAt: number;
   spokenPrepare: Set<number>;
   spokenNow: Set<number>;
   announced: Set<number>;
@@ -67,7 +125,7 @@ interface Session {
   offRouteSince: number | null;
   lastReroute: number;
   lastSpeed: number;
-  arrived: boolean;
+  phase: NavPhase;
   /** Last utterance timestamp — drives the long-straight reassurance prompt. */
   lastSpokenAt: number;
   /** EMA-smoothed speed for the camera/HUD (raw GPS speed jitters). */
@@ -119,9 +177,91 @@ function navZoom(speedMps: number, distanceToNext: number): number {
   return clamp(17.6 - speedMps * 0.12, 16.3, 17.6);
 }
 
+/** Slice one leg out of an already-fetched multi-stop route: the coordinate span
+ * `legs[i].coord_start…coord_end` plus the steps tagged with that `leg_index`.
+ * Returns null when the route carries no leg breakdown (a plain A→B trip), so
+ * callers fall back to the whole route unchanged. Mirrors iOS `legRoute`. */
+function sliceLeg(route: RouteResponse, leg: number): RouteResponse | null {
+  const legs: RouteLeg[] | undefined = route.legs;
+  if (!legs || leg < 0 || leg >= legs.length) return null;
+  const span = legs[leg];
+  const coords = route.geometry.coordinates;
+  if (
+    span.coord_start < 0 ||
+    span.coord_end >= coords.length ||
+    span.coord_start >= span.coord_end
+  ) {
+    return null;
+  }
+  return {
+    ...route,
+    geometry: {
+      type: "LineString",
+      coordinates: coords.slice(span.coord_start, span.coord_end + 1),
+    },
+    steps: route.steps.filter((s) => s.leg_index === leg),
+    distance_m: span.distance_m,
+    duration_s: span.duration_s,
+    greenway_coverage: span.greenway_coverage,
+    legs: undefined,
+  };
+}
+
+/** Where leg `i` ends, and what it's called. */
+function legTarget(
+  stops: Via[],
+  end: LngLat,
+  endLabel: string | undefined,
+  leg: number
+): { at: LngLat; label: string | null } {
+  if (leg < stops.length) {
+    return { at: stops[leg].at, label: stops[leg].label ?? null };
+  }
+  return { at: end, label: endLabel ?? null };
+}
+
+function toPlace(at: LngLat, label?: string | null): TripPlace {
+  return { lat: at[1], lon: at[0], label: label ?? undefined };
+}
+
+/** The trip snapshot carried across every geometry swap within a session. */
+type TripFields = Pick<
+  Session,
+  | "to"
+  | "toLabel"
+  | "tripStops"
+  | "legIndex"
+  | "legDestination"
+  | "legLabel"
+  | "startedAt"
+>;
+
+function tripOf(s: Session): TripFields {
+  return {
+    to: s.to,
+    toLabel: s.toLabel,
+    tripStops: s.tripStops,
+    legIndex: s.legIndex,
+    legDestination: s.legDestination,
+    legLabel: s.legLabel,
+    startedAt: s.startedAt,
+  };
+}
+
+/** True when the current leg ends at the trip's final destination. */
+function isFinalLeg(s: Session): boolean {
+  return s.legIndex >= s.tripStops.length;
+}
+
 const INITIAL: NavView = {
   navigating: false,
   arrived: false,
+  phase: "guiding",
+  legLabel: null,
+  nextLegLabel: null,
+  legProgressLabel: null,
+  showManualArrival: false,
+  resumeFailed: false,
   rerouting: false,
   voiceEnabled: true,
   calmMode: false,
@@ -147,10 +287,16 @@ export function useNavigation() {
   const voiceRef = useRef(true);
   const calmRef = useRef(false);
 
-  // Keep the screen on for the duration of the ride.
-  useWakeLock(view.navigating && !view.arrived);
+  // Last GPS fix, so Continue can re-route from where the rider is standing.
+  const lastPos = useRef<LngLat | null>(null);
 
-  const load = useCallback((route: RouteResponse, to: LngLat) => {
+  // Keep the screen on only while actually guiding. Keyed on the phase, not on
+  // `arrived` — a rider paused at a stop must not hold the wake lock for the
+  // twenty minutes they're inside the shop.
+  useWakeLock(view.navigating && view.phase === "guiding");
+
+  /** Install a route as the thing being guided on, carrying trip state over. */
+  const load = useCallback((route: RouteResponse, trip: TripFields) => {
     const coords = route.geometry.coordinates;
     sessionRef.current = {
       coords,
@@ -158,7 +304,7 @@ export function useNavigation() {
       stepArcs: computeStepArcs(route.steps, coords),
       totalLen: haversineLength(coords),
       durationS: route.duration_s,
-      to,
+      ...trip,
       spokenPrepare: new Set(),
       spokenNow: new Set(),
       announced: new Set(),
@@ -166,7 +312,7 @@ export function useNavigation() {
       offRouteSince: null,
       lastReroute: 0,
       lastSpeed: 0,
-      arrived: false,
+      phase: "guiding",
       lastSpokenAt: Date.now(),
       smoothedSpeed: 0,
       dimmed: false,
@@ -174,6 +320,14 @@ export function useNavigation() {
     };
   }, []);
 
+  /**
+   * Recompute current → **this leg's** destination and keep guiding on it.
+   *
+   * No waypoints. With navigation scoped to a single leg there is nothing
+   * downstream to thread through — which is what turns the old
+   * `fetchRoute({ to: s.to })` (a bug that silently cancelled the rest of an
+   * errand) into the correct call.
+   */
   const reroute = useCallback(async (pos: LngLat) => {
     const s = sessionRef.current;
     if (!s) return;
@@ -182,9 +336,9 @@ export function useNavigation() {
     setView((v) => ({ ...v, rerouting: true }));
     speak("Off route — rerouting.", voiceRef.current);
     try {
-      const fresh = await fetchRoute({ from: pos, to: s.to });
+      const fresh = await fetchRoute({ from: pos, to: s.legDestination });
       if (fresh.geometry.coordinates.length >= 2 && sessionRef.current) {
-        load(fresh, s.to);
+        load(fresh, tripOf(s));
         setView((v) => ({ ...v, activeRoute: fresh, rerouting: false }));
         return;
       }
@@ -234,31 +388,15 @@ export function useNavigation() {
       if (heading == null) heading = 0;
       cameraVersion.current += 1;
 
-      // Arrival.
-      if (distanceRemaining < 15) {
-        if (!s.arrived) {
-          s.arrived = true;
-          speak("You've arrived. Enjoy the ride.", voiceRef.current);
-        }
-        s.dimmed = false;
-        setView((v) => ({
-          ...v,
-          arrived: true,
-          currentStep,
-          nextStep: null,
-          followingStep: null,
-          distanceToNext: 0,
-          distanceRemaining: 0,
-          timeRemaining: 0,
-          progress: 1,
-          dimmed: false,
-          camera: {
-            center: here,
-            bearing: heading as number,
-            zoom: navZoom(s.smoothedSpeed, 0),
-            version: cameraVersion.current,
-          },
-        }));
+      lastPos.current = here;
+
+      // Arrival — at this LEG's end. Intermediate stops get the more generous
+      // radius; the final destination keeps the original 15 m.
+      if (
+        distanceRemaining <
+        (isFinalLeg(s) ? ARRIVED_METERS : LEG_ARRIVED_METERS)
+      ) {
+        handleArrival(s, here, heading as number, currentStep);
         return;
       }
 
@@ -269,7 +407,7 @@ export function useNavigation() {
       // on route → confirm the rider hasn't been forgotten. Calm mode skips it.
       if (
         !calmRef.current &&
-        offRoute <= 30 &&
+        offRoute <= OFF_ROUTE_METERS &&
         distanceToNext > REASSURE_MIN_AHEAD_M &&
         Date.now() - s.lastSpokenAt > REASSURE_AFTER_MS
       ) {
@@ -283,7 +421,7 @@ export function useNavigation() {
       }
 
       // Off-route → reroute (sustained + cooldown).
-      if (offRoute > 30) {
+      if (offRoute > OFF_ROUTE_METERS) {
         if (s.offRouteSince == null) s.offRouteSince = Date.now();
         const offFor = Date.now() - s.offRouteSince;
         const sinceLast = Date.now() - s.lastReroute;
@@ -299,11 +437,11 @@ export function useNavigation() {
       const now = Date.now();
       const wakeHeld = now < s.dimWakeUntil;
       if (s.dimmed) {
-        if (distanceToNext < UNDIM_WITHIN_M || offRoute > 30 || wakeHeld) s.dimmed = false;
+        if (distanceToNext < UNDIM_WITHIN_M || offRoute > OFF_ROUTE_METERS || wakeHeld) s.dimmed = false;
       } else if (
         !wakeHeld &&
         distanceToNext > DIM_BEYOND_M &&
-        offRoute <= 30 &&
+        offRoute <= OFF_ROUTE_METERS &&
         now - s.lastSpokenAt > DIM_AFTER_QUIET_MS
       ) {
         s.dimmed = true;
@@ -320,6 +458,10 @@ export function useNavigation() {
         speedMps: s.smoothedSpeed,
         progress,
         dimmed: s.dimmed,
+        // Backstop for locking up short of a stop, where the arrival radius
+        // alone would never hand over a Continue button.
+        showManualArrival:
+          !isFinalLeg(s) && distanceRemaining < MANUAL_ARRIVAL_WITHIN_M,
         camera: {
           center: here,
           bearing: heading as number,
@@ -330,6 +472,113 @@ export function useNavigation() {
     },
     [reroute]
   );
+
+  /** Leg-derived fields for the view. */
+  function legView(
+    s: Session
+  ): Pick<NavView, "legLabel" | "nextLegLabel" | "legProgressLabel"> {
+    const next = legTarget(s.tripStops, s.to, s.toLabel, s.legIndex + 1);
+    return {
+      legLabel: s.legLabel,
+      nextLegLabel: s.legIndex < s.tripStops.length ? next.label : null,
+      legProgressLabel:
+        s.tripStops.length === 0
+          ? null
+          : isFinalLeg(s)
+            ? "Final leg"
+            : `Stop ${s.legIndex + 1} of ${s.tripStops.length}`,
+    };
+  }
+
+  /** Write the resume record. Only multi-stop trips have anything to resume. */
+  function persist(s: Session) {
+    if (s.tripStops.length === 0) return;
+    saveTripProgress({
+      version: CURRENT_VERSION,
+      stops: s.tripStops.map((st) => toPlace(st.at, st.label)),
+      end: toPlace(s.to, s.toLabel),
+      legIndex: s.legIndex,
+      startedAt: s.startedAt,
+    });
+  }
+
+  /** Release the GPS watch — on a pause as much as on a teardown. */
+  function releaseWatch() {
+    if (watchId.current != null) {
+      navigator.geolocation.clearWatch(watchId.current);
+      watchId.current = null;
+    }
+  }
+
+  function acquireWatch() {
+    if (watchId.current != null) return;
+    watchId.current = navigator.geolocation.watchPosition(
+      (p) => onPositionRef.current(p),
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 }
+    );
+  }
+
+  /**
+   * End of a leg. On the final leg this is the trip's terminal arrival; on any
+   * other it is a *pause* — the GPS watch is released and the wake lock drops,
+   * but the session stays alive so Continue can resume it.
+   */
+  function handleArrival(
+    s: Session,
+    here: LngLat,
+    heading: number,
+    currentStep: RouteStep | null
+  ) {
+    s.dimmed = false;
+    if (isFinalLeg(s)) {
+      if (s.phase !== "arrived") {
+        s.phase = "arrived";
+        speak("You've arrived. Enjoy the ride.", voiceRef.current);
+        clearTripProgress();
+        releaseWatch();
+      }
+    } else if (s.phase !== "pausedAtStop") {
+      s.phase = "pausedAtStop";
+      const at = s.legLabel ? `Arrived at ${s.legLabel}.` : "Arrived at your stop.";
+      const next = legTarget(s.tripStops, s.to, s.toLabel, s.legIndex + 1).label;
+      speak(
+        next ? `${at} Continue to ${next} when you're ready.` : at,
+        voiceRef.current
+      );
+      persist(s);
+      releaseWatch();
+    }
+    setView((v) => ({
+      ...v,
+      phase: s.phase,
+      arrived: s.phase === "arrived",
+      ...legView(s),
+      showManualArrival: false,
+      currentStep,
+      nextStep: null,
+      followingStep: null,
+      distanceToNext: 0,
+      distanceRemaining: 0,
+      timeRemaining: 0,
+      progress: 1,
+      dimmed: false,
+      camera: {
+        center: here,
+        bearing: heading,
+        zoom: navZoom(s.smoothedSpeed, 0),
+        version: cameraVersion.current,
+      },
+    }));
+  }
+
+  // The GPS callback is re-created on every render; the watch is registered once
+  // and reads through this ref so re-acquiring it (Continue) never has to depend
+  // on the current closure.
+  const onPositionRef = useRef(onPosition);
+  useEffect(() => {
+    onPositionRef.current = onPosition;
+  }, [onPosition]);
 
   // Greenway-aware step-entry announcement.
   function announceStepEntry(s: Session, index: number) {
@@ -392,39 +641,138 @@ export function useNavigation() {
     }
   }
 
+  /**
+   * Begin navigating. On a multi-stop trip this snapshots the stop list and
+   * guides on **leg 0 only**, sliced out of the route the rider just reviewed —
+   * no extra network call, and the line is exactly what they saw in the planner.
+   * The map keeps showing the whole trip (matching iOS) until a reroute.
+   */
   const start = useCallback(
-    (route: RouteResponse, to: LngLat) => {
+    (
+      route: RouteResponse,
+      to: LngLat,
+      opts?: { stops?: Via[]; toLabel?: string }
+    ) => {
       if (!navigator.geolocation || route.geometry.coordinates.length < 2) return;
-      load(route, to);
+      const stops = opts?.stops ?? [];
+      const target = legTarget(stops, to, opts?.toLabel, 0);
+      const firstLeg = sliceLeg(route, 0) ?? route;
+      load(firstLeg, {
+        to,
+        toLabel: opts?.toLabel,
+        tripStops: stops,
+        legIndex: 0,
+        legDestination: target.at,
+        legLabel: target.label,
+        startedAt: Date.now(),
+      });
       cameraVersion.current = 0;
-      setView((v) => ({ ...v, navigating: true, arrived: false, rerouting: false, activeRoute: route }));
+      lastPos.current = null;
+      const s = sessionRef.current!;
+      persist(s);
+      setView((v) => ({
+        ...v,
+        navigating: true,
+        arrived: false,
+        phase: "guiding",
+        resumeFailed: false,
+        rerouting: false,
+        activeRoute: route,
+        ...legView(s),
+      }));
       // Prefer the synthesized "Head east on X" opener; else the first turn.
-      const first = route.steps[0];
-      const firstTurn = route.steps.find((s) => isTurn(s.maneuver_type));
+      const first = firstLeg.steps[0];
+      const firstTurn = firstLeg.steps.find((st) => isTurn(st.maneuver_type));
       const opener =
         first && first.maneuver_type.startsWith("start")
           ? capFirst(clauseOf(first))
           : firstTurn?.instruction ?? "Follow the route.";
       speak(`Starting navigation. ${opener.replace(/\.?$/, ".")}`, voiceRef.current);
-      watchId.current = navigator.geolocation.watchPosition(onPosition, () => {}, {
-        enableHighAccuracy: true,
-        maximumAge: 1000,
-        timeout: 20000,
-      });
+      acquireWatch();
     },
-    [load, onPosition]
+    [load]
   );
 
-  const stop = useCallback(() => {
-    if (watchId.current != null) {
-      navigator.geolocation.clearWatch(watchId.current);
-      watchId.current = null;
+  /**
+   * Continue to the next leg.
+   *
+   * Fetches a fresh route from wherever the rider is standing now rather than
+   * slicing the next planned leg: after a long stop they're round the corner
+   * from where that leg started, and a sliced line would begin metres away and
+   * immediately trigger an off-route reroute.
+   */
+  const resume = useCallback(async () => {
+    const s = sessionRef.current;
+    if (!s || s.phase !== "pausedAtStop" || isFinalLeg(s)) return;
+    const from = lastPos.current;
+    if (!from) {
+      setView((v) => ({ ...v, resumeFailed: true }));
+      return;
     }
+    const nextLeg = s.legIndex + 1;
+    const target = legTarget(s.tripStops, s.to, s.toLabel, nextLeg);
+    setView((v) => ({ ...v, rerouting: true, resumeFailed: false }));
+    try {
+      const fresh = await fetchRoute({ from, to: target.at });
+      if (fresh.geometry.coordinates.length >= 2) {
+        load(fresh, {
+          ...tripOf(s),
+          legIndex: nextLeg,
+          legDestination: target.at,
+          legLabel: target.label,
+        });
+        const ns = sessionRef.current!;
+        persist(ns);
+        setView((v) => ({
+          ...v,
+          phase: "guiding",
+          arrived: false,
+          rerouting: false,
+          resumeFailed: false,
+          dimmed: false,
+          activeRoute: fresh,
+          ...legView(ns),
+        }));
+        speak(
+          target.label ? `Continuing to ${target.label}.` : "Continuing.",
+          voiceRef.current
+        );
+        acquireWatch();
+        return;
+      }
+    } catch {
+      /* stay paused and offer a retry — never strand the rider */
+    }
+    setView((v) => ({ ...v, rerouting: false, resumeFailed: true }));
+  }, [load]);
+
+  /** Skip the current stop without visiting it and carry on to the next leg. */
+  const skipStop = useCallback(async () => {
+    const s = sessionRef.current;
+    if (!s || isFinalLeg(s)) return;
+    if (s.phase === "guiding") s.phase = "pausedAtStop";
+    await resume();
+  }, [resume]);
+
+  /** Manual "I'm here" — the rider declares arrival instead of waiting for the
+   * radius, so stopping short of the stop can't leave them without a Continue. */
+  const declareArrival = useCallback(() => {
+    const s = sessionRef.current;
+    if (!s || s.phase !== "guiding") return;
+    handleArrival(s, lastPos.current ?? s.legDestination, 0, null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const stop = useCallback(() => {
+    releaseWatch();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
     sessionRef.current = null;
+    lastPos.current = null;
+    clearTripProgress();
     setView(INITIAL);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const setVoiceEnabled = useCallback((on: boolean) => {
@@ -454,5 +802,15 @@ export function useNavigation() {
     if (watchId.current != null) navigator.geolocation.clearWatch(watchId.current);
   }, []);
 
-  return { ...view, start, stop, setVoiceEnabled, setCalmMode, wake };
+  return {
+    ...view,
+    start,
+    stop,
+    resume,
+    skipStop,
+    declareArrival,
+    setVoiceEnabled,
+    setCalmMode,
+    wake,
+  };
 }

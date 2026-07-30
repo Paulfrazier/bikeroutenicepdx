@@ -2,6 +2,23 @@ import CoreLocation
 import Observation
 import UIKit
 
+/// Where the rider is in a trip.
+///
+/// `arrived` is terminal. `pausedAtStop` is the leg boundary on a multi-stop
+/// trip: guidance is suspended — GPS, voice, screen wake and the Live Activity
+/// are all released — but the session stays bound so Continue can resume it.
+///
+/// This is deliberately an enum rather than a second boolean beside `arrived`.
+/// `arrived` is load-bearing control flow (it suppresses arrival re-entry,
+/// off-route evaluation, and the screen-wake invariant), so a pause state that
+/// left it `false` would re-fire arrival on every queued fix, reroute the rider
+/// while they're inside the shop, and re-acquire the wake lock on foregrounding.
+enum NavPhase {
+    case guiding
+    case pausedAtStop
+    case arrived
+}
+
 /// Live turn-by-turn navigation state. Sibling to `RouteStore` (which stays the
 /// planner): when the rider taps "Start", this snapshots the planned route and
 /// drives guidance off continuous GPS — chase-camera heading, step progression,
@@ -10,13 +27,25 @@ import UIKit
 /// It deliberately does NOT own route *planning*. On reroute it publishes a fresh
 /// route into `store.snapped` (so the map line updates) and restores the original
 /// planned route when navigation ends, leaving vias/manual edits untouched.
+///
+/// A multi-stop trip is navigated **one leg at a time**: the session snapshots
+/// the stop list at `start()` and only ever targets the current leg's end, so an
+/// off-route reroute has nothing downstream to thread through. Arriving at an
+/// intermediate stop pauses rather than finishes — see `NavPhase`.
 @MainActor
 @Observable
 final class NavigationSession {
     // MARK: - Lifecycle state
     var isNavigating = false
-    var arrived = false
+    private(set) var navPhase: NavPhase = .guiding
+    /// Terminal arrival — the whole trip is done. Read by the HUD, Live Activity
+    /// and Watch bridge, all of which mean exactly that. Computed so every write
+    /// site has to go through a phase transition.
+    var arrived: Bool { navPhase == .arrived }
     var isRerouting = false
+    /// Set when a Continue couldn't fetch the next leg (offline at the shop).
+    /// The HUD offers a retry; the session stays paused rather than advancing.
+    private(set) var resumeFailed = false
 
     // MARK: - Live position
     var currentLocation: CLLocationCoordinate2D?
@@ -69,18 +98,74 @@ final class NavigationSession {
     private(set) var traceLocations: [CLLocation] = []
     private var rideStartedAt: Date?
 
+    /// Trip-wide greenway tally. `steps` only ever holds the *current* leg (and
+    /// is replaced again on every reroute), so a Ride computed from it would
+    /// describe the last geometry loaded rather than the trip. These accumulate
+    /// the ridden portion of each route before it is thrown away.
+    private var tripFriendlyMeters: Double = 0
+    private var tripTotalMeters: Double = 0
+    /// Whether the currently-loaded geometry has already been folded into the
+    /// tally above. Reset by `load(route:)`.
+    private var greenwayFolded = false
+
     // MARK: - Prompt bookkeeping (so each cue fires once per step per route)
     private var spokenPrepare: Set<Int> = []
     private var spokenNow: Set<Int> = []
     private var announcedEntry: Set<Int> = []
     private var offRouteSince: Date?
     private var lastRerouteAt: Date?
-    /// Stops the rider has already arrived at this session. A reroute routes
-    /// through the ones NOT in here, so an errand list survives going off-route
-    /// without sending the rider back to a stop they've already made.
-    private var reachedStopIDs: Set<UUID> = []
     /// Last utterance — drives the long-straight reassurance prompt.
     private var lastSpokenAt = Date()
+
+    // MARK: - Trip / leg state
+    //
+    // A trip is a SNAPSHOT taken at `start()`: reading `store.stops` live would
+    // let a mid-trip planner edit corrupt leg indexing. Navigation then walks
+    // the snapshot one leg at a time, and only ever targets the current leg's
+    // destination — which is what makes an off-route reroute correct with no
+    // waypoints at all.
+
+    /// Ordered intermediate stops for this trip, snapshotted at `start()`.
+    private(set) var tripStops: [Via] = []
+    /// The final destination, snapshotted at `start()`.
+    private var tripEnd: Waypoint?
+    /// Which leg we're on. Leg *i* ends at `tripStops[i]`; the last leg ends at
+    /// `tripEnd`.
+    private(set) var legIndex = 0
+    /// Where the current leg ends — the only thing navigation ever targets.
+    private(set) var legDestination: CLLocationCoordinate2D?
+    /// Display name of the current leg's destination, if it has one.
+    private(set) var legLabel: String?
+
+    /// True when this trip has intermediate stops at all. A plain A→B trip takes
+    /// the original whole-route path end to end.
+    var isMultiStop: Bool { !tripStops.isEmpty }
+    /// Total legs in the trip (stops + the final destination).
+    var legCount: Int { tripStops.count + 1 }
+    /// "Stop 1 of 2" while heading to an intermediate stop, "Final leg" on the
+    /// run to the destination. Nil on a plain A→B trip, which has no legs to
+    /// count and shows no chip at all.
+    var legProgressLabel: String? {
+        guard isMultiStop else { return nil }
+        return isFinalLeg ? "Final leg" : "Stop \(legIndex + 1) of \(tripStops.count)"
+    }
+
+    /// Whether to offer the manual "I'm here" affordance: on a multi-stop trip,
+    /// while actually guiding, once we're in the neighbourhood of an
+    /// intermediate stop. The final leg doesn't need it — End already finishes
+    /// the trip and banks the Ride.
+    var showManualArrival: Bool {
+        navPhase == .guiding && isMultiStop && !isFinalLeg
+            && distanceRemaining < Self.manualArrivalWithinM
+    }
+
+    /// Name of the *next* leg's destination — the "Continue to X" label.
+    var nextLegLabel: String? {
+        let next = legIndex + 1
+        if next < tripStops.count { return tripStops[next].label }
+        if next == tripStops.count { return tripEnd?.label }
+        return nil
+    }
 
     /// Quiet-period + upcoming-turn gates for reassurance (mirrors web).
     private static let reassureAfterS: TimeInterval = 120
@@ -100,6 +185,25 @@ final class NavigationSession {
     private static let cruiseBeyondM: Double = 400
     private static let cruiseMaxOffRouteM: Double = 15
 
+    // MARK: - Arrival + off-route thresholds
+    //
+    // Named because they are shared cross-surface (see scripts/check-parity.ts)
+    // and because leaving them as inline literals is how the old stop-proximity
+    // radius came to overlap the off-route radius unnoticed.
+
+    /// Terminal arrival: the trip is over.
+    static let arrivedMeters: Double = 15
+    /// Leg arrival at an intermediate stop. Deliberately more generous than
+    /// terminal arrival — the rider parks, locks up, and walks the last few
+    /// metres, and if this never fires they never get a Continue button. The
+    /// HUD's manual "I'm here" is the backstop when even this misses.
+    static let legArrivedMeters: Double = 30
+    /// Perpendicular distance from the route line before we consider rerouting.
+    /// (Named `…ThresholdM` so it doesn't shadow the `offRouteMeters` reading.)
+    static let offRouteThresholdM: Double = 30
+    /// Show the manual "I'm here" affordance inside this range of the leg end.
+    static let manualArrivalWithinM: Double = 150
+
     // MARK: - Wiring
 
     func bind(_ store: RouteStore) {
@@ -118,14 +222,24 @@ final class NavigationSession {
     // MARK: - Start / stop
 
     /// Begin navigating the currently planned route (`store.snapped`).
+    ///
+    /// On a multi-stop trip this snapshots the stop list and guides on **leg 0
+    /// only**, sliced out of the route the rider just reviewed — no extra
+    /// network call, and the line is exactly what they saw in the planner. A
+    /// plain A→B trip has no legs to slice and takes the whole route unchanged.
     func start() {
         guard let snap = store?.snapped, snap.coordinates.count >= 2 else { return }
         originalSnapped = snap
-        load(route: snap)
+        tripStops = store?.stops ?? []
+        tripEnd = store?.end
+        legIndex = 0
+        retargetLeg()
+        tripFriendlyMeters = 0
+        tripTotalMeters = 0
+        load(route: legRoute(from: snap, leg: 0) ?? snap)
         traceLocations = []
         rideStartedAt = Date()
-        arrived = false
-        reachedStopIDs = []
+        navPhase = .guiding
         isNavigating = true
         smoothedSpeed = 0
         hudDimmed = false
@@ -156,14 +270,40 @@ final class NavigationSession {
         liveActivityEnd()
         watchEnd()
         isNavigating = false
-        arrived = false
+        navPhase = .guiding
         isRerouting = false
         hudDimmed = false
         // Restore the planned route under the map.
         if let original = originalSnapped { store?.snapped = original }
         originalSnapped = nil
         currentLocation = nil
+        clearTripState()
         return ride
+    }
+
+    /// Write the resume record. Only meaningful for a multi-stop trip — a plain
+    /// A→B ride has nothing to resume to.
+    private func persistTripProgress() {
+        guard isMultiStop, let end = tripEnd, let started = rideStartedAt else { return }
+        TripProgressStore.save(
+            TripProgress(
+                stops: tripStops.map { TripProgress.Place($0.coordinate, label: $0.label) },
+                end: TripProgress.Place(end.coordinate, label: end.label),
+                legIndex: legIndex,
+                startedAt: started
+            )
+        )
+    }
+
+    /// Drop the trip snapshot and its persisted resume record. Called on the
+    /// one-per-trip teardown, never on a leg boundary.
+    private func clearTripState() {
+        tripStops = []
+        tripEnd = nil
+        legIndex = 0
+        legDestination = nil
+        legLabel = nil
+        TripProgressStore.clear()
     }
 
     /// Load a route snapshot and reset per-route prompt state.
@@ -182,6 +322,8 @@ final class NavigationSession {
         spokenNow = []
         announcedEntry = []
         currentStepIndex = 0
+        arcAlong = 0
+        greenwayFolded = false
         nextManeuverIndex = stepArcs.isEmpty ? nil : 0
     }
 
@@ -199,7 +341,11 @@ final class NavigationSession {
     }
 
     private func recomputeProgress() {
-        guard let loc = currentLocation, routeCoords.count >= 2 else { return }
+        // Only the guiding phase drives progress. `provider.stop()` does not
+        // cancel fixes already queued, so without this gate a straggler landing
+        // after a leg pause would re-fire arrival and restart the whole cadence.
+        guard navPhase == .guiding, let loc = currentLocation,
+              routeCoords.count >= 2 else { return }
         arcAlong = GeoMath.arcLength(of: loc, in: routeCoords)
         offRouteMeters = GeoMath.distanceToPolyline(loc, routeCoords)
         distanceRemaining = max(0, totalLength - arcAlong)
@@ -207,8 +353,7 @@ final class NavigationSession {
             timeRemaining = durationSeconds * (distanceRemaining / totalLength)
         }
         updateStepProgress()
-        updateReachedStops(loc)
-        if !arrived, distanceRemaining < 15 {
+        if distanceRemaining < arrivalRadius {
             handleArrival()
             return
         }
@@ -221,23 +366,49 @@ final class NavigationSession {
         watchUpdate()
     }
 
-    /// Radius within which a stop counts as reached. Generous — the rider parks
-    /// and walks the last few metres, and a stop must never be re-inserted into
-    /// a reroute after they've already been there.
-    private static let stopReachedMeters: Double = 40
+    /// True when the current leg ends at the trip's final destination.
+    var isFinalLeg: Bool { legIndex >= tripStops.count }
 
-    /// Mark stops the rider has arrived at. Only forward progress counts, so a
-    /// stop stays reached even if they wander back past it afterwards.
-    private func updateReachedStops(_ loc: CLLocationCoordinate2D) {
-        guard let store else { return }
-        for stop in store.stops where !reachedStopIDs.contains(stop.id) {
-            if GeoMath.distance(loc, stop.coordinate) <= Self.stopReachedMeters {
-                reachedStopIDs.insert(stop.id)
-                if let label = stop.label {
-                    say("Arriving at \(label).")
-                }
-            }
+    /// How close counts as arriving at the current leg's end. Intermediate stops
+    /// get the more generous radius — see `legArrivedMeters`.
+    private var arrivalRadius: Double {
+        isFinalLeg ? Self.arrivedMeters : Self.legArrivedMeters
+    }
+
+    /// Point the session at leg `legIndex`'s destination — the only thing
+    /// navigation ever targets.
+    private func retargetLeg() {
+        if legIndex < tripStops.count {
+            legDestination = tripStops[legIndex].coordinate
+            legLabel = tripStops[legIndex].label
+        } else {
+            legDestination = tripEnd?.coordinate
+            legLabel = tripEnd?.label
         }
+    }
+
+    /// Slice one leg out of an already-fetched multi-stop route: the coordinate
+    /// span `legs[i].coord_start...coord_end` plus the steps tagged with that
+    /// `leg_index`. Returns nil when the route carries no leg breakdown (a plain
+    /// A→B trip), so callers fall back to the whole route unchanged.
+    private func legRoute(from route: SnappedRoute, leg: Int) -> SnappedRoute? {
+        guard route.legs.indices.contains(leg) else { return nil }
+        let span = route.legs[leg]
+        let coords = route.coordinates
+        guard span.coord_start >= 0, span.coord_end < coords.count,
+              span.coord_start < span.coord_end else { return nil }
+        var sliced = route
+        sliced.coordinates = Array(coords[span.coord_start...span.coord_end])
+        sliced.steps = route.steps.filter { $0.leg_index == leg }
+        // Classes are per-segment, so one shorter than the coordinate span.
+        sliced.routeClasses = route.routeClasses.map {
+            Array($0[span.coord_start..<min(span.coord_end, $0.count)])
+        }
+        sliced.distanceMeters = span.distance_m
+        sliced.durationSeconds = span.duration_s
+        sliced.coverage = span.greenway_coverage
+        sliced.legs = []
+        return sliced
     }
 
     /// The next maneuver = first step whose arc-length is meaningfully ahead of us.
@@ -303,7 +474,7 @@ final class NavigationSession {
     /// Long-straight reassurance: quiet for a while, no turn coming up, still
     /// on route → confirm the rider hasn't been forgotten. Calm mode skips it.
     private func evaluateReassurance() {
-        guard !calmMode, offRouteMeters <= 30,
+        guard !calmMode, offRouteMeters <= Self.offRouteThresholdM,
               distanceToNextManeuver > Self.reassureMinAheadM,
               Date().timeIntervalSince(lastSpokenAt) > Self.reassureAfterS else { return }
         let ahead = VoiceGuide.spokenDistanceBare(distanceToNextManeuver)
@@ -368,8 +539,8 @@ final class NavigationSession {
     // MARK: - Off-route auto-reroute (Phase 3)
 
     private func evaluateOffRoute() {
-        guard isNavigating, !isRerouting, !arrived else { return }
-        if offRouteMeters > 30 {
+        guard isNavigating, !isRerouting, navPhase == .guiding else { return }
+        if offRouteMeters > Self.offRouteThresholdM {
             if offRouteSince == nil { offRouteSince = Date() }
             let offFor = Date().timeIntervalSince(offRouteSince ?? Date())
             let sinceLast = lastRerouteAt.map { Date().timeIntervalSince($0) } ?? .infinity
@@ -382,18 +553,21 @@ final class NavigationSession {
         }
     }
 
-    /// Recompute current → destination via the planner's BRouter path (keeps
-    /// greenway quality), swap it under the map, and continue guiding on it.
+    /// Recompute current → **this leg's** destination via the planner's BRouter
+    /// path (keeps greenway quality), swap it under the map, and continue
+    /// guiding on it.
+    ///
+    /// No waypoints. With navigation scoped to a single leg there is nothing
+    /// downstream to thread through, so the `vias: []` behaviour that used to
+    /// silently cancel the rest of an errand is now correct by construction.
     private func reroute() async {
-        guard let store, let from = currentLocation, let end = store.end?.coordinate else { return }
+        guard let store, let from = currentLocation, let end = legDestination else { return }
         isRerouting = true
         lastRerouteAt = Date()
         say("Off route — rerouting.")
-        // Stops the rider hasn't reached yet must survive the reroute — dropping
-        // them would silently cancel the rest of the errand. Reshape vias are
-        // NOT carried over: they shaped a line the rider has already left.
-        let remaining = store.stops.filter { !reachedStopIDs.contains($0.id) }
-        if let fresh = await store.navReroute(from: from, to: end, remainingStops: remaining) {
+        if let fresh = await store.navReroute(from: from, to: end) {
+            // Fold in what was actually ridden before discarding this geometry.
+            accumulateRiddenGreenway()
             load(route: fresh)
             // Re-anchor progress to the fresh geometry immediately.
             recomputeProgress()
@@ -404,18 +578,97 @@ final class NavigationSession {
 
     // MARK: - Arrival
 
+    /// End of a leg. On the final leg this is the trip's terminal arrival. On an
+    /// intermediate stop it is a *pause*: everything is released exactly as
+    /// before, but the session stays bound so `resume()` can pick it up — and
+    /// the trip is written to disk so it survives the app being killed while
+    /// the rider is inside the shop.
     private func handleArrival() {
-        arrived = true
         setScreenWake(false)
         hudDimmed = false
         nextManeuverIndex = nil
         distanceToNextManeuver = 0
         distanceRemaining = 0
         voice.turnHaptic()
-        voice.speak("You've arrived. Enjoy the ride.")
+        if isFinalLeg {
+            navPhase = .arrived
+            voice.speak("You've arrived. Enjoy the ride.")
+            TripProgressStore.clear()
+        } else {
+            navPhase = .pausedAtStop
+            let here = legLabel.map { "Arrived at \($0)." } ?? "Arrived at your stop."
+            let onward = nextLegLabel.map { " Continue to \($0) when you're ready." } ?? ""
+            voice.speak(here + onward)
+            persistTripProgress()
+        }
         provider.stop()
         liveActivityEnd()
         watchEnd()
+    }
+
+    /// Manual "I'm here". The rider tells us they've arrived instead of waiting
+    /// for the radius to fire — the backstop for locking up across the street,
+    /// where proximity alone would leave them with no Continue button at all.
+    func declareArrival() {
+        guard navPhase == .guiding else { return }
+        handleArrival()
+    }
+
+    /// Continue to the next leg.
+    ///
+    /// Fetches a **fresh** route from wherever the rider is standing now, rather
+    /// than slicing the next leg out of the original plan: after twenty minutes
+    /// they're round the corner from where that leg started, and a sliced line
+    /// would begin metres away and immediately trigger an off-route reroute.
+    /// Better a deliberate re-route than an emergent one.
+    ///
+    /// Must not touch `traceLocations` / `rideStartedAt` — accumulating the
+    /// trace across legs is what yields one Ride for the whole trip.
+    func resume() async {
+        guard navPhase == .pausedAtStop, !isFinalLeg,
+              let store, let from = currentLocation else { return }
+        legIndex += 1
+        retargetLeg()
+        guard let end = legDestination else {
+            legIndex -= 1
+            retargetLeg()
+            return
+        }
+        isRerouting = true
+        resumeFailed = false
+        guard let fresh = await store.navReroute(from: from, to: end) else {
+            // Stay paused and surface a retry. Never strand the rider in a
+            // half-advanced state with GPS off.
+            legIndex -= 1
+            retargetLeg()
+            isRerouting = false
+            resumeFailed = true
+            return
+        }
+        // Fold in the leg just finished before its geometry is discarded.
+        accumulateRiddenGreenway()
+        load(route: fresh)
+        navPhase = .guiding
+        isRerouting = false
+        offRouteSince = nil
+        hudDimmed = false
+        dimWakeUntil = .distantPast
+        persistTripProgress()
+        setScreenWake(true)
+        voice.activate()
+        provider.start()
+        liveActivityStart()
+        lastSpokenAt = Date()
+        voice.speak(legLabel.map { "Continuing to \($0)." } ?? "Continuing.")
+        recomputeProgress()
+    }
+
+    /// Skip the current stop without visiting it (the bakery turned out to be
+    /// closed) and carry on to the next leg.
+    func skipStop() async {
+        guard !isFinalLeg else { return }
+        if navPhase == .guiding { navPhase = .pausedAtStop }
+        await resume()
     }
 
     // MARK: - Battery-saver dim + adaptive GPS
@@ -426,13 +679,13 @@ final class NavigationSession {
     private func evaluateDim() {
         let wakeHeld = Date() < dimWakeUntil
         if hudDimmed {
-            if distanceToNextManeuver < Self.undimWithinM || offRouteMeters > 30
+            if distanceToNextManeuver < Self.undimWithinM || offRouteMeters > Self.offRouteThresholdM
                 || isRerouting || wakeHeld {
                 hudDimmed = false
             }
         } else if !wakeHeld,
                   distanceToNextManeuver > Self.dimBeyondM,
-                  offRouteMeters <= 30,
+                  offRouteMeters <= Self.offRouteThresholdM,
                   !isRerouting,
                   Date().timeIntervalSince(lastSpokenAt) > Self.dimAfterQuietS {
             hudDimmed = true
@@ -460,16 +713,18 @@ final class NavigationSession {
 
     /// Keep the display on while actively navigating — the map is the rider's
     /// dashboard. `isIdleTimerDisabled` is app-global, so the invariant is:
-    /// disabled ⇔ (foreground + navigating + not arrived).
+    /// disabled ⇔ (foreground + navigating + actively guiding).
     private func setScreenWake(_ on: Bool) {
         UIApplication.shared.isIdleTimerDisabled = on
     }
 
     /// Re-assert the wake invariant on scene-phase transitions (the app calls
     /// this): background always releases; returning to foreground re-acquires
-    /// only if a ride is still in progress.
+    /// only while actually guiding. Keyed on the phase, not on `arrived` — a
+    /// rider paused at a stop must not have the screen pinned on for the twenty
+    /// minutes they're inside the shop.
     func syncScreenWake(foreground: Bool) {
-        setScreenWake(foreground && isNavigating && !arrived)
+        setScreenWake(foreground && isNavigating && navPhase == .guiding)
     }
 
     // MARK: - Ride recording (Phase 6)
@@ -482,15 +737,18 @@ final class NavigationSession {
         let coords = traceLocations.map(\.coordinate)
         let distance = GeoMath.length(coords)
         guard distance > 50 else { return nil }
+        // Wall-clock: a multi-stop errand's Ride spans the whole outing,
+        // including the time spent at each stop. Deliberate — it answers "how
+        // long did that trip take" — but it means average speed derived from
+        // these two numbers is not a riding speed.
         let duration = (traceLocations.last?.timestamp ?? Date()).timeIntervalSince(started)
-        // Greenway share: fraction of the *planned* route length on comfortable
-        // infra (rank ≥ 2), a close proxy for the ride that followed it.
-        let greenwayPct = plannedGreenwayShare()
+        // Fold in the leg still loaded, then report the trip-wide share.
+        accumulateRiddenGreenway()
         let ride = Ride(
             date: started,
             distanceMeters: distance,
             durationSeconds: max(duration, 0),
-            greenwayShare: greenwayPct,
+            greenwayShare: tripGreenwayShare,
             coordinates: coords
         )
         RideStore.shared.add(ride)
@@ -498,13 +756,35 @@ final class NavigationSession {
         return ride
     }
 
-    /// Length-weighted share of route steps on comfortable infrastructure.
-    private func plannedGreenwayShare() -> Double {
-        let total = steps.reduce(0) { $0 + $1.distance_m }
-        guard total > 0 else { return 0 }
+    /// Length-weighted share of the trip ridden on comfortable infrastructure
+    /// (rank ≥ 2), across every leg and every reroute.
+    private var tripGreenwayShare: Double {
+        tripTotalMeters > 0 ? tripFriendlyMeters / tripTotalMeters : 0
+    }
+
+    /// Fold the portion of the currently-loaded route the rider actually covered
+    /// into the trip-wide tally, then leave it consumed.
+    ///
+    /// Called immediately before any geometry swap (leg transition or reroute)
+    /// and once at teardown. Without this the Ride's greenway share would
+    /// describe only the last geometry loaded — the final leg of a multi-stop
+    /// trip, or whatever a late reroute happened to produce.
+    private func accumulateRiddenGreenway() {
+        guard !greenwayFolded, totalLength > 0, !steps.isEmpty else { return }
+        let ridden = min(max(arcAlong, 0), totalLength)
+        guard ridden > 0 else { return }
+        let planned = steps.reduce(0) { $0 + $1.distance_m }
+        guard planned > 0 else { return }
         let friendly = steps.filter { protectionRank($0.bicycle_network_class) >= 2 }
             .reduce(0) { $0 + $1.distance_m }
-        return friendly / total
+        // Assume the facility mix is uniform along the leg — the same
+        // approximation the original whole-route calculation made.
+        let fraction = ridden / totalLength
+        tripTotalMeters += planned * fraction
+        tripFriendlyMeters += friendly * fraction
+        // Consumed until the next `load(route:)`, so a stray second call before
+        // the geometry actually swaps cannot double-count it.
+        greenwayFolded = true
     }
 
     // MARK: - External surfaces (Live Activity / Watch) — wired in their phases

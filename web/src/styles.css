@@ -1776,6 +1776,65 @@ button {
 }
 .nav-hud__end:active { transform: translateY(1px); }
 
+/* ── Multi-stop legs ──────────────────────────────────────────────────────── */
+
+/* "Stop 1 of 2" — the stats above describe the current leg, not the whole trip. */
+.nav-hud__leg-chip {
+  align-self: flex-start;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(21, 128, 61, 0.14);
+  color: #15803d;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+/* Commit actions for a leg pause, kept down here in the thumb zone. */
+.nav-hud__leg-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.nav-hud__leg-actions-row {
+  display: flex;
+  gap: 10px;
+}
+.nav-hud__leg-actions-row > * { flex: 1; }
+
+.nav-hud__continue {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 14px;
+  background: #15803d;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-hud__continue:active { transform: translateY(1px); }
+.nav-hud__continue:disabled { opacity: 0.6; cursor: default; }
+
+.nav-hud__leg-secondary {
+  width: 100%;
+  padding: 12px;
+  border: 1.5px solid rgba(21, 128, 61, 0.45);
+  border-radius: 14px;
+  background: transparent;
+  color: #15803d;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.nav-hud__leg-secondary:active { transform: translateY(1px); }
+.nav-hud__leg-secondary:disabled { opacity: 0.55; cursor: default; }
+
+/* The manual "I'm here" backstop sits directly above End. */
+.nav-hud__im-here { margin-bottom: 10px; }
+
 /* Battery-saver dim overlay: below the HUD (z-index 50) so its controls stay
  * tappable; capped opacity keeps the map readable. Tap anywhere to wake. */
 .nav-dim {
@@ -1790,6 +1849,8 @@ button {
 @media (prefers-color-scheme: dark) {
   .nav-hud__toggle { background: rgba(120, 120, 128, 0.28); color: #f2f2f7; }
   .nav-hud__progress { background: rgba(120, 120, 128, 0.35); }
+  .nav-hud__leg-chip { background: rgba(34, 197, 94, 0.22); color: #4ade80; }
+  .nav-hud__leg-secondary { border-color: rgba(74, 222, 128, 0.5); color: #4ade80; }
 }
 
 /* Let the map fill the screen while navigating (side panel/drawer are hidden). */
