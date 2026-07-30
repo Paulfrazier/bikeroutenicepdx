@@ -6,6 +6,10 @@ build/
 build-device/
 DerivedData/
 
+# TestFlight credentials — App Store Connect key id / issuer id.
+# The .p8 itself lives in ~/.appstoreconnect/private_keys/, never in the repo.
+.testflight.env
+
 # macOS
 .DS_Store
 
