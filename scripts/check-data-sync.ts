@@ -42,6 +42,27 @@ const GROUPS: Group[] = [
     script: "npm run export:bike-network",
     targets: [WEB, IOS, SERVER],
   },
+  // One layer per publishing agency (see scripts/lib/jurisdictions.ts).
+  // bike-network.geojson above is the merged view of these same features, which
+  // is what build-graph.ts and every client actually read — so these are WEB
+  // ONLY. Bundling them into iOS as well would double the app for files nothing
+  // there opens. Single-target entries still get an existence check, so a
+  // half-finished export run is caught.
+  {
+    file: "bike-network.portland.geojson",
+    script: "npm run export:bike-network",
+    targets: [WEB],
+  },
+  {
+    file: "bike-network.rlis.geojson",
+    script: "npm run export:bike-network",
+    targets: [WEB],
+  },
+  {
+    file: "bike-network.manifest.json",
+    script: "npm run export:bike-network",
+    targets: [WEB, IOS, SERVER],
+  },
   {
     file: "greenways.geojson",
     script: "npm run export:greenways",

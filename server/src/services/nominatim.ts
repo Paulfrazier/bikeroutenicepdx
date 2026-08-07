@@ -36,11 +36,19 @@ interface NominatimResult {
 }
 
 // ---------------------------------------------------------------------------
-// Portland metro bounding box
+// Portland metro bounding box — a ranking *bias*, not a filter.
 // Nominatim viewbox format: lon_min,lat_max,lon_max,lat_min (unusual — documented)
-// SW corner: ~-123.0, 45.3  NE corner: ~-122.3, 45.7
+// SW corner: ~-123.3, 45.1  NE corner: ~-122.1, 45.9
+//
+// Widened from -123.0/45.3/-122.3/45.7 to take in the full metro: Forest Grove
+// and Cornelius west, Battle Ground and Ridgefield north, Wilsonville and Canby
+// south, Sandy and Washougal east.
+//
+// Paired with `bounded=0` (see geocodeSearch). Same reasoning as photon.ts: a
+// hard bound drops the correct hit and surfaces a confidently wrong nearby
+// street, which is the worse failure mode.
 // ---------------------------------------------------------------------------
-const PORTLAND_VIEWBOX = "-123.0,45.7,-122.3,45.3";
+const METRO_VIEWBOX = "-123.3,45.9,-122.1,45.1";
 
 // User-Agent required by Nominatim usage policy.
 // Without it, requests are rate-limited more aggressively.
@@ -289,8 +297,10 @@ export async function geocodeSearch(
     q: query,
     format: "jsonv2",
     limit: String(Math.min(limit, 10)),
-    viewbox: PORTLAND_VIEWBOX,
-    bounded: "1",
+    viewbox: METRO_VIEWBOX,
+    // Bias, don't bound. bounded=1 made out-of-box queries return a wrong
+    // in-box street rather than the right place. See METRO_VIEWBOX note.
+    bounded: "0",
     addressdetails: "1",
   });
 

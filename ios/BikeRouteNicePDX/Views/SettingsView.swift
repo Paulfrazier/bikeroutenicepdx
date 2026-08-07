@@ -45,6 +45,21 @@ struct SettingsView: View {
                 } footer: {
                     Text(engineHint)
                 }
+
+                Section {
+                    Link("OpenStreetMap (ODbL)", destination: URL(string: "https://openstreetmap.org")!)
+                    ForEach(attributions) { entry in
+                        if let url = entry.url {
+                            Link(entry.display, destination: url)
+                        } else {
+                            Text(entry.display)
+                        }
+                    }
+                } header: {
+                    Text("Data sources")
+                } footer: {
+                    Text("Routing runs on OpenStreetMap. Bike facilities come from the agencies above.")
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -58,6 +73,10 @@ struct SettingsView: View {
             }
         }
     }
+
+    /// Bundled data credits (PBOT, Metro RLIS, …). Read once — the manifest is
+    /// a static bundle resource, so there's nothing to refresh.
+    private var attributions: [DataAttribution] { DataAttributionLoader.load() }
 
     /// One-line explanation of the selected engine.
     private var engineHint: String {

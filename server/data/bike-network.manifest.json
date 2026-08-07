@@ -1,0 +1,32 @@
+[
+  {
+    "id": "portland",
+    "file": "bike-network.portland.geojson",
+    "bbox": [
+      -122.836004,
+      45.432035,
+      -122.433615,
+      45.646468
+    ],
+    "features": 11083,
+    "bytes": 3027823,
+    "fetchedAt": "2026-08-07",
+    "attribution": "PBOT",
+    "attributionUrl": "https://www.portland.gov/transportation"
+  },
+  {
+    "id": "rlis",
+    "file": "bike-network.rlis.geojson",
+    "bbox": [
+      -123.249138,
+      45.133779,
+      -121.714438,
+      45.875478
+    ],
+    "features": 18199,
+    "bytes": 6133877,
+    "fetchedAt": "2026-08-07",
+    "attribution": "© Oregon Metro",
+    "attributionUrl": "https://www.oregonmetro.gov/rlis"
+  }
+]

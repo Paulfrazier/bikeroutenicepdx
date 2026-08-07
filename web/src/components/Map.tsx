@@ -52,8 +52,12 @@ async function ensurePmtilesProtocol() {
   pmtilesProtocolAdded = true;
 }
 
+// Portland stays the default center — it's still where most riders start — but
+// the network now covers the metro (see scripts/lib/jurisdictions.ts), so open
+// one zoom step wider to put Beaverton, Milwaukie and Gresham in the first view
+// instead of making a suburban rider pan to find their own neighborhood.
 const PORTLAND_CENTER: LngLatLike = [-122.65, 45.52];
-const PORTLAND_ZOOM = 12;
+const PORTLAND_ZOOM = 11;
 
 // Free hosted vector basemap — no API key, no signup, no usage limits.
 // https://openfreemap.org

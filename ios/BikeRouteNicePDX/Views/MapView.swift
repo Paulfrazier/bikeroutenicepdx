@@ -21,11 +21,13 @@ struct MapView: UIViewRepresentable {
         // Setting showsUserLocation alone does NOT trigger the prompt.
         context.coordinator.requestLocationPermission()
 
-        // Center on Portland.
+        // Center on Portland — still where most rides start — but opened wide
+        // enough to show the metro network (Beaverton, Milwaukie, Gresham), which
+        // the overlay now covers. Mirrors the web map's default (Map.tsx).
         let center = CLLocationCoordinate2D(latitude: 45.52, longitude: -122.67)
         map.region = MKCoordinateRegion(
             center: center,
-            span: MKCoordinateSpan(latitudeDelta: 0.09, longitudeDelta: 0.09)
+            span: MKCoordinateSpan(latitudeDelta: 0.18, longitudeDelta: 0.18)
         )
 
         // Full Portland bike network overlay — added once, one overlay per

@@ -1,125 +1,90 @@
 /**
  * export-bike-network.ts
  *
- * Produces the full "Portland bike map" overlay GeoJSON for the front-ends:
- * every ACTIVE segment of the City's official Bicycle Network, classified by
- * facility type so the map can color greenways AND bike-friendly streets.
+ * Produces the bike-map overlay GeoJSON for the front-ends: every facility
+ * segment published by the agencies in scripts/lib/jurisdictions.ts, normalized
+ * to one `class` vocabulary so the map can color greenways, protected lanes and
+ * bike-friendly streets identically no matter who published them.
  *
- * SOURCE 1: City of Portland "Bicycle Network" layer (PortlandMaps Open Data).
- *   https://www.portlandmaps.com/od/rest/services/COP_OpenData_Transportation/MapServer/75
- *   This single authoritative layer carries both Neighborhood Greenways (NG)
- *   and on-street facilities (PBL/BBL/BL/...) via its `Facility` field. It
- *   replaces the older ArcGIS "Bicycle_Network"/FacilityType layer that PBOT
- *   retired, and supersedes the greenways-only export for display purposes.
+ * SOURCES: see scripts/lib/jurisdictions.ts — that registry is the only place
+ *   agency URLs, facility-code vocabularies and license strings live. Phase 1 is
+ *   City of Portland (PBOT) + Metro RLIS (the whole Oregon metro).
  *
- * SOURCE 2: PBOT "Recommended Bicycle Routes" layer 4 (the cartographic "Bike
- *   There!" map). https://www.portlandmaps.com/arcgis/rest/services/Public/PBOT_RecommendedBicycleRoutes/MapServer/4
- *   We pull ONLY its two shared-roadway classes via `ConnectionType`:
- *   SR_LT ("Shared Roadway, Low Traffic") and SR_MT ("…, Moderate Traffic").
- *   These are recommended quiet streets with NO built facility, so they're
- *   absent from source 1 — purely additive. Everything else in layer 4
- *   (NG/BL/BBL/MUP) we ignore because source 1 carries it with authoritative
- *   facility codes. They're why e.g. SE 16th south of Ladd Circle is a real
- *   recommended route even though it has no lane or greenway.
- *
- * WRITES: web/public/bike-network.geojson                       (web overlay)
- *         ios/BikeRouteNicePDX/Resources/bike-network.geojson    (bundled iOS)
- *         server/data/bike-network.geojson                       (server runtime)
+ * WRITES:
+ *   bike-network.geojson        merged view of every jurisdiction — the file all
+ *                               three clients and scripts/build-graph.ts read.
+ *                               → web/public, ios Resources, server/data
+ *   bike-network.manifest.json  { id, file, bbox, features, bytes, fetchedAt,
+ *                                 attribution, attributionUrl }[] — drives the
+ *                               credits UI on web + iOS.
+ *                               → web/public, ios Resources, server/data
+ *   bike-network.<id>.geojson   one file per jurisdiction, WEB ONLY. Same
+ *                               features as the merged file, so shipping them to
+ *                               iOS too would double the app bundle for files
+ *                               nothing there opens. They exist for viewport-
+ *                               scoped lazy loading (not yet wired up).
  *
  * Each feature: { type:"Feature", geometry:LineString|MultiLineString,
- *                 properties:{ class, facility, name? } }
- *   class    — normalized display category (see CLASS_MAP/SHARED_MAP), drives color
- *   facility — raw PBOT code (PBL/BBL/BL/NG/TRL/ESR/ABL/… or SR_LT/SR_MT)
- *   name     — SegmentName / StreetName when present
+ *                 properties:{ class, rclass, facility, name?, source, stress? } }
+ *   class    — normalized display category, drives color
+ *   rclass   — render class after the speed/stroad down-rate (see lib/render-class)
+ *   facility — the agency's raw code (PBL/BBL/NG/SR_LT/BKE-BLVD/…)
+ *   source   — jurisdiction id, so provenance is debuggable in the field
+ *   stress   — normalized traffic stress where the agency publishes one (RLIS)
+ *
+ * The manifest's `fetchedAt` is what the clients render next to Metro's
+ * attribution — Metro's license requires the date the data was received.
  *
  * EXTERNAL DEPS: none (Node built-ins: fs, path, fetch)
  * USAGE:  npm run export:bike-network
- * EXIT CODES: 0 wrote both files · 1 fetch failed / empty result
+ * EXIT CODES: 0 wrote every target · 1 fetch failed / a jurisdiction came back empty
  */
 
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { bakeRenderClass, MIN_FAST_MPH, MIN_STROAD_LANES } from "./lib/render-class.js";
+import {
+  JURISDICTIONS,
+  type DisplayClass,
+  type Jurisdiction,
+  type SourceSpec,
+} from "./lib/jurisdictions.js";
+import { contains, loadCityBoundary, representativePoint, type Boundary } from "./lib/boundary.js";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
 
-// ---------------------------------------------------------------------------
-// Config
-// ---------------------------------------------------------------------------
+const COORD_PRECISION = 6;
 
-const LAYER_URL =
-  "https://www.portlandmaps.com/od/rest/services/COP_OpenData_Transportation/MapServer/75";
-const PAGE_SIZE = 200; // layer maxRecordCount
-const WHERE = "Status='ACTIVE'";
-const OUT_FIELDS = "Facility,SegmentName,SCS";
+const WEB_DIR = path.join(REPO_ROOT, "web", "public");
+const IOS_DIR = path.join(REPO_ROOT, "ios", "BikeRouteNicePDX", "Resources");
+const SERVER_DIR = path.join(REPO_ROOT, "server", "data");
 
-// SOURCE 2 — PBOT Recommended Bicycle Routes layer 4: pull ONLY the two
-// shared-roadway classes (recommended quiet streets with no built facility).
-const SHARED_LAYER_URL =
-  "https://www.portlandmaps.com/arcgis/rest/services/Public/PBOT_RecommendedBicycleRoutes/MapServer/4";
-const SHARED_PAGE_SIZE = 1000; // layer maxRecordCount is 2000; stay well under
-const SHARED_WHERE = "ConnectionType IN ('SR_LT','SR_MT')";
-const SHARED_FIELDS = "ConnectionType,StreetName";
+/** Surfaces that read the merged network + the manifest: web fetches them at
+ * runtime, iOS bundles them into the app, the server reads them per-process. */
+const TARGET_DIRS = [WEB_DIR, IOS_DIR, SERVER_DIR];
 
-// PBOT Facility code -> normalized display class.
-// Order of color priority for the map legend: protected > buffered > greenway
-// > path > lane > shared. `calm`/`calm_mod` come from source 2 (SR_LT/SR_MT).
-type DisplayClass =
-  | "greenway"
-  | "path"
-  | "protected"
-  | "buffered"
-  | "lane"
-  | "shared"
-  | "calm" // SR_LT — shared roadway, low traffic (just below greenway)
-  | "calm_mod"; // SR_MT — shared roadway, moderate traffic (below buffered)
+/**
+ * Per-jurisdiction layers go to web only, on purpose.
+ *
+ * They hold exactly the same features as the merged bike-network.geojson, so
+ * shipping both to iOS doubles the app bundle (~9 MB of duplication) for files
+ * nothing on that platform opens — iOS reads the merged file and the manifest.
+ * The server likewise only ever loads the merged view.
+ *
+ * Web keeps them because they're the artifact viewport-scoped lazy loading will
+ * consume: the manifest's per-jurisdiction bbox lets the client fetch only the
+ * regions a route or viewport actually touches, instead of the whole metro. That
+ * is not wired up yet — web still eagerly loads the merged file.
+ */
+const PARTS_DIRS = [WEB_DIR];
 
-const CLASS_MAP: Record<string, DisplayClass> = {
-  NG: "greenway", // Neighborhood Greenway
-  TRL: "path", // Off-Street Paths/Trails
-  PBL: "protected", // Protected Bike Lane
-  SIR: "protected", // Separated in-Roadway
-  BBL: "buffered", // Buffered Bike Lane
-  BBBL: "buffered", // Buffered variants
-  SBBL: "buffered",
-  BL: "lane", // Bike Lane
-  ABL: "lane", // Advisory Bike Lane
-  ESR: "shared", // Enhanced Shared Roadway
-};
-
-// PBOT layer-4 ConnectionType -> normalized display class (shared roadways only).
-const SHARED_MAP: Record<string, DisplayClass> = {
-  SR_LT: "calm", // Shared Roadway, Low Traffic
-  SR_MT: "calm_mod", // Shared Roadway, Moderate Traffic
-};
-
-const OUT_WEB = path.join(REPO_ROOT, "web", "public", "bike-network.geojson");
-const OUT_IOS = path.join(
-  REPO_ROOT,
-  "ios",
-  "BikeRouteNicePDX",
-  "Resources",
-  "bike-network.geojson"
-);
-// The server also needs the classified network at runtime to compute per-step
-// greenway class + coverage (server/src/services/greenway-coverage.ts). It must
-// live inside the server workspace so it ships in the Railway build (which only
-// bundles `server`), not just in web/public.
-const OUT_SERVER = path.join(REPO_ROOT, "server", "data", "bike-network.geojson");
+const BOUNDARY_CACHE = path.join(REPO_ROOT, "data", "boundaries");
 
 // Hand-curated PBOT facilities built but not yet in the published GIS — produced
 // by `npm run build:supplement` (see data/pbot-supplement/ + docs/data-sources.md).
-// Merged in here so the new lanes draw identically to official lanes on web + iOS
-// AND flow into routing (build-graph reads this same bike-network.geojson).
-const SUPPLEMENT_PATH = path.join(
-  REPO_ROOT,
-  "data",
-  "pbot-supplement",
-  "new-builds.geojson"
-);
-// Supplement `class` → PBOT facility code, to match the bike-network schema.
+const SUPPLEMENT_PATH = path.join(REPO_ROOT, "data", "pbot-supplement", "new-builds.geojson");
 const SUPPLEMENT_FACILITY: Record<string, string> = {
   greenway: "NG",
   protected: "PBL",
@@ -127,8 +92,6 @@ const SUPPLEMENT_FACILITY: Record<string, string> = {
   lane: "BL",
   path: "TRL",
 };
-
-const COORD_PRECISION = 6;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -144,6 +107,17 @@ interface FeatureCollection {
   features: GeoJSONFeature[];
   error?: unknown;
   exceededTransferLimit?: boolean;
+}
+
+interface ManifestEntry {
+  id: string;
+  file: string;
+  bbox: [number, number, number, number];
+  features: number;
+  bytes: number;
+  fetchedAt: string;
+  attribution: string;
+  attributionUrl: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -174,7 +148,9 @@ function buildFeature(
   feature: GeoJSONFeature,
   cls: DisplayClass,
   facility: string,
-  name: unknown
+  name: unknown,
+  sourceId: string,
+  stress: string | undefined
 ): GeoJSONFeature | null {
   if (!feature.geometry) return null;
   const t = feature.geometry.type;
@@ -192,26 +168,26 @@ function buildFeature(
     properties: {
       class: cls,
       facility,
-      ...(typeof name === "string" && name ? { name } : {}),
+      ...(typeof name === "string" && name.trim() ? { name: name.trim() } : {}),
+      source: sourceId,
+      ...(stress ? { stress } : {}),
     },
   };
 }
 
-/** Layer 75 (Bicycle Network): classify by the `Facility` code. */
-function trim(feature: GeoJSONFeature): GeoJSONFeature | null {
-  const facility = String(feature.properties?.["Facility"] ?? "").trim();
-  const cls = CLASS_MAP[facility];
-  if (!cls) return null; // skip NONE / unrecognized
-  return buildFeature(feature, cls, facility, feature.properties?.["SegmentName"]);
-}
-
-/** Layer 4 (Recommended Routes): classify by the `ConnectionType` code; we only
- * ever fetch SR_LT/SR_MT, but guard anyway so an unexpected code is skipped. */
-function trimShared(feature: GeoJSONFeature): GeoJSONFeature | null {
-  const code = String(feature.properties?.["ConnectionType"] ?? "").trim();
-  const cls = SHARED_MAP[code];
-  if (!cls) return null;
-  return buildFeature(feature, cls, code, feature.properties?.["StreetName"]);
+/** Classify one raw feature using a source's own code vocabulary. */
+function makeTrimmer(spec: SourceSpec, sourceId: string) {
+  return (feature: GeoJSONFeature): GeoJSONFeature | null => {
+    const code = String(feature.properties?.[spec.codeField] ?? "").trim();
+    const cls = spec.classMap[code];
+    if (!cls) return null; // unrecognized / not a ridable facility
+    const stressRaw = spec.stressField
+      ? String(feature.properties?.[spec.stressField] ?? "").trim()
+      : "";
+    const stress = stressRaw && spec.stressMap ? spec.stressMap[stressRaw] : undefined;
+    const name = spec.nameField ? feature.properties?.[spec.nameField] : undefined;
+    return buildFeature(feature, cls, code, name, sourceId, stress);
+  };
 }
 
 interface PageOpts {
@@ -243,16 +219,16 @@ async function fetchPage(opts: PageOpts): Promise<FeatureCollection> {
 /** Paginate one layer to exhaustion, trimming + classifying each feature into
  * `kept` and tallying `byClass`. Returns the raw feature count fetched. */
 async function collect(
-  label: string,
-  cfg: Omit<PageOpts, "offset">,
-  trimFn: (f: GeoJSONFeature) => GeoJSONFeature | null,
+  spec: SourceSpec,
+  sourceId: string,
   kept: GeoJSONFeature[],
   byClass: Record<string, number>
 ): Promise<number> {
+  const trimFn = makeTrimmer(spec, sourceId);
   let offset = 0;
   let raw = 0;
   for (;;) {
-    const fc = await fetchPage({ ...cfg, offset });
+    const fc = await fetchPage({ ...spec, offset });
     const page = fc.features ?? [];
     raw += page.length;
     for (const f of page) {
@@ -263,9 +239,9 @@ async function collect(
         byClass[c] = (byClass[c] ?? 0) + 1;
       }
     }
-    process.stdout.write(`\r[${label}] offset ${offset} → ${raw} raw / ${kept.length} kept`);
-    if (page.length < cfg.pageSize && !fc.exceededTransferLimit) break;
-    offset += cfg.pageSize;
+    process.stdout.write(`\r[${spec.label}] offset ${offset} → ${raw} raw / ${kept.length} kept`);
+    if (page.length < spec.pageSize && !fc.exceededTransferLimit) break;
+    offset += spec.pageSize;
   }
   process.stdout.write("\n");
   return raw;
@@ -300,6 +276,7 @@ function mergeSupplement(kept: GeoJSONFeature[]): void {
         rclass: cls,
         facility: SUPPLEMENT_FACILITY[cls] ?? "",
         ...(f.properties?.["name"] ? { name: f.properties["name"] } : {}),
+        source: "portland",
         supplement: true,
         build_note: f.properties?.["build_note"] ?? "",
         source_url: f.properties?.["source_url"] ?? "",
@@ -311,15 +288,74 @@ function mergeSupplement(kept: GeoJSONFeature[]): void {
   console.log(`[supplement] merged ${added} built-but-unpublished features`);
 }
 
-function writeBoth(features: GeoJSONFeature[]): void {
-  const json = JSON.stringify({ type: "FeatureCollection", features });
-  for (const target of [OUT_WEB, OUT_IOS, OUT_SERVER]) {
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, json, "utf8");
-    console.log(
-      `[OK]    wrote ${(json.length / 1024).toFixed(1)} KB → ${path.relative(REPO_ROOT, target)}`
-    );
+function bboxOf(features: GeoJSONFeature[]): [number, number, number, number] {
+  let minLon = Infinity,
+    minLat = Infinity,
+    maxLon = -Infinity,
+    maxLat = -Infinity;
+  const visit = (c: unknown): void => {
+    if (!Array.isArray(c)) return;
+    if (typeof c[0] === "number" && typeof c[1] === "number") {
+      const lon = c[0] as number;
+      const lat = c[1] as number;
+      if (lon < minLon) minLon = lon;
+      if (lat < minLat) minLat = lat;
+      if (lon > maxLon) maxLon = lon;
+      if (lat > maxLat) maxLat = lat;
+      return;
+    }
+    for (const x of c) visit(x);
+  };
+  for (const f of features) if (f.geometry) visit(f.geometry.coordinates);
+  return [round(minLon), round(minLat), round(maxLon), round(maxLat)];
+}
+
+function write(name: string, json: string, dirs: string[]): void {
+  for (const dir of dirs) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name), json, "utf8");
   }
+  console.log(
+    `[OK]    wrote ${(json.length / 1024).toFixed(1)} KB → ${name} (${dirs.length} target${dirs.length === 1 ? "" : "s"})`
+  );
+}
+
+/**
+ * Bake `rclass` for one jurisdiction.
+ *
+ * Portland joins against the PBOT posted-speed + arterial exports, which only
+ * cover the city. Outside it those joins have no data, so an RLIS lane would
+ * always keep rclass = class and never read as stressful. RLIS publishes its own
+ * `BIKETHERE` traffic-stress rating, so we use it as the fallback signal: an
+ * unprotected facility on a high-traffic or caution-rated segment gets the same
+ * down-rate the speed join would have applied in town. Separated facilities
+ * (protected/greenway/path) are never down-rated, matching render-class.ts.
+ */
+function bakeStressFallback(features: GeoJSONFeature[]): { busy: number; caution: number } {
+  const STRONG = new Set(["protected", "greenway", "path", "calm", "calm_mod"]);
+  let busy = 0;
+  let caution = 0;
+  for (const f of features) {
+    const p = f.properties;
+    if (!p) continue;
+    const cls = String(p["class"]);
+    if (p["rclass"]) continue; // already baked
+    if (STRONG.has(cls)) {
+      p["rclass"] = cls;
+      continue;
+    }
+    const stress = p["stress"];
+    if (stress === "high") {
+      p["rclass"] = "busy";
+      busy++;
+    } else if (stress === "caution") {
+      p["rclass"] = "caution";
+      caution++;
+    } else {
+      p["rclass"] = cls;
+    }
+  }
+  return { busy, caution };
 }
 
 // ---------------------------------------------------------------------------
@@ -327,79 +363,120 @@ function writeBoth(features: GeoJSONFeature[]): void {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  console.log(`[source 1] City of Portland Bicycle Network (ACTIVE)\n           ${LAYER_URL}`);
-  console.log(`[source 2] PBOT Recommended Routes — shared roadways (SR_LT/SR_MT)\n           ${SHARED_LAYER_URL}`);
-  const kept: GeoJSONFeature[] = [];
-  const byClass: Record<string, number> = {};
+  const fetchedAt = new Date().toISOString().slice(0, 10);
+  const manifest: ManifestEntry[] = [];
+  const merged: GeoJSONFeature[] = [];
 
-  // Source 1 — the authoritative facility inventory (greenways + on-street).
-  await collect(
-    "facilities",
-    { url: LAYER_URL, where: WHERE, fields: OUT_FIELDS, pageSize: PAGE_SIZE },
-    trim,
-    kept,
-    byClass
-  );
-  const facilityCount = kept.length;
-
-  // Source 2 — recommended shared roadways (calm/calm_mod), additive to source 1.
-  await collect(
-    "shared",
-    { url: SHARED_LAYER_URL, where: SHARED_WHERE, fields: SHARED_FIELDS, pageSize: SHARED_PAGE_SIZE },
-    trimShared,
-    kept,
-    byClass
-  );
-  console.log(
-    `[merge] ${facilityCount} facility + ${kept.length - facilityCount} shared-roadway features`
-  );
-
-  // Guard on the FACILITY count, not the total: source 2 is additive, so a
-  // source-1 outage that returned 0 facilities must still abort even if the
-  // shared-roadway fetch succeeded — never ship a facility-less overlay.
-  if (facilityCount === 0) {
-    console.error("[ERROR] no facility features produced — aborting (won't overwrite with empty set)");
-    process.exit(1);
+  // The Portland clip is a correctness guard (keeps PBOT + the new-builds
+  // supplement authoritative in-city), so a failure here is fatal rather than a
+  // warning we ride past — skipping it would let staler RLIS geometry silently
+  // down-class the hand-curated 2024–26 lanes.
+  let portlandBoundary: Boundary | null = null;
+  if (JURISDICTIONS.some((j) => j.clipOutsideOf === "portland")) {
+    portlandBoundary = await loadCityBoundary("Portland", BOUNDARY_CACHE);
+    console.log(`[clip] Portland boundary: ${portlandBoundary.rings.length} rings`);
   }
 
-  console.log("[classes]", JSON.stringify(byClass));
+  for (const j of JURISDICTIONS) {
+    console.log(`\n=== ${j.id} — ${j.label} ===`);
+    const kept: GeoJSONFeature[] = [];
+    const byClass: Record<string, number> = {};
 
-  // Bake the render class (rclass): down-rate unprotected lanes on fast streets
-  // to "busy" by joining against the posted-speed export, so the overlay + route
-  // color them red without any runtime speed lookup. Requires speeds.geojson
-  // (run export:speeds first); skipped with a warning if it's missing.
-  const speedsPath = path.join(REPO_ROOT, "web", "public", "speeds.geojson");
-  if (fs.existsSync(speedsPath)) {
-    const speeds = JSON.parse(fs.readFileSync(speedsPath, "utf8"));
-    // Also down-rate plain unbuffered lanes (PBOT "lane"/BL) that run along an
-    // arterial — the door-zone collector-lane case (NE 7th etc.) that the posted-
-    // speed rule misses because these are tagged 20 mph. Buffered lanes are spared.
-    const arterialsPath = path.join(REPO_ROOT, "web", "public", "arterials.geojson");
-    const arterials = fs.existsSync(arterialsPath)
-      ? JSON.parse(fs.readFileSync(arterialsPath, "utf8"))
-      : undefined;
-    if (!arterials) {
-      console.warn(
-        `[rclass] WARN: ${path.relative(REPO_ROOT, arterialsPath)} not found — run export:arterials. Skipping the door-zone-lane-on-arterial down-rate.`
-      );
+    for (const spec of j.sources) {
+      console.log(`[source] ${spec.label}\n         ${spec.url}`);
+      await collect(spec, j.id, kept, byClass);
     }
-    const { busy, caution, caution4 } = bakeRenderClass(kept, speeds, MIN_FAST_MPH, arterials);
-    console.log(
-      `[rclass] ${busy} on ≥${MIN_FAST_MPH} mph → "busy"; lane on arterial → caution ${caution} (2–3 lanes) · caution4 ${caution4} (≥${MIN_STROAD_LANES} lanes, red)`
-    );
-  } else {
-    console.warn(
-      `[rclass] WARN: ${path.relative(REPO_ROOT, speedsPath)} not found — run export:speeds, then bake:render-class. Writing without downgrade.`
-    );
-    for (const f of kept) if (f.properties) f.properties["rclass"] = f.properties["class"];
+
+    if (kept.length === 0) {
+      console.error(`[ERROR] ${j.id} produced 0 features — aborting (won't ship an empty layer)`);
+      process.exit(1);
+    }
+
+    // Precedence: drop anything inside the city PBOT already covers.
+    let clipped = kept;
+    if (j.clipOutsideOf === "portland" && portlandBoundary) {
+      clipped = kept.filter((f) => {
+        if (!f.geometry) return false;
+        const pt = representativePoint(f.geometry);
+        if (!pt) return false;
+        return !contains(portlandBoundary!, pt[0], pt[1]);
+      });
+      console.log(
+        `[clip] ${j.id}: dropped ${kept.length - clipped.length} features inside Portland, kept ${clipped.length}`
+      );
+      if (clipped.length === 0) {
+        console.error(`[ERROR] ${j.id} clipped to 0 features — boundary is probably wrong`);
+        process.exit(1);
+      }
+    }
+
+    // rclass: PBOT speed/arterial join in town, RLIS stress rating outside it.
+    if (j.id === "portland") {
+      const speedsPath = path.join(REPO_ROOT, "web", "public", "speeds.geojson");
+      if (fs.existsSync(speedsPath)) {
+        const speeds = JSON.parse(fs.readFileSync(speedsPath, "utf8"));
+        const arterialsPath = path.join(REPO_ROOT, "web", "public", "arterials.geojson");
+        const arterials = fs.existsSync(arterialsPath)
+          ? JSON.parse(fs.readFileSync(arterialsPath, "utf8"))
+          : undefined;
+        if (!arterials) {
+          console.warn(
+            `[rclass] WARN: ${path.relative(REPO_ROOT, arterialsPath)} not found — run export:arterials. Skipping the door-zone-lane-on-arterial down-rate.`
+          );
+        }
+        const { busy, caution, caution4 } = bakeRenderClass(
+          clipped,
+          speeds,
+          MIN_FAST_MPH,
+          arterials
+        );
+        console.log(
+          `[rclass] ${busy} on ≥${MIN_FAST_MPH} mph → "busy"; lane on arterial → caution ${caution} (2–3 lanes) · caution4 ${caution4} (≥${MIN_STROAD_LANES} lanes, red)`
+        );
+      } else {
+        console.warn(
+          `[rclass] WARN: ${path.relative(REPO_ROOT, speedsPath)} not found — run export:speeds, then bake:render-class. Writing without downgrade.`
+        );
+        for (const f of clipped) if (f.properties) f.properties["rclass"] = f.properties["class"];
+      }
+      // AFTER the bake so the new facilities keep rclass = class.
+      mergeSupplement(clipped);
+    } else {
+      const { busy, caution } = bakeStressFallback(clipped);
+      console.log(`[rclass] stress fallback → busy ${busy} (BIKETHERE=HT) · caution ${caution} (CA)`);
+    }
+
+    console.log(`[classes] ${JSON.stringify(byClass)}`);
+
+    const file = `bike-network.${j.id}.geojson`;
+    const json = JSON.stringify({ type: "FeatureCollection", features: clipped });
+    write(file, json, PARTS_DIRS);
+    manifest.push({
+      id: j.id,
+      file,
+      bbox: bboxOf(clipped),
+      features: clipped.length,
+      bytes: json.length,
+      fetchedAt,
+      attribution: j.attribution,
+      attributionUrl: j.attributionUrl,
+    });
+    merged.push(...clipped);
   }
 
-  // Add the built-but-unpublished supplement AFTER rclass baking so these new
-  // facilities keep rclass = class (no speed/arterial down-rate).
-  mergeSupplement(kept);
+  write("bike-network.manifest.json", JSON.stringify(manifest, null, 2), TARGET_DIRS);
 
-  writeBoth(kept);
-  console.log(`\nDone — ${kept.length} bike-network features.`);
+  // Backward-compatible merged file: scripts/build-graph.ts and any loader not
+  // yet manifest-aware still read this. Keeping it means the metro expansion
+  // can't break routing tile builds on a stale checkout.
+  write("bike-network.geojson", JSON.stringify({ type: "FeatureCollection", features: merged }), TARGET_DIRS);
+
+  console.log(
+    `\nDone — ${merged.length} features across ${manifest.length} jurisdictions:\n` +
+      manifest
+        .map((m) => `  ${m.id.padEnd(10)} ${String(m.features).padStart(6)} features  ${(m.bytes / 1024 / 1024).toFixed(2)} MB`)
+        .join("\n")
+  );
 }
 
 main().catch((err) => {

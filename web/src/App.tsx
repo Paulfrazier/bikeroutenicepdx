@@ -40,6 +40,7 @@ import { useRoute } from "./hooks/useRoute";
 import { useFriendliness } from "./hooks/useFriendliness";
 import { useNavigation } from "./hooks/useNavigation";
 import { NavHud } from "./components/NavHud";
+import { DataCredits } from "./components/DataCredits";
 import {
   toRouteClassFeatureCollection,
   snapToNetwork,
@@ -1031,10 +1032,7 @@ export default function App() {
         )}
 
         <footer className="side-panel__footer">
-          <small>
-            Route data: <a href="https://openstreetmap.org" target="_blank" rel="noopener noreferrer">OSM</a> (ODbL) ·{" "}
-            <a href="https://www.portland.gov/transportation" target="_blank" rel="noopener noreferrer">PBOT</a>
-          </small>
+          <DataCredits />
           <small>
             <a href="/privacy.html" target="_blank" rel="noopener noreferrer">Privacy</a> ·{" "}
             <a href="/terms.html" target="_blank" rel="noopener noreferrer">Terms</a> · Ride at your own risk

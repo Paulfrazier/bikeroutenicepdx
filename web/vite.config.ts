@@ -18,7 +18,7 @@ export default defineConfig({
       manifest: {
         name: "BikeRouteNicePDX",
         short_name: "PDX Greenways",
-        description: "Portland greenway-aware bike routing",
+        description: "Portland metro greenway-aware bike routing",
         start_url: "/",
         display: "standalone",
         background_color: "#ffffff",

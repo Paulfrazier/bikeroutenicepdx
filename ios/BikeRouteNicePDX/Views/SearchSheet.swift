@@ -72,7 +72,7 @@ struct SearchSheet: View {
                         ContentUnavailableView(
                             "Search for a place",
                             systemImage: "magnifyingglass",
-                            description: Text("Find an address or landmark in Portland to set your \(targetNoun).")
+                            description: Text("Find an address or landmark in the Portland metro to set your \(targetNoun).")
                         )
                     }
                 }

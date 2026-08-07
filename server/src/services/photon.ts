@@ -18,14 +18,24 @@ import { config } from "../config.js";
 import { shorten, type GeocodingResult } from "./nominatim.js";
 
 // ---------------------------------------------------------------------------
-// Portland metro bias + bounds
+// Portland metro bias
 //
-// `lat`/`lon` is a proximity *bias* (affects ranking), `bbox` is a hard filter.
-// Photon bbox order is the GeoJSON-standard minLon,minLat,maxLon,maxLat — note
-// this differs from Nominatim's viewbox (lon_min,lat_max,lon_max,lat_min).
+// `lat`/`lon` is a proximity *bias* (affects ranking) — that is all we use.
+//
+// We deliberately do NOT send Photon's `bbox`, which is a hard filter. A hard
+// filter does not fail cleanly: it drops the correct hit and promotes whatever
+// fuzzy garbage happens to fall inside the box, so the user gets a confidently
+// wrong answer. Measured with the old -123.0,45.3,-122.3,45.7 box:
+//   "Forest Grove Oregon"     -> South Forest Grove Loop, Clackamas
+//   "Battle Ground Washington"-> Vancouver Barracks Parade Ground
+//   "Ridgefield Washington"   -> SW Ridgefield Lane, Tigard
+//   "Sandy Oregon"            -> Oregon Mountain Community, Portland
+// Proximity bias alone resolves all four correctly and leaves in-town queries
+// (Beaverton TC, Hillsboro, Powell Butte) byte-identical. Genuinely distant
+// queries now return the real distant place rather than a bogus local street,
+// which the result label's city/context makes obvious to the rider.
 // ---------------------------------------------------------------------------
-const PORTLAND_CENTER = { lat: 45.5231, lon: -122.6765 }; // downtown-ish centroid
-const PORTLAND_BBOX = "-123.0,45.3,-122.3,45.7"; // minLon,minLat,maxLon,maxLat
+const METRO_CENTER = { lat: 45.5231, lon: -122.6765 }; // downtown-ish centroid
 
 const USER_AGENT = "BikeRouteNicePDX/0.1 (paulfrazier@gmail.com)";
 
@@ -223,9 +233,8 @@ async function fetchPhoton(query: string, limit: number): Promise<GeocodingResul
     q: query,
     lang: "en",
     limit: String(Math.min(limit, 10)),
-    lat: String(PORTLAND_CENTER.lat),
-    lon: String(PORTLAND_CENTER.lon),
-    bbox: PORTLAND_BBOX,
+    lat: String(METRO_CENTER.lat),
+    lon: String(METRO_CENTER.lon),
   });
 
   let res: Response;

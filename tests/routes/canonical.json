@@ -1,7 +1,7 @@
 [
   {
     "id": "01-sabin-lloyd",
-    "name": "Sabin → Lloyd Center",
+    "name": "Sabin \u2192 Lloyd Center",
     "from": {
       "name": "Sabin neighborhood",
       "lng": -122.642,
@@ -23,7 +23,7 @@
   },
   {
     "id": "02-stjohns-downtown",
-    "name": "St Johns → Downtown",
+    "name": "St Johns \u2192 Downtown",
     "from": {
       "name": "St Johns neighborhood",
       "lng": -122.755,
@@ -47,7 +47,7 @@
   },
   {
     "id": "03-hawthorne-ohsu",
-    "name": "Hawthorne neighborhood → OHSU",
+    "name": "Hawthorne neighborhood \u2192 OHSU",
     "from": {
       "name": "Hawthorne neighborhood",
       "lng": -122.634,
@@ -71,7 +71,7 @@
   },
   {
     "id": "04-sellwood-pearl",
-    "name": "Sellwood → Pearl District",
+    "name": "Sellwood \u2192 Pearl District",
     "from": {
       "name": "Sellwood neighborhood",
       "lng": -122.658,
@@ -95,7 +95,7 @@
   },
   {
     "id": "05-beaumont-psu",
-    "name": "Beaumont → PSU",
+    "name": "Beaumont \u2192 PSU",
     "from": {
       "name": "Beaumont neighborhood",
       "lng": -122.628,
@@ -121,7 +121,7 @@
   },
   {
     "id": "06-belmont-mttabor",
-    "name": "Belmont area → Mt Tabor",
+    "name": "Belmont area \u2192 Mt Tabor",
     "from": {
       "name": "Belmont / SE 30th",
       "lng": -122.639,
@@ -144,7 +144,7 @@
   },
   {
     "id": "07-nw23rd-alberta",
-    "name": "NW 23rd → Alberta Arts District",
+    "name": "NW 23rd \u2192 Alberta Arts District",
     "from": {
       "name": "NW 23rd Ave / Thurman",
       "lng": -122.699,
@@ -170,7 +170,7 @@
   },
   {
     "id": "08-cully-pdx",
-    "name": "Cully → PDX Airport",
+    "name": "Cully \u2192 PDX Airport",
     "from": {
       "name": "Cully neighborhood",
       "lng": -122.599,
@@ -194,7 +194,7 @@
   },
   {
     "id": "09-rosecity-stjohns",
-    "name": "South of Rose City Park → St Johns",
+    "name": "South of Rose City Park \u2192 St Johns",
     "from": {
       "name": "South of Rose City Park",
       "lng": -122.606,
@@ -219,7 +219,7 @@
   },
   {
     "id": "10-house-omsi",
-    "name": "House → OMSI",
+    "name": "House \u2192 OMSI",
     "from": {
       "name": "House (Sabin/Alameda)",
       "lng": -122.6431,
@@ -243,7 +243,7 @@
   },
   {
     "id": "11-house-trackers",
-    "name": "House → Trackers Earth",
+    "name": "House \u2192 Trackers Earth",
     "from": {
       "name": "House (Sabin/Alameda)",
       "lng": -122.6431,
@@ -268,7 +268,7 @@
   },
   {
     "id": "12-house-pcg",
-    "name": "House → Portland City Grill",
+    "name": "House \u2192 Portland City Grill",
     "from": {
       "name": "House (Sabin/Alameda)",
       "lng": -122.6431,
@@ -292,14 +292,14 @@
   },
   {
     "id": "13-hmart-kpark",
-    "name": "H Mart (Belmont) → Kʰunamokwst Park",
+    "name": "H Mart (Belmont) \u2192 K\u02b0unamokwst Park",
     "from": {
       "name": "H Mart (SE Belmont)",
       "lng": -122.6305,
       "lat": 45.5166
     },
     "to": {
-      "name": "Kʰunamokwst Park (Cully)",
+      "name": "K\u02b0unamokwst Park (Cully)",
       "lng": -122.6088,
       "lat": 45.5586
     },
@@ -313,5 +313,74 @@
       "NE Sandy Blvd"
     ],
     "expected_greenway_coverage": 0.7
+  },
+  {
+    "id": "14-beaverton-tigard",
+    "name": "Beaverton TC \u2192 Tigard",
+    "from": {
+      "name": "Beaverton Transit Center",
+      "lng": -122.804,
+      "lat": 45.487
+    },
+    "to": {
+      "name": "Tigard",
+      "lng": -122.771,
+      "lat": 45.431
+    },
+    "expected_greenways": [
+      "Fanno Creek Trail",
+      "Fanno Creek Greenway Trail"
+    ],
+    "forbidden_streets": [
+      "SW Scholls Ferry Rd"
+    ],
+    "expected_greenway_coverage": 0.4,
+    "note": "Metro RLIS coverage. Measured 63% on the 2026-08-06 export; floor left well under it because RLIS suburban density is sparser than PBOT's and Metro republishes periodically. Fanno Creek Trail is the spine of Beaverton-Tigard bike travel \u2014 losing it means the RLIS path class stopped resolving."
+  },
+  {
+    "id": "15-hillsboro-beaverton",
+    "name": "Hillsboro \u2192 Beaverton",
+    "from": {
+      "name": "Hillsboro",
+      "lng": -122.9898,
+      "lat": 45.5228
+    },
+    "to": {
+      "name": "Beaverton Transit Center",
+      "lng": -122.804,
+      "lat": 45.487
+    },
+    "expected_greenways": [
+      "Westside Trail",
+      "Reedville Trail"
+    ],
+    "forbidden_streets": [
+      "SW Tualatin Valley Hwy"
+    ],
+    "expected_greenway_coverage": 0.03,
+    "note": "Deliberately LOW bar. Measured only 6% \u2014 the TV Highway corridor genuinely lacks connected bike facilities, which is a fact about Washington County, not a bug. This guards against regressing to 0% (the pre-RLIS state), and forbids routing onto TV Hwy itself."
+  },
+  {
+    "id": "16-lakeoswego-sellwood",
+    "name": "Lake Oswego \u2192 Sellwood",
+    "from": {
+      "name": "Lake Oswego",
+      "lng": -122.6706,
+      "lat": 45.4207
+    },
+    "to": {
+      "name": "Sellwood",
+      "lng": -122.656,
+      "lat": 45.47
+    },
+    "expected_greenways": [
+      "Tryon Creek Path",
+      "Terwilliger Trail"
+    ],
+    "forbidden_streets": [
+      "SW Macadam Ave"
+    ],
+    "expected_greenway_coverage": 0.2,
+    "note": "Crosses the Portland clip line, so it also guards the RLIS\u2194PBOT handoff: a broken boundary clip shows up here as a coverage cliff or a duplicated-geometry class flip. Measured 36% + 13% calm."
   }
 ]
