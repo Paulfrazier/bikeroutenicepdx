@@ -94,6 +94,49 @@ export function resolveBrouterUrl(engine: string = "prod"): string {
   return engine === "selfbuild" ? config.brouterUrlSelfbuild : config.brouterUrl;
 }
 
+/**
+ * Timeout for a warm BRouter. Generous enough for a long cross-town route on a
+ * running JVM, short enough that a genuinely dead engine fails fast.
+ */
+const BROUTER_WARM_TIMEOUT_MS = 8_000;
+
+/**
+ * Timeout for the retry. The BRouter services run with Railway app-sleeping on:
+ * after ~10 min idle they scale to zero, and the next request has to wait for a
+ * container start plus a JVM boot and segment-tile open. That cold path is well
+ * over the warm budget.
+ */
+const BROUTER_COLD_BOOT_TIMEOUT_MS = 25_000;
+
+/**
+ * Fetch with a single cold-boot retry.
+ *
+ * A slept Railway service answers the very first request with a 502 (or drops
+ * the connection outright) while it wakes — documented behaviour, not a fault.
+ * Retrying once on exactly that signature turns a user-visible routing failure
+ * into a slow first route. Anything the engine answers itself (a 200 with a
+ * plain-text "no route" body, a 4xx) is returned as-is: retrying it would just
+ * pay the timeout twice for the same answer.
+ */
+async function fetchWithColdBootRetry(url: string): Promise<Response> {
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(BROUTER_WARM_TIMEOUT_MS),
+    });
+    // 502/503/504 here means Railway's edge, not BRouter — the container is
+    // still coming up. Fall through to the retry.
+    if (res.status !== 502 && res.status !== 503 && res.status !== 504) {
+      return res;
+    }
+  } catch {
+    // Timeout or connection error — same cold-boot suspicion.
+  }
+
+  return fetch(url, {
+    signal: AbortSignal.timeout(BROUTER_COLD_BOOT_TIMEOUT_MS),
+  });
+}
+
 export async function fetchBrouterGeometry(
   from: [number, number], // [lng, lat]
   to: [number, number], // [lng, lat]
@@ -111,7 +154,7 @@ export async function fetchBrouterGeometry(
 
   let res: Response;
   try {
-    res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    res = await fetchWithColdBootRetry(url);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new ValhallaError(`BRouter unreachable: ${message}`, "unreachable", 502);

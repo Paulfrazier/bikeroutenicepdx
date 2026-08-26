@@ -1,6 +1,12 @@
 # Keep Railway deploy archives lean and robust. None of these are needed by any
-# service build (server NIXPACKS workspace, or the brouter Dockerfiles):
+# service build (server NIXPACKS workspace, or the brouter Dockerfiles).
+#
+# NOTE the leading slash on /data/. A bare `data/` matches a directory named
+# `data` at ANY depth, which silently swallowed server/data/bike-network.geojson
+# — the 9 MB PBOT network index that greenway-coverage.ts loads at runtime. The
+# server still boots without it and just logs a warning, so the only symptom is
+# every route coming back with greenway_coverage: 0. Keep this anchored.
 .claude/
-data/
+/data/
 ios/
 *.xcodeproj

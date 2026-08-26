@@ -27,11 +27,17 @@ the live brouter-service. Geometry-only candidates; the prototype scorer omits t
 forbidden-street penalty (no step names) — restored if integrated.
 
 ```
-BROUTER_URL=https://brouter-production-f3fa.up.railway.app PREFERENCE=ultra \
+BROUTER_URL=https://brouter-selfbuild-production.up.railway.app PREFERENCE=ultra \
   npx tsx scripts/compare-facility.ts
 ```
 
 ## Findings (prod brouter-service, 2026-06-23)
+
+> The stock `brouter` service these findings were measured against was retired on
+> 2026-08-26 (it cost ~$3.50/mo in idle RAM and both apps had defaulted to
+> `engine: "selfbuild"` since 2026-06-30). The command above now points at the
+> self-build engine, whose profiles carry the weaklane penalty — so re-running it
+> will not reproduce these numbers exactly.
 
 **`comfort` (safety profile): facility-steering ≈ no benefit.** BRouter `safety` already
 rides buffered lanes (SE 17th: 38% buffered; St Johns→Downtown: 45%). Facility vias added
