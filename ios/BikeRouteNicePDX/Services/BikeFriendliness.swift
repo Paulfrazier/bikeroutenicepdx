@@ -172,6 +172,12 @@ actor BikeFriendliness {
 
     /// Classify a route line. Returns one class per route segment
     /// (length == coords.count - 1) and the comfort-coverage fraction.
+    /// Build the spatial indexes now (bike network + arterials, ~0.5 s of
+    /// parsing) so the rider's first route isn't the one that pays for it.
+    func warmUp() {
+        loadIfNeeded()
+    }
+
     func classify(_ coords: [CLLocationCoordinate2D]) -> (classes: [RouteClass], coverage: Double) {
         loadIfNeeded()
         guard coords.count >= 2 else { return ([], 0) }

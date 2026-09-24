@@ -340,11 +340,12 @@ struct RootView: View {
         // inflate the whole chrome stack past the screen — every layer then
         // rendered centered-and-clipped at both edges (read as "zoomed in" at
         // launch, since the legend starts expanded until the first route).
-        // Floating it lets the card expand down over the map (briefly covering
-        // the trailing buttons) instead of widening the layout.
+        // Floating it lets the card expand down over the map instead of widening
+        // the layout. It starts BELOW the button row (8 + 40pt button + 8) so the
+        // expanded card never covers the Fixes / Settings buttons at launch.
         LegendView()
             .padding(.trailing, 12)
-            .padding(.top, 8)
+            .padding(.top, 56)
             .frame(maxWidth: .infinity, alignment: .trailing)
 
         topBanner

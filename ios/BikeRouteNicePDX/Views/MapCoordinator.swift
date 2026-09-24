@@ -65,6 +65,18 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
     /// True while a route is on screen — fades the bike-network overlay back so
     /// the route reads as the foreground (toggled in sync()/removeRouteOverlays).
     private var networkFaded = false
+    /// Multiplier on the bike-network stroke widths, thinned when zoomed out so
+    /// the metro-wide view reads as a network rather than a solid mat of color
+    /// (mirrors the web map's zoom-interpolated line-width). Quantized so a pan
+    /// doesn't repaint on every frame.
+    private var networkWidthScale: CGFloat = 1
+
+    /// 1.0 at neighborhood zoom (span ≤ 0.04°), easing to 0.5 at metro zoom
+    /// (span ≥ 0.16°), in 0.1 steps.
+    private static func networkWidthScale(for span: CLLocationDegrees) -> CGFloat {
+        let t = min(max((span - 0.04) / 0.12, 0), 1)
+        return (CGFloat(1 - 0.5 * t) * 10).rounded() / 10
+    }
 
     /// Last-applied lane-type visibility. Lets sync() detect a legend toggle and
     /// repaint the network overlays (mirrors `networkFaded`'s redraw approach).
@@ -335,6 +347,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             let hidden = store.hiddenLaneGroups.contains(multi.bikeClass.group)
             let alpha: CGFloat = hidden ? 0 : (networkFaded ? 0.35 : 0.85)
             renderer.strokeColor = multi.bikeClass.color.withAlphaComponent(alpha)
+            renderer.lineWidth = multi.bikeClass.lineWidth * networkWidthScale
             renderer.setNeedsDisplay()
         }
     }
@@ -1289,6 +1302,13 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
 
     // MARK: - MKMapViewDelegate
 
+    func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+        let scale = Self.networkWidthScale(for: mapView.region.span.latitudeDelta)
+        guard scale != networkWidthScale else { return }
+        networkWidthScale = scale
+        repaintNetwork(on: mapView)
+    }
+
     func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
         switch overlay {
         case let polyline as RouteGlowPolyline:
@@ -1398,7 +1418,7 @@ final class MapCoordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDele
             let hidden = store.hiddenLaneGroups.contains(multi.bikeClass.group)
             let alpha: CGFloat = hidden ? 0 : (networkFaded ? 0.35 : 0.85)
             renderer.strokeColor = multi.bikeClass.color.withAlphaComponent(alpha)
-            renderer.lineWidth = multi.bikeClass.lineWidth
+            renderer.lineWidth = multi.bikeClass.lineWidth * networkWidthScale
             renderer.lineCap = .round
             renderer.lineJoin = .round
             if multi.bikeClass.dashed { renderer.lineDashPattern = [3, 6] }

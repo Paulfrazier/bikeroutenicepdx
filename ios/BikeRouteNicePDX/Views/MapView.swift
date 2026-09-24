@@ -30,21 +30,27 @@ struct MapView: UIViewRepresentable {
             span: MKCoordinateSpan(latitudeDelta: 0.18, longitudeDelta: 0.18)
         )
 
-        // Full Portland bike network overlay — added once, one overlay per
-        // facility class (already sorted so better facilities draw on top).
-        let network = BikeNetworkLoader.loadOverlays()
-        if !network.isEmpty {
-            map.addOverlays(network, level: .aboveRoads)
+        // Bike network overlay (one overlay per facility class, better facilities
+        // on top) plus the built-but-unpublished "supplement" lanes, which render
+        // identically and are tappable for the "learn more" panel. The 8.7 MB
+        // parse runs off the main thread so the map is interactive at launch.
+        let coordinator = context.coordinator
+        Task { @MainActor [weak map] in
+            let parsed = await Task.detached(priority: .userInitiated) {
+                BikeNetworkLoader.parse()
+            }.value
+            guard let map else { return }
+            let built = BikeNetworkLoader.overlays(from: parsed)
+            // Inserted at the BOTTOM of .aboveRoads: anything already on that
+            // level (the teal connector fixes) was meant to paint over the
+            // network, and may have been added while the parse ran.
+            for (i, overlay) in (built.network + built.supplement).enumerated() {
+                map.insertOverlay(overlay, at: i, level: .aboveRoads)
+            }
+            coordinator.supplementHits = built.supplementHits
+            // Then, with the map up, pre-build the route classifier's indexes.
+            await BikeFriendliness.shared.warmUp()
         }
-
-        // Built-but-unpublished "supplement" lanes (PBOT 2024-2026). Same level +
-        // class bucketing as the network so they render identically; the parallel
-        // `hits` list makes them tappable for the "learn more" panel.
-        let supplement = SupplementNetworkLoader.load()
-        if !supplement.overlays.isEmpty {
-            map.addOverlays(supplement.overlays, level: .aboveRoads)
-        }
-        context.coordinator.supplementHits = supplement.hits
 
         // Tap to drop pins.
         let tap = UITapGestureRecognizer(
