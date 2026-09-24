@@ -320,7 +320,7 @@ export function SearchBar({
                       toggle(r);
                     }}
                   >
-                    {saved ? "★" : "☆"}
+                    {saved ? "♥" : "♡"}
                   </button>
                 </li>
               </Fragment>

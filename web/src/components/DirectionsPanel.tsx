@@ -14,6 +14,7 @@ import { Fragment } from "react";
 import type { RouteStep, RouteLeg } from "../types";
 import { networkClassToVariant } from "../types";
 import type { LngLat } from "../types";
+import { fmtDistanceImperial } from "../navigation";
 
 // ── Maneuver type → bicycle-friendly emoji ───────────────────────────────────
 const MANEUVER_EMOJI: Record<string, string> = {
@@ -67,15 +68,9 @@ function NetworkPill({ cls }: { cls: string | null }) {
 }
 
 // ── Distance formatting ──────────────────────────────────────────────────────
-function fmtStepDist(m: number): string {
-  if (m < 50) return `${Math.round(m)} m`;
-  if (m < 1000) return `${Math.round(m / 10) * 10} m`;
-  return `${(m / 1000).toFixed(1)} km`;
-}
-
-function fmtLegDist(m: number): string {
-  return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`;
-}
+// Imperial, matching turn-by-turn (navigation.ts).
+const fmtStepDist = fmtDistanceImperial;
+const fmtLegDist = fmtDistanceImperial;
 
 function fmtDuration(s: number): string {
   const mins = Math.round(s / 60);

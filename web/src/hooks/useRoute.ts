@@ -13,18 +13,17 @@ import type {
  * `waypoints` are ordered intermediate points — reshape vias from dragging, and
  * user-declared stops — routed start → waypoints → end.
  *
- * The debounce is split three ways by what changed:
+ * Endpoints and drag edits fire immediately. `from`/`to` only ever change on a
+ * discrete commit — picking a search result, a map tap, dropping a dragged pin,
+ * swap — never per keystroke (SearchBar debounces its own suggestions), so a
+ * delay here was pure dead time before every route. A superseded request is
+ * dropped by the `cancelled` guard below.
  *
- *   - `from`/`to` mutate keystroke-by-keystroke while the rider types, so they
- *     wait 400ms rather than hammering the API.
- *   - A drag-release or delete is one deliberate act — fire immediately.
- *   - STOPS sit in between. They only change on a discrete commit (pick a
- *     result, remove, reorder), never mid-typing, so the 400ms endpoint path was
- *     pure dead time on every stop edit. But Move-up/Move-down can be tapped
- *     repeatedly, and each tap at 0ms would be its own request, so a short delay
- *     coalesces a burst of reorders into one route.
+ * STOPS keep a short delay: Move-up/Move-down can be tapped repeatedly, and
+ * each tap at 0ms would be its own request, so 150ms coalesces a burst of
+ * reorders into one route.
  */
-const ENDPOINT_DEBOUNCE_MS = 400;
+const ENDPOINT_DEBOUNCE_MS = 0;
 const STOP_DEBOUNCE_MS = 150;
 const VIA_DEBOUNCE_MS = 0;
 

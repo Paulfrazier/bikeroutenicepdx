@@ -6,6 +6,8 @@
  * being classified → shows "—".
  */
 
+import { fmtDistanceImperial } from "../navigation";
+
 interface RouteSummaryProps {
   distance_m: number;
   duration_s: number;
@@ -17,10 +19,8 @@ interface RouteSummaryProps {
   personalized?: boolean;
 }
 
-function formatDistance(m: number): string {
-  if (m < 1000) return `${Math.round(m)} m`;
-  return `${(m / 1000).toFixed(1)} km`;
-}
+// Imperial, matching turn-by-turn (navigation.ts) — Portland riders think in miles.
+const formatDistance = fmtDistanceImperial;
 
 function formatDuration(s: number): string {
   const min = Math.round(s / 60);

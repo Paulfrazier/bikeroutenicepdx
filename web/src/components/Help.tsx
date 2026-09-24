@@ -55,13 +55,13 @@ type Slide = {
 const SLIDES: Slide[] = [
   {
     icon: "🚲",
-    title: "Welcome to PDX Greenways",
+    title: "Welcome to BikeRoute PDX",
     body: (
       <>
         Find calm, bike-friendly routes across the Portland metro — built on
         Portland's neighborhood greenway network plus the regional bikeways of
         Beaverton, Hillsboro, Tigard, Tualatin, Lake Oswego and Gresham. Here's
-        how to drive it.
+        how to use it.
       </>
     ),
   },

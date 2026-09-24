@@ -155,9 +155,9 @@ button {
 }
 
 .side-panel__header {
-  padding: 12px 16px 8px;
+  padding: 8px 16px 6px;
   /* Keep the title clear of the status bar / notch in standalone mode. */
-  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  padding-top: calc(8px + env(safe-area-inset-top, 0px));
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
@@ -465,15 +465,23 @@ button {
   color: var(--color-text-muted);
 }
 
+/* Zero-height row: the ↕ button floats in the label column, centered on the
+   seam between From and To, instead of costing a full row of vertical space
+   (which on mobile is carved out of a 280px strip above the map). */
 .endpoint-inputs__swap-row {
-  display: flex;
-  justify-content: flex-end;
-  padding-right: 40px;
+  position: relative;
+  height: 0;
+  z-index: 1;
 }
 
 .endpoint-inputs__swap-btn {
-  font-size: 18px;
-  padding: 2px 6px;
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  line-height: 1;
+  padding: 3px 6px;
   color: var(--color-text-muted);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);

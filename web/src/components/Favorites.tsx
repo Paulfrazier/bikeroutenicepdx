@@ -1,7 +1,7 @@
 /**
  * Favorites.tsx — UI for the user's saved places.
  *
- *  - <FavoritesButton>: a floating ★ button (mirrors ConnectorsButton), stacked
+ *  - <FavoritesButton>: a floating ♥ button (mirrors ConnectorsButton), stacked
  *    under the 🔧 fixes FAB; shows a dot when any place is saved.
  *  - <FavoritesPanel>: a "Saved places" modal listing every favorite with
  *    rename / reorder / delete.
@@ -22,7 +22,7 @@ export function useHasFavorites(): boolean {
   return useMemo(() => hasFavorites(), [version]);
 }
 
-/** Floating ★ button that opens the "Saved places" panel. */
+/** Floating ♥ button that opens the "Saved places" panel. */
 export function FavoritesButton({ onClick }: { onClick: () => void }) {
   const active = useHasFavorites();
   return (
@@ -33,7 +33,7 @@ export function FavoritesButton({ onClick }: { onClick: () => void }) {
       aria-label="Saved places"
       title="Saved places"
     >
-      <span aria-hidden="true">★</span>
+      <span aria-hidden="true">♥</span>
       {active && <span className="favorites-fab__dot" aria-hidden="true" />}
     </button>
   );
@@ -59,7 +59,7 @@ function FavoriteRow({
     <li className="favorites-row">
       <div className="favorites-row__top">
         <span className="favorites-row__swatch" aria-hidden="true">
-          ★
+          ♥
         </span>
         <input
           className="favorites-row__name"

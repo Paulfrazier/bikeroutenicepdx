@@ -889,6 +889,13 @@ export function Map({
     );
 
     map.on("load", () => {
+      // MapLibre opens the compact attribution expanded on first paint, where its
+      // text runs under the legend on a phone. Start it collapsed to the ⓘ.
+      map
+        .getContainer()
+        .querySelector(".maplibregl-ctrl-attrib.maplibregl-compact-show")
+        ?.classList.remove("maplibregl-compact-show");
+
       // ── Bike network overlay ─────────────────────────────────────────────
       // Full Portland bike network colored by RENDER class (rclass) — the baked
       // class that already down-rates an unprotected lane on a ≥40 mph street to

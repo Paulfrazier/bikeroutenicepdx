@@ -951,7 +951,7 @@ export default function App() {
       <aside className="side-panel" aria-label="Route planner">
         <header className="side-panel__header">
           <h1 className="side-panel__title">
-            <span aria-hidden="true">🚲</span> PDX Greenways
+            <span aria-hidden="true">🚲</span> BikeRoute PDX
           </h1>
         </header>
 

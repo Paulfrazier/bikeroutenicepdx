@@ -38,6 +38,15 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        // MapLibre is ~75% of the bundle and changes far less often than app
+        // code; its own hashed chunk stays cached across app deploys.
+        manualChunks: { maplibre: ["maplibre-gl", "pmtiles"] },
+      },
+    },
+  },
   server: {
     proxy: {
       // Dev proxy: /api/* → backend at localhost:3000 (avoids CORS)

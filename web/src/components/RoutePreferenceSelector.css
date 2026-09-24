@@ -1,7 +1,8 @@
 /* RoutePreferenceSelector — segmented tier picker (Ultra · Comfort · Balanced · Fast). */
 
 .route-pref {
-  margin: 0.5rem 0 0.25rem;
+  /* Match the side panel's 16px gutter so the dial lines up with the inputs. */
+  margin: 0.25rem 16px 0.5rem;
 }
 
 .route-pref__segments {
