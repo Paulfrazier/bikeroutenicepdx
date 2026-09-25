@@ -10,6 +10,10 @@ import CoreLocation
 /// `@MainActor` `NavigationSession` is always touched safely.
 final class NavigationLocationProvider: NSObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
+    /// True only between `start()` and `stop()`. The authorization callback also
+    /// fires when the manager is created (app launch) and on any Settings change,
+    /// so it must not start GPS unless a ride is actually in progress.
+    private var active = false
 
     /// Invoked on the main actor for each new GPS fix while navigating.
     var onLocation: (@MainActor (CLLocation) -> Void)?
@@ -24,12 +28,18 @@ final class NavigationLocationProvider: NSObject, CLLocationManagerDelegate {
         manager.activityType = .otherNavigation
         manager.distanceFilter = 5 // meters
         manager.headingFilter = 3 // degrees
-        manager.pausesLocationUpdatesAutomatically = false
+        // Let iOS pause GPS once the rider has been stationary for a long while
+        // (a ride left running in a pocket would otherwise drain the battery at
+        // best-for-navigation precision all day). `.otherNavigation` keeps the
+        // heuristic conservative, so red lights don't trip it; a pause is
+        // undone by `resumeIfPaused()` when the app returns to the foreground.
+        manager.pausesLocationUpdatesAutomatically = true
     }
 
     /// Begin continuous updates. Requests "Always" so guidance survives the app
     /// going to the background mid-ride; falls back gracefully to When-In-Use.
     func start() {
+        active = true
         switch manager.authorizationStatus {
         case .notDetermined:
             manager.requestWhenInUseAuthorization()
@@ -47,10 +57,20 @@ final class NavigationLocationProvider: NSObject, CLLocationManagerDelegate {
     }
 
     func stop() {
+        active = false
         manager.stopUpdatingLocation()
         manager.stopUpdatingHeading()
         manager.allowsBackgroundLocationUpdates = false
         setCruise(false)
+    }
+
+    /// Re-arm updates after an automatic pause. iOS never resumes paused updates
+    /// by itself, so the app calls this on returning to the foreground. No-op
+    /// unless a ride is in progress.
+    func resumeIfPaused() {
+        guard active else { return }
+        manager.startUpdatingLocation()
+        manager.startUpdatingHeading()
     }
 
     private var cruising = false
@@ -81,6 +101,7 @@ final class NavigationLocationProvider: NSObject, CLLocationManagerDelegate {
     }
 
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+        guard active else { return }
         if status == .authorizedWhenInUse || status == .authorizedAlways {
             manager.allowsBackgroundLocationUpdates = (status == .authorizedAlways)
             manager.startUpdatingLocation()

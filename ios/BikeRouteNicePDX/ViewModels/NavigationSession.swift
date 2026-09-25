@@ -724,7 +724,10 @@ final class NavigationSession {
     /// rider paused at a stop must not have the screen pinned on for the twenty
     /// minutes they're inside the shop.
     func syncScreenWake(foreground: Bool) {
-        setScreenWake(foreground && isNavigating && navPhase == .guiding)
+        let guiding = isNavigating && navPhase == .guiding
+        setScreenWake(foreground && guiding)
+        // iOS may have auto-paused GPS while the phone sat still in a pocket.
+        if foreground && guiding { provider.resumeIfPaused() }
     }
 
     // MARK: - Ride recording (Phase 6)
