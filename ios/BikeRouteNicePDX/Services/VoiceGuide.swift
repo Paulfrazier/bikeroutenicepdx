@@ -6,8 +6,15 @@ import UIKit
 /// (paired with the `audio` background mode). `NavigationSession` decides *what*
 /// to say and *when*; this type just says it.
 @MainActor
-final class VoiceGuide {
+final class VoiceGuide: NSObject, AVSpeechSynthesizerDelegate {
     private let synth = AVSpeechSynthesizer()
+    /// Set by `deactivateAfterSpeaking()`: release the audio session once the
+    /// current utterance ends, so music isn't left ducked after arrival.
+    private var releaseWhenIdle = false
+    /// Utterances handed to the synthesizer that haven't finished or been
+    /// cancelled. `isSpeaking` can lag a just-queued utterance, so count instead.
+    private var pending = 0
+
     private let haptics = UINotificationFeedbackGenerator()
     private let impact = UIImpactFeedbackGenerator(style: .rigid)
 
@@ -15,8 +22,14 @@ final class VoiceGuide {
     /// keep the wrist/phone cue).
     var voiceEnabled = true
 
+    override init() {
+        super.init()
+        synth.delegate = self
+    }
+
     /// Prepare the shared audio session for spoken guidance over other audio.
     func activate() {
+        releaseWhenIdle = false
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .voicePrompt, options: [.duckOthers, .mixWithOthers, .interruptSpokenAudioAndMixWithOthers])
         try? session.setActive(true)
@@ -25,8 +38,33 @@ final class VoiceGuide {
     }
 
     func deactivate() {
+        releaseWhenIdle = false
         synth.stopSpeaking(at: .immediate)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    /// Let the last announcement ("You've arrived") finish, then release the
+    /// audio session. Releases immediately if nothing is being spoken.
+    func deactivateAfterSpeaking() {
+        if pending > 0 {
+            releaseWhenIdle = true
+        } else {
+            deactivate()
+        }
+    }
+
+    private func releaseIfPending() {
+        pending = max(0, pending - 1)
+        guard releaseWhenIdle, pending == 0 else { return }
+        deactivate()
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.releaseIfPending() }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.releaseIfPending() }
     }
 
     /// Speak `text`, interrupting any in-progress utterance (newer guidance always
@@ -37,6 +75,7 @@ final class VoiceGuide {
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        pending += 1
         synth.speak(utterance)
     }
 

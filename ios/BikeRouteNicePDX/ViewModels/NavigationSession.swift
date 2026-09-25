@@ -601,6 +601,7 @@ final class NavigationSession {
             voice.speak(here + onward)
             persistTripProgress()
         }
+        voice.deactivateAfterSpeaking()
         provider.stop()
         liveActivityEnd()
         watchEnd()
