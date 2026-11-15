@@ -555,6 +555,16 @@ export default function App() {
     restoreSnapshot();
   }, [vias.length, restoreSnapshot]);
 
+  // Clearing an endpoint from the form ("Clear the current route?") is an
+  // explicit reset of the route's shape: drop the through/reshape waypoints and
+  // drawn strokes so they don't silently come back on the next route. Stops are
+  // kept — they're listed in the form and are trip intent, not route shaping.
+  const clearRouteShaping = useCallback(() => {
+    setVias((prev) => prev.filter((v) => v.kind === "stop"));
+    setDrawnStrokes([]);
+    setPreResetSnapshot(null);
+  }, []);
+
   // Build mode: remove every waypoint at once.
   const handleClearWaypoints = useCallback(() => {
     setVias([]);
@@ -961,11 +971,13 @@ export default function App() {
           fromValue={fromLabel}
           toValue={toLabel}
           onFromChange={(lngLat, name) => {
+            if (!lngLat) clearRouteShaping();
             setFrom(lngLat);
             setFromLabel(name);
             clickCount.current = lngLat ? 1 : 0;
           }}
           onToChange={(lngLat, name) => {
+            if (!lngLat) clearRouteShaping();
             setTo(lngLat);
             setToLabel(name);
             // Keep the map's tap cycle in step with the form. Without this,

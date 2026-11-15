@@ -257,6 +257,11 @@ final class RouteStore {
     /// detect a route change and rebuild its overlay — even when a re-snap
     /// returns the same number of points as the line it replaces.
     private(set) var routeVersion = 0
+    /// Bumped by `clearAll()`. Async edits (drag reshape, through-section,
+    /// via delete, re-route) capture it before awaiting the router and drop their
+    /// result if a Clear landed meanwhile — otherwise a slow re-route would put
+    /// the old route back, and a failed one would restore the cleared vias.
+    private var clearGeneration = 0
 
     /// True once the user has hand-dragged the route line, overriding the
     /// server snap. Drives the "Manually edited" caption and is reset whenever
@@ -600,6 +605,7 @@ final class RouteStore {
     ///      straight bridges to the pins (`assembleDrawnRoute`), overriding auto.
     ///   2. Otherwise → the auto route with qualifying connectors spliced in.
     private func recomputeDisplay() async {
+        let gen = clearGeneration
         // From-scratch canvas: until the rider draws a stroke (Draw) or drops a
         // waypoint (Build), show no route line — only the start/end pins + network
         // overlay. Mirrors web `blankCanvas`; the web `!nav.navigating` clause is
@@ -619,7 +625,9 @@ final class RouteStore {
             var base = SnappedRoute(coordinates: coords, distanceMeters: GeoMath.length(coords))
             base.durationSeconds = 0
             base.steps = []
-            snapped = await classified(base)
+            let display = await classified(base)
+            guard gen == clearGeneration else { return }
+            snapped = display
             return
         }
         // A fully hand-drawn route (Draw strokes) overrides everything. While Draw
@@ -636,7 +644,9 @@ final class RouteStore {
             // A hand-drawn route has no engine time estimate or turn-by-turn steps.
             base.durationSeconds = autoRoute?.durationSeconds ?? 0
             base.steps = []
-            snapped = await classified(base)
+            let display = await classified(base)
+            guard gen == clearGeneration else { return }
+            snapped = display
             return
         }
         guard let auto = autoRoute else { snapped = nil; return }
@@ -649,13 +659,16 @@ final class RouteStore {
         // so the duration label and Directions button survive the rebuild.
         base.durationSeconds = auto.durationSeconds
         base.steps = auto.steps
-        snapped = await classified(base)
+        let display = await classified(base)
+            guard gen == clearGeneration else { return }
+            snapped = display
     }
 
     /// Re-route start → vias → end WITHOUT flipping into the `.snapping` spinner
     /// (keeps the routed UI + edit panel visible). Used when entering Build/Draw
     /// (after the wipe) and when restoring a snapshot. Re-splices via recomputeDisplay.
     private func rerouteKeepingPhase() async {
+        let gen = clearGeneration
         guard let startC = start?.coordinate, let endC = end?.coordinate else {
             await recomputeDisplay()
             return
@@ -666,10 +679,12 @@ final class RouteStore {
                 preference: routePreference.rawValue, engine: routingEngine.rawValue,
                 waypoints: routeWaypoints
             )
+            guard gen == clearGeneration else { return }
             guard routed.coordinates.count >= 2 else { return }
             autoRoute = routed
             await recomputeDisplay()
         } catch {
+            guard gen == clearGeneration else { return }
             // Keep the previous route on failure.
         }
     }
@@ -809,6 +824,7 @@ final class RouteStore {
     /// Reset everything.
     func clearAll() {
         autoRouteTask?.cancel()
+        clearGeneration += 1
         start = nil
         end = nil
         drawnTrace = []
@@ -851,6 +867,7 @@ final class RouteStore {
         preview: [CLLocationCoordinate2D],
         movingViaIndex: Int?
     ) async {
+        let gen = clearGeneration
         guard let startC = start?.coordinate, let endC = end?.coordinate else { return }
 
         let previousVias = vias
@@ -889,11 +906,13 @@ final class RouteStore {
                 from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue,
                 waypoints: routeWaypoints
             )
+            guard gen == clearGeneration else { return }
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             autoRoute = routed
             await recomputeDisplay() // re-splice any manual segments onto the fresh route
             isManuallyEdited = false // it's a clean road route now
         } catch {
+            guard gen == clearGeneration else { return }
             // Re-route failed (e.g. via unreachable) — undo this drag.
             vias = previousVias
             autoRoute = previousAuto
@@ -908,6 +927,7 @@ final class RouteStore {
     /// belongs to a corridor ("route through a section"), the whole `corridorId`
     /// group is removed at once so a section deletes as one unit.
     func deleteVia(at index: Int) async {
+        let gen = clearGeneration
         guard vias.indices.contains(index),
               let startC = start?.coordinate, let endC = end?.coordinate else { return }
 
@@ -934,12 +954,14 @@ final class RouteStore {
                 from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue,
                 waypoints: routeWaypoints
             )
+            guard gen == clearGeneration else { return }
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             autoRoute = routed
             await recomputeDisplay()
             isManuallyEdited = !vias.isEmpty
             phase = .routed
         } catch {
+            guard gen == clearGeneration else { return }
             vias = previousVias
             autoRoute = previousAuto
             snapped = previousSnapped
@@ -1134,6 +1156,7 @@ final class RouteStore {
     }
 
     func insertPreciseVia(_ at: CLLocationCoordinate2D) async {
+        let gen = clearGeneration
         guard vias.count < Self.maxVias,
               let startC = start?.coordinate, let endC = end?.coordinate else { return }
 
@@ -1153,11 +1176,13 @@ final class RouteStore {
                 from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue,
                 waypoints: routeWaypoints
             )
+            guard gen == clearGeneration else { return }
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             autoRoute = routed
             await recomputeDisplay()
             isManuallyEdited = false
         } catch {
+            guard gen == clearGeneration else { return }
             vias = previousVias
             autoRoute = previousAuto
             snapped = previousSnapped
@@ -1418,6 +1443,7 @@ final class RouteStore {
     /// shared `corridorId`) so it deletes as one unit. Mirrors the web
     /// `handleConfirmCorridor`; reverts the splice on a re-route failure.
     func confirmCorridor() async {
+        let gen = clearGeneration
         guard let preview = corridorPreview, preview.points.count >= 2,
               let startC = start?.coordinate, let endC = end?.coordinate else { return }
 
@@ -1460,11 +1486,13 @@ final class RouteStore {
                 from: startC, to: endC, vias: vias.map(\.coordinate), preference: routePreference.rawValue, engine: routingEngine.rawValue,
                 waypoints: routeWaypoints
             )
+            guard gen == clearGeneration else { return }
             guard routed.coordinates.count >= 2 else { throw APIError.transport("empty route") }
             autoRoute = routed
             await recomputeDisplay() // re-splice any manual segments onto the fresh route
             isManuallyEdited = false // it's a clean road route now
         } catch {
+            guard gen == clearGeneration else { return }
             // Re-route failed (e.g. the section is unreachable) — undo the splice.
             vias = previousVias
             autoRoute = previousAuto
