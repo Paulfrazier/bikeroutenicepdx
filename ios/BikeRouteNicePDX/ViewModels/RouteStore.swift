@@ -529,9 +529,10 @@ final class RouteStore {
                 waypoints: nil
             )
             guard routed.coordinates.count >= 2 else { return nil }
-            let enriched = await classified(routed)
-            snapped = enriched
-            return enriched
+            // Deliberately does NOT publish to `snapped`: the caller does, after
+            // checking its trip wasn't ended during the await. Writing here would
+            // clobber the planned route `NavigationSession.stop()` just restored.
+            return await classified(routed)
         } catch {
             return nil
         }

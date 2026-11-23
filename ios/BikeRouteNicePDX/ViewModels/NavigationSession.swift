@@ -114,6 +114,10 @@ final class NavigationSession {
     private var announcedEntry: Set<Int> = []
     private var offRouteSince: Date?
     private var lastRerouteAt: Date?
+    /// Bumped by every `start()` and `stop()`. `reroute()` and `resume()` suspend
+    /// on the network; if the rider ends the trip in the meantime they must not
+    /// resume afterwards and act on a session that no longer exists.
+    private var sessionToken = 0
     /// Last utterance — drives the long-straight reassurance prompt.
     private var lastSpokenAt = Date()
 
@@ -229,6 +233,7 @@ final class NavigationSession {
     /// plain A→B trip has no legs to slice and takes the whole route unchanged.
     func start() {
         guard let snap = store?.snapped, snap.coordinates.count >= 2 else { return }
+        sessionToken &+= 1
         originalSnapped = snap
         tripStops = store?.stops ?? []
         tripEnd = store?.end
@@ -263,6 +268,7 @@ final class NavigationSession {
     /// (Phase 6) so the caller can persist it, or nil if nothing meaningful rode.
     @discardableResult
     func stop() -> Ride? {
+        sessionToken &+= 1
         let ride = finishRide()
         setScreenWake(false)
         provider.stop()
@@ -562,10 +568,17 @@ final class NavigationSession {
     /// silently cancel the rest of an errand is now correct by construction.
     private func reroute() async {
         guard let store, let from = currentLocation, let end = legDestination else { return }
+        let token = sessionToken
         isRerouting = true
         lastRerouteAt = Date()
         say("Off route — rerouting.")
-        if let fresh = await store.navReroute(from: from, to: end) {
+        let result = await store.navReroute(from: from, to: end)
+        // The trip was ended (or restarted) while the request was in flight:
+        // `stop()` already reset everything, so touch nothing — least of all
+        // `store.snapped`, which `stop()` has just restored to the planned route.
+        guard token == sessionToken else { return }
+        if let fresh = result {
+            store.snapped = fresh
             // Fold in what was actually ridden before discarding this geometry.
             accumulateRiddenGreenway()
             load(route: fresh)
@@ -635,9 +648,17 @@ final class NavigationSession {
             retargetLeg()
             return
         }
+        let token = sessionToken
         isRerouting = true
         resumeFailed = false
-        guard let fresh = await store.navReroute(from: from, to: end) else {
+        let result = await store.navReroute(from: from, to: end)
+        // End trip stays tappable while a Continue is in flight. If it landed,
+        // `stop()` has already torn the session down (legIndex 0, no stops, GPS
+        // off); carrying on would rewind `legIndex` below zero (a crash in
+        // `retargetLeg`) or restart GPS, the wake lock and the Live Activity for
+        // a trip that is over.
+        guard token == sessionToken else { return }
+        guard let fresh = result else {
             // Stay paused and surface a retry. Never strand the rider in a
             // half-advanced state with GPS off.
             legIndex -= 1
@@ -646,6 +667,8 @@ final class NavigationSession {
             resumeFailed = true
             return
         }
+        // Publish the fresh line under the map (`navReroute` no longer does it).
+        store.snapped = fresh
         // Fold in the leg just finished before its geometry is discarded.
         accumulateRiddenGreenway()
         load(route: fresh)
